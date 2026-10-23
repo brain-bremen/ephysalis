@@ -19,7 +19,7 @@ def test_cli_converts_multiple_sessions(tmp_path):
     output = tmp_path / "output"
 
     with patch("sys.argv", [
-        "ephyscon",
+        "ephyscon", "convert",
         str(session1), str(session2),
         "--output-folder", str(output),
         "--config", str(GOLDEN_CONFIG_PATH),

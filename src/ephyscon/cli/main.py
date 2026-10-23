@@ -2,6 +2,7 @@ import argparse
 from ephyscon import convert_open_ephys_session
 from ephyscon.config import load_config_from_file
 from ephyscon.inspect import format_session_info, inspect_session, validate_session_path
+from ephyscon.cli.session_commands import add_session_commands
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
@@ -77,10 +78,12 @@ def pick_open_ephys_session_via_dialog() -> Path | None:
     return Path(path)
 
 
-def main():
-    # oe-to-dh.exe --output-folder <output_folder> --config <config.json> --tdr <path_to_tdr_file> <oe-session>
-    parser = argparse.ArgumentParser(
-        description="Convert Open Ephys recordings to DH5 format."
+def add_convert_command(sub: argparse._SubParsersAction) -> None:
+    # ephyscon convert --output-folder <output_folder> --config <config.json> --tdr <path_to_tdr_file> <oe-session>
+    parser = sub.add_parser(
+        "convert",
+        help="Convert Open Ephys recordings to DH5 format.",
+        description="Convert Open Ephys recordings to DH5 format.",
     )
 
     parser.add_argument(
@@ -103,14 +106,31 @@ def main():
         action="store_true",
         help="Print a summary of the session contents and exit.",
     )
+    parser.set_defaults(func=convert)
 
-    args, unknown = parser.parse_known_args()
 
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="ephyscon",
+        description="Preprocessing of extracellular electrophysiology recordings.",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    sub = parser.add_subparsers(dest="command", required=True)
+    add_convert_command(sub)
+    add_session_commands(sub)
+
+    args = parser.parse_args(argv)
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    return args.func(args) or 0
+
+
+def convert(args: argparse.Namespace) -> int:
     # If no sessions provided, open a file dialog to pick one
     if not args.oe_session:
         picked = pick_open_ephys_session_via_dialog()
         if picked is None:
-            return
+            return 0
         args.oe_session = [str(picked)]
 
     # Validate all paths up front
@@ -159,7 +179,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except Exception as e:
         logger.error(f"Error occurred: {e}", exc_info=True)
         logger.error(f"Current config value: {locals().get('config', None)}")

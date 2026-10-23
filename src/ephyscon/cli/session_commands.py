@@ -1,0 +1,95 @@
+"""Session-level commands: ``ephyscon inspect`` and ``ephyscon init``."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from ephyscon.session_config import (
+    SESSION_CONFIG_FILENAME,
+    default_session_config,
+    load_session_config,
+    save_session_config,
+)
+from ephyscon.io.base import open_session
+from ephyscon.stimulus.base import detect_stimulus_system, get_stimulus_system
+
+
+def _inspect(args: argparse.Namespace) -> int:
+    session = open_session(args.session, args.format)
+    config_path = session.path / SESSION_CONFIG_FILENAME
+    config = load_session_config(config_path) if config_path.exists() else None
+
+    print(f"Session {session.name} ({session.format.name}), {len(session.runs)} runs")
+    print(f"Config: {config_path if config else 'none (run `ephyscon init`)'}")
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        flag = "" if run_config is None or run_config.include else "  [excluded]"
+        start = run.start_time.isoformat(sep=" ") if run.start_time else "?"
+        duration = f"{run.duration_s:.0f} s" if run.duration_s else "?"
+        print(f"\n  [{run.index}] {run.name}  start {start}  {duration}{flag}")
+        for probe in run.probes.values():
+            bands = "+".join(k.value for k in probe.streams)
+            print(
+                f"      {probe.probe_id}: {probe.part_number or '?'} sn {probe.serial_number or '?'}, "
+                f"{probe.num_channels} ch, {probe.num_shanks} shank(s), streams {bands}"
+            )
+        if run.aux_stream:
+            print(f"      aux: {run.aux_stream} {run.extra.get('aux', '')}")
+
+        system = (
+            get_stimulus_system(run_config.stimulus_system)
+            if run_config and run_config.stimulus_system
+            else detect_stimulus_system(run)
+        )
+        if system is None:
+            print("      stimulus: none found")
+            continue
+        for paradigm in system.discover(run):
+            count = paradigm.metadata.get("stimulusCount", "?")
+            line = f"      stimulus [{system.name}] {paradigm.name}: {count} trials"
+            if args.conditions:
+                conditions = system.load_conditions(paradigm)
+                line += f", {conditions['condition'].nunique()} conditions"
+            print(line)
+    return 0
+
+
+def _init(args: argparse.Namespace) -> int:
+    session = open_session(args.session, args.format)
+    output = Path(args.output) if args.output else session.path / SESSION_CONFIG_FILENAME
+    if output.exists() and not args.force:
+        print(f"{output} exists, use --force to overwrite", file=sys.stderr)
+        return 1
+
+    if args.excel or (session.path / "Depths.txt").exists():
+        from ephyscon.migrate import migrate_session
+
+        result = migrate_session(session, Path(args.excel) if args.excel else None, args.sheet)
+        config, warnings = result.config, result.warnings
+    else:
+        config, warnings = default_session_config(session), []
+
+    for warning in warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    save_session_config(config, output)
+    print(f"Wrote {output}")
+    return 0
+
+
+def add_session_commands(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("inspect", help="Show runs, probes, streams and paradigms of a session")
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--conditions", action="store_true", help="Also load the trial conditions")
+    p.set_defaults(func=_inspect)
+
+    p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--excel", help="Legacy lab Excel workbook to migrate run/probe info from")
+    p.add_argument("--sheet", help="Sheet name in the workbook (default: session folder name)")
+    p.add_argument("-o", "--output", help=f"Output path (default: <session>/{SESSION_CONFIG_FILENAME})")
+    p.add_argument("--force", action="store_true", help="Overwrite an existing config")
+    p.set_defaults(func=_init)
