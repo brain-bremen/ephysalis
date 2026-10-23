@@ -157,7 +157,7 @@ def test_running_speed(run, timing):
 
 
 def test_running_speed_legacy_artefact(run):
-    """The MATLAB speed is ~9x too high: it resampled the encoder line to 30 kHz and
+    """The MATLAB speed is ~8-9x too high: it resampled the encoder line to 30 kHz and
     thresholded it at > 0, so filter ringing adds spurious pulses around every real one.
     Simulating that resampling reproduces the MATLAB output, which validates the port."""
     aux = _aux_signals(run)
@@ -171,3 +171,40 @@ def test_running_speed_legacy_artefact(run):
     interior = slice(500, 4500)  # away from the smoothing edges of the crop
     assert np.corrcoef(legacy_like[interior], legacy[interior])[0, 1] > 0.95
     assert rising.size > 5 * aux.wheel_rising_edges().size
+
+
+def test_sync_edge_cache(run, tmp_path, monkeypatch):
+    import ephyscon.sync as sync_module
+    from ephyscon.sync import SyncEdgeCache, load_or_extract_edges
+
+    channels = AuxChannelMap.legacy_default(8)
+    cache = SyncEdgeCache(tmp_path)
+    extracted = load_or_extract_edges(run, channels, cache)
+    assert cache.path(RUN).exists()
+
+    def fail(*args, **kwargs):
+        raise AssertionError("edges should come from the cache")
+
+    monkeypatch.setattr(sync_module, "digital_edges", fail)
+    cached = load_or_extract_edges(run, channels, cache)
+    for stream in extracted:
+        np.testing.assert_array_equal(cached[stream].samples, extracted[stream].samples)
+        np.testing.assert_array_equal(cached[stream].rising, extracted[stream].rising)
+    timing = extract_run_timing(run, sync_cache=cache)
+    assert len(timing.trials["RF"]) == 23
+
+    # another NIDQ sync bit invalidates the aux entry only
+    other = channels.model_copy(deep=True)
+    other.digital["sync"] = 5
+    calls = []
+    monkeypatch.setattr(sync_module, "digital_edges", lambda rec, ch, bit, **kw: calls.append(bit) or extracted[AUX])
+    load_or_extract_edges(run, other, cache)
+    assert calls == [5]
+
+
+def test_cli_sync(tmp_path, capsys):
+    from ephyscon.cli.main import main
+
+    assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path)]) == 0
+    assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
+    assert (tmp_path / f"{RUN}.npz").exists()

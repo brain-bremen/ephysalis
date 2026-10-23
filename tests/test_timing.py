@@ -10,7 +10,7 @@ from ephyscon.auxsignals import (
     threshold_crossings,
     wheel_speed,
 )
-from ephyscon.sync import ClockMap, Edges, binary_edges, digital_edges, match_edges
+from ephyscon.sync import ClockMap, EdgeAccumulator, Edges, binary_edges, digital_edges, match_edges
 
 
 def _quick_filter_c6(x, n_per, f_order):
@@ -124,3 +124,18 @@ def test_wheel_speed_constant_running():
     speed = wheel_speed(edges, 10.0)
     assert speed.shape == (10000,)
     np.testing.assert_allclose(speed[1000:9000], np.pi * 8, rtol=0.01)
+
+
+def test_edge_accumulator_uneven_chunks():
+    rng = np.random.default_rng(1)
+    level = np.repeat(rng.integers(0, 2, 60).astype(bool), rng.integers(1, 30, 60))
+    word = level.astype(np.int16) << 6
+    accumulator = EdgeAccumulator(6, 1000.0)
+    bounds = [0, 1, 7, 50, 51, 300, level.size]
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        accumulator.add(word[a:b])
+    reference = binary_edges(level, 1000.0)
+    edges = accumulator.edges()
+    np.testing.assert_array_equal(edges.samples, reference.samples)
+    np.testing.assert_array_equal(edges.rising, reference.rising)
+    assert accumulator.num_samples == level.size

@@ -7,13 +7,21 @@ default), which absorbs both start offsets and clock drift.
 
 The MATLAB pipeline resampled the whole NIDQ stream to 30 kHz and shifted it by the smoothed
 edge differences. Mapping event times is equivalent for edges and pulses, and much cheaper.
+
+Reading a probe's sync channel means reading its whole AP file, so the edges are extracted
+once and cached per run (:class:`SyncEdgeCache`, ``ephyscon sync``). Code that reads the AP
+data anyway (e.g. spike sorting) can feed its chunks to an :class:`EdgeAccumulator` and
+store the result with :meth:`SyncEdgeCache.store`.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -26,6 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 AUX = "aux"  # stream key of the auxiliary stream in RunSync
+_CACHE_VERSION = 1
 
 
 @dataclass
@@ -55,6 +64,64 @@ def binary_edges(signal: np.ndarray, sampling_frequency: float, offset: int = 0)
     )
 
 
+@dataclass(frozen=True)
+class SyncSource:
+    """Where a stream records the sync pulses: one bit of one channel of a recording."""
+
+    recording: BaseRecording
+    channel_id: str
+    bit: int
+
+    def key(self) -> dict:
+        """Identifies the extracted edges; cached edges are only reused if this matches."""
+        return {
+            "channel_id": str(self.channel_id),
+            "bit": self.bit,
+            "num_samples": int(self.recording.get_num_samples()),
+            "sampling_frequency": float(self.recording.sampling_frequency),
+        }
+
+
+class EdgeAccumulator:
+    """Collects the edges of one bit from consecutive chunks of a digital channel."""
+
+    def __init__(self, bit: int, sampling_frequency: float):
+        self.bit = bit
+        self.sampling_frequency = sampling_frequency
+        self.num_samples = 0
+        self._samples: list[np.ndarray] = []
+        self._rising: list[np.ndarray] = []
+        self._previous: bool | None = None
+        self._initial = False
+
+    def add(self, word: np.ndarray) -> None:
+        """Add the next chunk (1-d) of the digital channel."""
+        bits = ((np.asarray(word).astype(np.int64) >> self.bit) & 1).astype(bool)
+        if bits.size == 0:
+            return
+        n_new = bits.size
+        offset = self.num_samples
+        if self._previous is None:
+            self._initial = bool(bits[0])
+        else:
+            # prepend the last sample of the previous chunk to catch an edge at the boundary
+            bits = np.concatenate([[self._previous], bits])
+            offset -= 1
+        edges = binary_edges(bits, self.sampling_frequency, offset=offset)
+        self._samples.append(edges.samples)
+        self._rising.append(edges.rising)
+        self._previous = bool(bits[-1])
+        self.num_samples += n_new
+
+    def edges(self) -> Edges:
+        return Edges(
+            samples=np.concatenate(self._samples) if self._samples else np.zeros(0, np.int64),
+            rising=np.concatenate(self._rising) if self._rising else np.zeros(0, bool),
+            sampling_frequency=self.sampling_frequency,
+            initial_level=self._initial,
+        )
+
+
 def digital_edges(
     recording: BaseRecording,
     channel: int | str,
@@ -63,30 +130,109 @@ def digital_edges(
 ) -> Edges:
     """Edges of one bit of a digital channel, read in chunks (works on multi-GB AP files)."""
     channel_id = recording.channel_ids[channel] if isinstance(channel, int) else channel
-    fs = recording.sampling_frequency
+    accumulator = EdgeAccumulator(bit, recording.sampling_frequency)
     n = recording.get_num_samples()
-    chunk = max(int(chunk_s * fs), 2)
-    samples, rising = [], []
-    previous: bool | None = None
-    initial = False
+    chunk = max(int(chunk_s * recording.sampling_frequency), 2)
     for start in range(0, n, chunk):
         stop = min(start + chunk, n)
-        word = recording.get_traces(start_frame=start, end_frame=stop, channel_ids=[channel_id])[:, 0]
-        bits = ((word.astype(np.int64) >> bit) & 1).astype(bool)
-        if previous is None:
-            initial = bool(bits[0])
+        accumulator.add(recording.get_traces(start_frame=start, end_frame=stop, channel_ids=[channel_id])[:, 0])
+    return accumulator.edges()
+
+
+class SyncEdgeCache:
+    """Sync edges of all streams of a run, stored in ``<directory>/<run name>.npz``."""
+
+    def __init__(self, directory: str | Path):
+        self.directory = Path(directory)
+
+    def path(self, run_name: str) -> Path:
+        return self.directory / f"{run_name}.npz"
+
+    def load(self, run_name: str) -> dict[str, tuple[dict, Edges]]:
+        """``{stream: (source key, edges)}``; empty if nothing (compatible) is cached."""
+        path = self.path(run_name)
+        if not path.exists():
+            return {}
+        with np.load(path) as data:
+            info = json.loads(str(data["info"]))
+            if info.get("version") != _CACHE_VERSION:
+                return {}
+            return {
+                stream: (
+                    entry["key"],
+                    Edges(
+                        samples=data[f"{stream}.samples"],
+                        rising=data[f"{stream}.rising"],
+                        sampling_frequency=entry["key"]["sampling_frequency"],
+                        initial_level=entry["initial_level"],
+                    ),
+                )
+                for stream, entry in info["streams"].items()
+            }
+
+    def save(self, run_name: str, entries: dict[str, tuple[dict, Edges]]) -> None:
+        info = {
+            "version": _CACHE_VERSION,
+            "streams": {
+                stream: {"key": key, "initial_level": edges.initial_level}
+                for stream, (key, edges) in entries.items()
+            },
+        }
+        arrays: dict[str, Any] = {"info": np.array(json.dumps(info))}
+        for stream, (_, edges) in entries.items():
+            arrays[f"{stream}.samples"] = edges.samples
+            arrays[f"{stream}.rising"] = edges.rising
+        self.directory.mkdir(parents=True, exist_ok=True)
+        tmp = self.directory / f"{run_name}.tmp.npz"
+        np.savez(tmp, **arrays)
+        tmp.replace(self.path(run_name))
+
+    def store(self, run_name: str, stream: str, source: SyncSource, edges: Edges) -> None:
+        """Add or replace the edges of one stream (e.g. collected during spike sorting)."""
+        entries = self.load(run_name)
+        entries[stream] = (source.key(), edges)
+        self.save(run_name, entries)
+
+
+def sync_sources(run: Run, aux_channels: AuxChannelMap | None = None) -> dict[str, SyncSource]:
+    """Sync source of every probe of a run and of its aux stream (key :data:`AUX`)."""
+    sources = {pid: run.format.sync_source(run, pid, aux_channels) for pid in run.probes}
+    if run.aux_stream is not None:
+        sources[AUX] = run.format.sync_source(run, None, aux_channels)
+    return sources
+
+
+def load_or_extract_edges(
+    run: Run,
+    aux_channels: AuxChannelMap | None = None,
+    cache: SyncEdgeCache | None = None,
+    max_workers: int = 4,
+) -> dict[str, Edges]:
+    """Sync edges of all streams of a run: from ``cache`` where valid, otherwise extracted
+    (streams in parallel, reading is I/O-bound) and added to ``cache``."""
+    sources = sync_sources(run, aux_channels)
+    cached = cache.load(run.name) if cache is not None else {}
+    result: dict[str, Edges] = {}
+    missing = []
+    for stream, source in sources.items():
+        if stream in cached and cached[stream][0] == source.key():
+            result[stream] = cached[stream][1]
         else:
-            bits = np.concatenate([[previous], bits])
-        edges = binary_edges(bits, fs, offset=start if previous is None else start - 1)
-        samples.append(edges.samples)
-        rising.append(edges.rising)
-        previous = bool(bits[-1])
-    return Edges(
-        samples=np.concatenate(samples) if samples else np.zeros(0, np.int64),
-        rising=np.concatenate(rising) if rising else np.zeros(0, bool),
-        sampling_frequency=fs,
-        initial_level=initial,
-    )
+            missing.append(stream)
+    if not missing:
+        return result
+
+    logger.info("Run %s: extracting sync edges of %s", run.name, ", ".join(missing))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            stream: pool.submit(digital_edges, sources[stream].recording, sources[stream].channel_id, sources[stream].bit)
+            for stream in missing
+        }
+        for stream, future in futures.items():
+            result[stream] = future.result()
+    if cache is not None:
+        cache.save(run.name, {stream: (sources[stream].key(), result[stream]) for stream in sources})
+    return result
 
 
 def match_edges(source: Edges, target: Edges, tolerance_s: float = 0.01) -> tuple[np.ndarray, np.ndarray]:
@@ -202,16 +348,16 @@ def synchronize_run(
     aux_channels: AuxChannelMap | None = None,
     reference: str | None = None,
     min_edges: int = 2,
+    cache: SyncEdgeCache | None = None,
 ) -> RunSync:
-    """Build clock maps for all probes and the aux stream of a run from their sync edges."""
+    """Build clock maps for all probes and the aux stream of a run from their sync edges
+    (read from ``cache`` if it holds valid edges for the run)."""
     probe_ids = list(run.probes)
     if not probe_ids:
         raise ValueError(f"Run {run.name} has no probes")
     reference = reference or probe_ids[0]
 
-    edges = {pid: run.format.sync_edges(run, pid, aux_channels) for pid in probe_ids}
-    if run.aux_stream is not None:
-        edges[AUX] = run.format.sync_edges(run, None, aux_channels)
+    edges = load_or_extract_edges(run, aux_channels, cache)
 
     ref_edges = edges[reference]
     maps = {}

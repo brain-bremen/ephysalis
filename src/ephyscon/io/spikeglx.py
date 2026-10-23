@@ -29,7 +29,7 @@ import numpy as np
 
 from ephyscon.io.base import InputFormat
 from ephyscon.session import ProbeInfo, Run, Session, StreamKind
-from ephyscon.sync import Edges, digital_edges
+from ephyscon.sync import SyncSource
 
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
@@ -200,9 +200,10 @@ class SpikeGLXFormat(InputFormat):
                 raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
         return _read_spikeglx(str(run.path), stream_id)
 
-    def sync_edges(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> Edges:
+    def sync_source(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> SyncSource:
         if probe_id is not None:
-            return digital_edges(self.get_recording(run, StreamKind.SYNC, probe_id), 0, IMEC_SYNC_BIT)
+            recording = self.get_recording(run, StreamKind.SYNC, probe_id)
+            return SyncSource(recording, recording.channel_ids[0], IMEC_SYNC_BIT)
         bit = run.extra["aux"].get("sync_bit")
         if aux_channels is not None and "sync" in aux_channels.digital:
             if bit is not None and bit != aux_channels.digital["sync"]:
@@ -213,7 +214,8 @@ class SpikeGLXFormat(InputFormat):
             bit = aux_channels.digital["sync"]
         if bit is None:
             raise ValueError(f"Run {run.name}: unknown NIDQ sync bit")
-        return digital_edges(self.get_recording(run, StreamKind.AUX), self._digital_channel(run), bit)
+        recording = self.get_recording(run, StreamKind.AUX)
+        return SyncSource(recording, recording.channel_ids[self._digital_channel(run)], bit)
 
     @staticmethod
     def _digital_channel(run: Run) -> int:

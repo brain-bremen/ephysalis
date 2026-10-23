@@ -26,7 +26,7 @@ pipeline is still available as `ephyscon convert`.
 | 0 | Fork oecon, rename to ephyscon, plugin registries | done |
 | 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, stimstage conditions | done |
 | 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
-| 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip | next |
+| 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | next |
 | 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | |
 | 5 | NWB writer (see `nwb_implementation_plan.md`), BIDS layout, extend the DH5 writer with spikes and trials | |
 | 6 | CLI/GUI batch processing for SpikeGLX sessions, re-running single steps (`rerun_steps_plan.md`), provenance | |
@@ -69,9 +69,9 @@ replaced by a more robust stimulus-side clock.
 - Unit "depth" was the index of the peak channel. ephyscon uses unit locations in µm.
 - For 2.0 probes, shanks were re-stacked into one virtual column for Kilosort.
 - NP1 LFP was decimated from 2.5 kHz to 1 kHz by picking samples, without an anti-alias filter.
-- **Running speed was about 9× too high.** The wheel encoder line was resampled from the NIDQ
+- **Running speed was about 8–9× too high** (8× over the full RF run of SOMxCD1_172, 9× in the 5 s crop). The wheel encoder line was resampled from the NIDQ
   rate to 30 kHz with MATLAB `resample` and thresholded at `> 0`; filter ringing turns every
-  encoder pulse into ~9. Simulating that resampling reproduces the MATLAB
+  encoder pulse into several. Simulating that resampling reproduces the MATLAB
   `RunningVelocity_1kHz` (r = 0.98), so the rest of `get_wheelspeed.m` is ported correctly.
   ephyscon counts the real pulses. Analyses with running-speed thresholds must be re-tuned.
 - The lab Excel sheets can disagree with the recordings. For example, the probe serial

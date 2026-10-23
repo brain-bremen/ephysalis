@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -16,11 +17,17 @@ from ephyscon.auxsignals import AuxSignals, wheel_speed
 from ephyscon.session import Run, StreamKind
 from ephyscon.session_config import AuxChannelMap, SessionConfig
 from ephyscon.stimulus.base import Paradigm, detect_stimulus_system, get_stimulus_system
-from ephyscon.sync import AUX, RunSync, synchronize_run
+from ephyscon.sync import AUX, RunSync, SyncEdgeCache, synchronize_run
 
 logger = logging.getLogger(__name__)
 
 RUNNING_SPEED_RATE = 1000.0  # Hz
+# processing files of a session (sync edge cache, ...) go to <session>/ephyscon/
+WORK_DIR_NAME = "ephyscon"
+
+
+def default_sync_cache(session_path: str | Path) -> SyncEdgeCache:
+    return SyncEdgeCache(Path(session_path) / WORK_DIR_NAME / "sync")
 
 
 @dataclass
@@ -42,9 +49,13 @@ def aux_channel_map(run: Run, config: SessionConfig | None = None) -> AuxChannel
     return AuxChannelMap.legacy_default(run.extra.get("aux", {}).get("n_analog", 8))
 
 
-def extract_run_timing(run: Run, config: SessionConfig | None = None) -> RunTiming:
+def extract_run_timing(
+    run: Run, config: SessionConfig | None = None, sync_cache: SyncEdgeCache | None = None
+) -> RunTiming:
+    """Sync, trials and running speed of a run. Sync edges are taken from (and added to)
+    ``sync_cache`` if given; without a cache they are extracted from the data every time."""
     aux_channels = aux_channel_map(run, config)
-    sync = synchronize_run(run, aux_channels)
+    sync = synchronize_run(run, aux_channels, cache=sync_cache)
     timing = RunTiming(run_name=run.name, sync=sync)
 
     aux = AuxSignals(run, aux_channels) if run.aux_stream is not None else None

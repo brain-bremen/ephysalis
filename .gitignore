@@ -16,3 +16,6 @@ wheels/
 
 # processing outputs
 *.nwb
+
+# ephyscon processing files written next to sessions (sync edge cache, ...)
+tests/data/**/ephyscon/

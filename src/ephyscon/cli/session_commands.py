@@ -1,4 +1,4 @@
-"""Session-level commands: ``ephyscon inspect`` and ``ephyscon init``."""
+"""Session-level commands: ``ephyscon inspect``, ``ephyscon init`` and ``ephyscon sync``."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from ephyscon.session_config import (
     save_session_config,
 )
 from ephyscon.io.base import open_session
+from ephyscon.sync import SyncEdgeCache
 from ephyscon.stimulus.base import detect_stimulus_system, get_stimulus_system
 
 
@@ -56,14 +57,20 @@ def _inspect(args: argparse.Namespace) -> int:
                     line += f", {conditions['condition'].nunique()} conditions"
                 print(line)
         if args.timing and (run_config is None or run_config.include):
-            _print_timing(run, config)
+            _print_timing(run, config, _sync_cache(session.path, args.cache_dir))
     return 0
 
 
-def _print_timing(run: Run, config: SessionConfig | None) -> None:
+def _sync_cache(session_path: Path, cache_dir: str | None) -> SyncEdgeCache:
+    from ephyscon.timing import default_sync_cache
+
+    return SyncEdgeCache(cache_dir) if cache_dir else default_sync_cache(session_path)
+
+
+def _print_timing(run: Run, config: SessionConfig | None, cache: SyncEdgeCache) -> None:
     from ephyscon.timing import extract_run_timing
 
-    timing = extract_run_timing(run, config)
+    timing = extract_run_timing(run, config, cache)
     for stream, clock in timing.sync.maps.items():
         if stream == timing.sync.reference:
             continue
@@ -103,6 +110,29 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sync(args: argparse.Namespace) -> int:
+    from ephyscon.sync import load_or_extract_edges
+    from ephyscon.timing import aux_channel_map
+
+    session = open_session(args.session, args.format)
+    config_path = session.path / SESSION_CONFIG_FILENAME
+    config = load_session_config(config_path) if config_path.exists() else None
+    cache = _sync_cache(session.path, args.cache_dir)
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if args.runs and run.name not in args.runs:
+            continue
+        if not args.runs and run_config is not None and not run_config.include:
+            continue
+        if args.force and cache.path(run.name).exists():
+            cache.path(run.name).unlink()
+        edges = load_or_extract_edges(run, aux_channel_map(run, config), cache)
+        counts = ", ".join(f"{stream} {e.samples.size}" for stream, e in edges.items())
+        print(f"{run.name}: sync edges {counts}")
+    print(f"Cache: {cache.directory}")
+    return 0
+
+
 def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("inspect", help="Show runs, probes, streams and paradigms of a session")
     p.add_argument("session", type=Path)
@@ -110,9 +140,21 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--conditions", action="store_true", help="Also load the trial conditions")
     p.add_argument(
         "--timing", action="store_true",
-        help="Also sync the streams and detect trials and running speed (reads the sync channels)",
+        help="Also sync the streams and detect trials and running speed (uses the sync edge cache)",
     )
+    p.add_argument("--cache-dir", help="Sync edge cache (default: <session>/ephyscon/sync)")
     p.set_defaults(func=_inspect)
+
+    p = sub.add_parser(
+        "sync",
+        help="Extract the sync edges of all streams once and cache them (reads the full AP files)",
+    )
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+    p.add_argument("--cache-dir", help="Sync edge cache (default: <session>/ephyscon/sync)")
+    p.add_argument("--force", action="store_true", help="Re-extract even if cached")
+    p.set_defaults(func=_sync)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("session", type=Path)

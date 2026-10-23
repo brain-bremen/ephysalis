@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
     from ephyscon.session_config import AuxChannelMap
-    from ephyscon.sync import Edges
+    from ephyscon.sync import SyncSource
 
 
 class InputFormat(ABC):
@@ -44,9 +44,9 @@ class InputFormat(ABC):
 
     # Sync and auxiliary channels. Optional: formats without them can't be synchronised.
 
-    def sync_edges(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> Edges:
-        """Edges of the sync pulse train recorded by a probe, or by the aux stream (``None``)."""
-        raise NotImplementedError(f"{self.name} does not support sync edges yet")
+    def sync_source(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> SyncSource:
+        """Channel and bit carrying the sync pulses of a probe, or of the aux stream (``None``)."""
+        raise NotImplementedError(f"{self.name} does not support sync yet")
 
     def aux_sampling_frequency(self, run: Run) -> float:
         return self.get_recording(run, StreamKind.AUX).sampling_frequency
