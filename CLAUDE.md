@@ -20,20 +20,23 @@ uv run pytest tests/test_decimation.py
 uv run pytest tests/test_decimation.py::TestDecimateNpArray::test_decimate_np_array_basic
 
 # Run the CLI tool
-uv run oecon <oe_session_path>
-uv run oecon <oe_session_path> --config config.json --output-folder /output/dir
+uv run ephyscon convert <oe_session_path>
+uv run ephyscon convert <oe_session_path> --config config.json --output-folder /output/dir
 
-# Type checking
+# Inspect a (SpikeGLX or Open Ephys) session
+uv run ephyscon inspect <session_path> --conditions
+
+# Type checking (oecon-era modules have known errors; new modules are clean)
 uv run mypy src/
 ```
 
 ## Architecture
 
-**oecon** converts [Open Ephys GUI](https://open-ephys.github.io/gui-docs/) binary recordings into the in-house DAQ-HDF5 (DH5) format used by the cognitive neurophysiology lab.
+**ephyscon** (formerly oecon) converts [Open Ephys GUI](https://open-ephys.github.io/gui-docs/) binary recordings into the in-house DAQ-HDF5 (DH5) format used by the cognitive neurophysiology lab.
 
 ### Conversion pipeline
 
-The main entry point is `convert_open_ephys_recording_to_dh5()` in `src/oecon/convert_open_ephys_to_dh5.py`. It orchestrates the following steps, each controlled by a config dataclass that is `None` to skip that step:
+The main entry point is `convert_open_ephys_recording_to_dh5()` in `src/ephyscon/convert_open_ephys_to_dh5.py`. It orchestrates the following steps, each controlled by a config dataclass that is `None` to skip that step:
 
 1. **Raw data** (`raw.py`, `RawConfig`) — copies continuous data into DH5 CONT blocks
 2. **Events** (`events.py`, `EventPreprocessingConfig`) — extracts TTL triggers (NI-DAQmx / Acquisition Board) and Network Events (VStim), merges and sorts by timestamp, stores as DH5 event triggers
@@ -45,7 +48,7 @@ Each processing function takes a `(config, recording, dh5file)` signature and re
 
 ### Configuration
 
-`OpenEphysToDhConfig` (in `src/oecon/config.py`) is the top-level config dataclass — a container of all per-step configs. It serialises/deserialises via `save_config_to_file` / `load_config_from_file` using plain JSON. Enums are not yet fully handled in round-trip deserialization (see TODO in `config.py`).
+`OpenEphysConversionConfig` (in `src/ephyscon/config.py`) is the top-level config dataclass — a container of all per-step configs. It serialises/deserialises via `save_config_to_file` / `load_config_from_file` using plain JSON. Enums are not yet fully handled in round-trip deserialization (see TODO in `config.py`).
 
 ### Event types
 
@@ -67,6 +70,23 @@ Both use 1-based indexing in the filenames (exp1, rec1, etc.).
 
 ### Tests
 
-Real-data integration tests in `tests/test_realdata.py` are **skipped** unless `tests/data/Test/` exists (an actual Open Ephys session folder). All other tests use mocks or synthetic data and run without external data.
+Real-data Open Ephys tests are **skipped** unless `tests/data/Test_2026-03-12_16-32-08` and its golden DH5 exist. `tests/test_realdata_spikeglx.py` runs only when `EPHYSCON_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. All other tests use mocks or synthetic data and run without external data.
 
 The `pytest-plt` fixture (`plt`) is available in tests for inline plotting during development — tests using it will generate plot files when run with `--plt`.
+
+## Session pipeline (SpikeGLX / multi-run sessions)
+
+This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline (see `docs/roadmap.md`):
+
+- `session.py` — format-independent model: Session → Run → ProbeInfo/streams (`StreamKind`)
+- `io/` — `InputFormat` readers (`spikeglx.py`, `openephys.py`) registered under the `ephyscon.input_formats` entry point group. They return lazy spikeinterface recordings, and discovery parses metadata only.
+- `stimulus/` — `StimulusSystem` plugins (`ephyscon.stimulus_systems`). `stimstage.py` ports the lab's MATLAB `getStimFromIndex.m`, whose conditions are enumerated column-major (MATLAB `ind2sub`), so the field order of `params` matters.
+- `matfile.py` — MAT v5/v7.3 reader that keeps struct field order (`MATLAB_fields`)
+- `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files. This is unrelated to `config.py`, the Open Ephys → DH5 conversion config.
+- CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`)
+
+Entry points only change when the package is reinstalled (`uv sync`).
+
+### Local setup notes
+
+The working copy lives on a network share (`X:`). Installing into a `.venv` there fails with file locks, so keep the venv local, e.g. `UV_PROJECT_ENVIRONMENT=C:/Users/<you>/.venvs/ephyscon UV_LINK_MODE=copy`. Git needs `-c safe.directory=*` (or a `safe.directory` entry) on that share.

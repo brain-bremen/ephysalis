@@ -7,8 +7,8 @@ have been migrated. DH5 output works identically to before.
 
 ### What exists now
 
-- `src/oecon/file_writer.py` — `FileWriter` ABC, `DH5Writer`, `create_file_writer()` factory
-- `src/oecon/config.py` — `OutputFormat`, `DH5OutputOptions`, `NWBOutputOptions`, `OpenEphysConversionConfig`
+- `src/ephyscon/file_writer.py` — `FileWriter` ABC, `DH5Writer`, `create_file_writer()` factory
+- `src/ephyscon/config.py` — `OutputFormat`, `DH5OutputOptions`, `NWBOutputOptions`, `OpenEphysConversionConfig`
 - All processing modules (`raw.py`, `events.py`, `trialmap.py`, `decimation.py`, `mua.py`) use `FileWriter`
 - `tests/test_file_writer.py` — 12 unit tests for `DH5Writer`
 
@@ -30,7 +30,7 @@ dependencies = [
 
 Run `uv sync` after adding.
 
-### Step 2 — Implement `NWBWriter` in `src/oecon/file_writer.py`
+### Step 2 — Implement `NWBWriter` in `src/ephyscon/file_writer.py`
 
 ```python
 class NWBWriter(FileWriter):
@@ -164,7 +164,7 @@ class NWBWriter(FileWriter):
 case "nwb":
     from pynwb import NWBFile, NWBHDF5IO
     from datetime import datetime
-    from oecon.config import NWBOutputOptions
+    from ephyscon.config import NWBOutputOptions
 
     if nwb_options is None:
         nwb_options = NWBOutputOptions()
@@ -218,7 +218,7 @@ Key assertions:
 
 ```bash
 # DH5 (default, unchanged)
-uv run oecon session_path
+uv run ephyscon convert session_path
 
 # NWB via config file
 cat > nwb_config.json << EOF
@@ -235,7 +235,7 @@ cat > nwb_config.json << EOF
   "trialmap_config": {}
 }
 EOF
-uv run oecon session_path --config nwb_config.json --output-folder output/
+uv run ephyscon convert session_path --config nwb_config.json --output-folder output/
 
 # Validate NWB file
 python -c "

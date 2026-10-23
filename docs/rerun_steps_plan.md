@@ -21,7 +21,7 @@ Allow users to re-run a previously-skipped step, or repeat a step with new param
 
 **`rerun_open_ephys_session(session_path, output_folder, config, on_progress)`**
 - Session-level entry point, parallel to `convert_open_ephys_session`
-- Exported from `oecon.__init__`
+- Exported from `ephyscon.__init__`
 
 ### What gets deleted per step
 

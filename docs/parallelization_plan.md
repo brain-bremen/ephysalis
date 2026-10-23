@@ -79,7 +79,7 @@ Same split: `_compute_mua_channel` (pure) + parallel dispatch + temp-file merge.
 
 ### 4. Helper: temp-file merge
 
-Add `src/oecon/parallel_utils.py`:
+Add `src/ephyscon/parallel_utils.py`:
 
 ```python
 def write_cont_to_tmp(tmp_dir, cont_id, data, index, sample_period_ns,
