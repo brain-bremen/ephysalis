@@ -6,8 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from ephyscon.session import Run
 from ephyscon.session_config import (
     SESSION_CONFIG_FILENAME,
+    SessionConfig,
     default_session_config,
     load_session_config,
     save_session_config,
@@ -45,15 +47,38 @@ def _inspect(args: argparse.Namespace) -> int:
         )
         if system is None:
             print("      stimulus: none found")
-            continue
-        for paradigm in system.discover(run):
-            count = paradigm.metadata.get("stimulusCount", "?")
-            line = f"      stimulus [{system.name}] {paradigm.name}: {count} trials"
-            if args.conditions:
-                conditions = system.load_conditions(paradigm)
-                line += f", {conditions['condition'].nunique()} conditions"
-            print(line)
+        else:
+            for paradigm in system.discover(run):
+                count = paradigm.metadata.get("stimulusCount", "?")
+                line = f"      stimulus [{system.name}] {paradigm.name}: {count} trials"
+                if args.conditions:
+                    conditions = system.load_conditions(paradigm)
+                    line += f", {conditions['condition'].nunique()} conditions"
+                print(line)
+        if args.timing and (run_config is None or run_config.include):
+            _print_timing(run, config)
     return 0
+
+
+def _print_timing(run: Run, config: SessionConfig | None) -> None:
+    from ephyscon.timing import extract_run_timing
+
+    timing = extract_run_timing(run, config)
+    for stream, clock in timing.sync.maps.items():
+        if stream == timing.sync.reference:
+            continue
+        print(
+            f"      sync {stream} -> {timing.sync.reference}: {clock.source_samples.size} edges, "
+            f"{clock.effective_sampling_frequency:.4f} Hz, max residual {clock.max_residual_s() * 1e3:.3f} ms"
+        )
+    for name, trials in timing.trials.items():
+        first = trials["start_time"].iloc[0] if len(trials) else float("nan")
+        print(
+            f"      trials {name}: {len(trials)} detected ({trials.attrs.get('photodiode_mode', '?')} "
+            f"photodiode), first at {first:.3f} s"
+        )
+    if timing.running_speed is not None:
+        print(f"      running speed: max {timing.running_speed.max():.1f} cm/s")
 
 
 def _init(args: argparse.Namespace) -> int:
@@ -83,6 +108,10 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("session", type=Path)
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--conditions", action="store_true", help="Also load the trial conditions")
+    p.add_argument(
+        "--timing", action="store_true",
+        help="Also sync the streams and detect trials and running speed (reads the sync channels)",
+    )
     p.set_defaults(func=_inspect)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")

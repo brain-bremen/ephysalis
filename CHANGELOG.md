@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stimulus system plugins** (`ephyscon.stimulus`, entry point group `ephyscon.stimulus_systems`), with a first plugin for the lab's MATLAB "stimulusStage" system
 - **`session.toml`** per-session configuration, `ephyscon init` (with `--excel` migration of the legacy lab Excel sheets) and `ephyscon inspect`
 - MAT v5/v7.3 reader that preserves struct field order (`ephyscon.matfile`)
+- **Clock sync** between probes and the aux stream from the sync edges (`ephyscon.sync`), **photodiode trial times** in the stimstage plugin, **running speed** from the wheel encoder (`ephyscon.auxsignals`), combined per run by `ephyscon.timing.extract_run_timing` and shown by `ephyscon inspect --timing`
+- Small real SpikeGLX test dataset (`tests/data/SOMxCD1_172_20250109_crop`, 5 s) with MATLAB reference output, and the crop tool `tools/make_spikeglx_test_dataset.py`
 
 - **GUI** (`ephyscon-gui`, formerly `oecon-gui`): new PySide6 application for converting Open Ephys sessions, with groupboxes for Input, Output, Config, Progress, and Log
 - **Session inspector** (`ephyscon-inspect`, formerly `oecon-inspect`): new standalone GUI app for browsing Open Ephys sessions without converting; shows recordings, streams, channel names, and event counts per stream

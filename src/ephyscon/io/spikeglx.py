@@ -25,16 +25,23 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+import numpy as np
+
 from ephyscon.io.base import InputFormat
 from ephyscon.session import ProbeInfo, Run, Session, StreamKind
+from ephyscon.sync import Edges, digital_edges
 
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
+
+    from ephyscon.session_config import AuxChannelMap
 
 logger = logging.getLogger(__name__)
 
 # <run>_g<gate>_t<trigger>.<stream>.meta, stream = imec<N>.ap | imec<N>.lf | nidq | obx<N>
 _META_RE = re.compile(r"^(?P<run>.+_g\d+)_t(?P<trigger>\d+)\.(?P<stream>imec\d+\.(?:ap|lf)|nidq|obx\d+)\.meta$")
+# the imec SY channel carries the sync input on bit 6
+IMEC_SYNC_BIT = 6
 
 
 def read_meta(path: Path) -> dict[str, str]:
@@ -192,6 +199,43 @@ class SpikeGLXFormat(InputFormat):
             except KeyError:
                 raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
         return _read_spikeglx(str(run.path), stream_id)
+
+    def sync_edges(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> Edges:
+        if probe_id is not None:
+            return digital_edges(self.get_recording(run, StreamKind.SYNC, probe_id), 0, IMEC_SYNC_BIT)
+        bit = run.extra["aux"].get("sync_bit")
+        if aux_channels is not None and "sync" in aux_channels.digital:
+            if bit is not None and bit != aux_channels.digital["sync"]:
+                logger.warning(
+                    "Run %s: NIDQ sync bit %d from the config differs from syncNiChan=%d in the meta file",
+                    run.name, aux_channels.digital["sync"], bit,
+                )
+            bit = aux_channels.digital["sync"]
+        if bit is None:
+            raise ValueError(f"Run {run.name}: unknown NIDQ sync bit")
+        return digital_edges(self.get_recording(run, StreamKind.AUX), self._digital_channel(run), bit)
+
+    @staticmethod
+    def _digital_channel(run: Run) -> int:
+        # the digital words follow the analog channels in the NIDQ stream
+        if run.extra["aux"].get("n_digital_words", 0) < 1:
+            raise KeyError(f"Run {run.name}: NIDQ stream has no digital word")
+        return run.extra["aux"]["n_analog"]
+
+    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
+        if not 0 <= index < run.extra["aux"]["n_analog"]:
+            raise IndexError(f"Run {run.name}: no NIDQ analog channel {index}")
+        recording = self.get_recording(run, StreamKind.AUX)
+        return recording.get_traces(channel_ids=[recording.channel_ids[index]])[:, 0]
+
+    def aux_analog_gain_v(self, run: Run, index: int) -> float:
+        # spikeinterface gains are in uV and include the NI range and channel gain
+        return float(self.get_recording(run, StreamKind.AUX).get_channel_gains()[index]) * 1e-6
+
+    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
+        recording = self.get_recording(run, StreamKind.AUX)
+        word = recording.get_traces(channel_ids=[recording.channel_ids[self._digital_channel(run)]])[:, 0]
+        return ((word.astype(np.int64) >> bit) & 1).astype(bool)
 
 
 @cache

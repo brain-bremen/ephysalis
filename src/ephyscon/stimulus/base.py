@@ -1,9 +1,9 @@
 """Interface for stimulus systems.
 
-A stimulus system knows (1) which paradigms were presented in a run and (2) which condition
-was shown in each trial. Trial *timing* (photodiode, TTL words, network events) is resolved
-against the synchronised event streams in a later step, so the same stimulus system can be
-used with different acquisition setups.
+A stimulus system knows (1) which paradigms were presented in a run, (2) which condition
+was shown in each trial and (3) how trial times are marked in the recording (photodiode,
+TTL words, network events). Trial times are resolved against the synchronised streams of
+the run (:class:`~ephyscon.sync.RunSync`), so they end up on the reference clock.
 
 Implementations register under the ``ephyscon.stimulus_systems`` entry point group. To
 support a new stimulus system, implement :class:`StimulusSystem` and register it in the
@@ -15,12 +15,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pandas as pd
 
 from ephyscon.plugins import STIMULUS_SYSTEM_GROUP, available, get_plugin
 from ephyscon.session import Run
+
+if TYPE_CHECKING:
+    from ephyscon.auxsignals import AuxSignals
+    from ephyscon.sync import RunSync
 
 
 @dataclass
@@ -51,6 +55,13 @@ class StimulusSystem(ABC):
         Required columns: ``trial`` (0-based) and ``condition`` (system-specific condition id).
         All other columns are stimulus parameters and end up as columns of the NWB trials table.
         """
+
+    def load_trials(
+        self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None
+    ) -> pd.DataFrame:
+        """:meth:`load_conditions` plus ``start_time`` and ``stop_time`` in s on the reference
+        clock of ``sync``. Trials without a detected time are dropped (with a warning)."""
+        raise NotImplementedError(f"Stimulus system {self.name} does not provide trial times yet")
 
 
 def get_stimulus_system(name: str) -> StimulusSystem:

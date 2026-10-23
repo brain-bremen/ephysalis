@@ -1,13 +1,18 @@
 """Tests on the small real SpikeGLX dataset in tests/data/SOMxCD1_172_20250109_crop."""
 
+from fractions import Fraction
+
 import numpy as np
 import pytest
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, resample_poly
 
+from ephyscon.auxsignals import AuxSignals, wheel_speed
 from ephyscon.io.base import open_session
 from ephyscon.session import StreamKind
 from ephyscon.session_config import AuxChannelMap, default_session_config
 from ephyscon.stimulus.base import detect_stimulus_system
+from ephyscon.sync import AUX
+from ephyscon.timing import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
 
 RUN = "3_rfmappingFine_g0"
@@ -16,6 +21,10 @@ RUN = "3_rfmappingFine_g0"
 @pytest.fixture(scope="module")
 def run():
     return open_session(SPIKEGLX_CROP_SESSION).run(RUN)
+
+
+def _aux_signals(run):
+    return AuxSignals(run, AuxChannelMap.legacy_default(run.extra["aux"]["n_analog"]))
 
 
 def test_session_structure(run):
@@ -102,3 +111,63 @@ def test_default_config(run):
     config = default_session_config(session)
     assert config.subject_id == "SOMxCD1_172"
     assert config.probes["imec0"].serial_number == "23167804621"
+
+
+@pytest.fixture(scope="module")
+def timing(run):
+    return extract_run_timing(run)
+
+
+def test_sync(timing):
+    assert timing.sync.reference == "imec0"
+    for stream in ("imec1", AUX):
+        clock = timing.sync.maps[stream]
+        assert clock.source_samples.size == 10
+        assert clock.max_residual_s() < 50e-6
+    assert timing.sync.maps[AUX].effective_sampling_frequency == pytest.approx(26041.3, abs=0.5)
+
+
+@pytest.mark.parametrize("probe_id", ["imec0", "imec1"])
+def test_trial_times_match_legacy(run, timing, probe_id):
+    """Photodiode trial on/offsets agree with the MATLAB pipeline within 5 samples (0.17 ms).
+
+    The remaining difference (about 1 sample for imec0, 4 for imec1) is consistent with the
+    MATLAB sync: it smooths the sync offset over 100 edges (~50 s), which near the start of a
+    run averages in later clock drift. ephyscon maps every pulse with its neighbouring edges.
+    MATLAB reports the first sample above threshold; ephyscon the interpolated crossing.
+    """
+    (trials,) = timing.trials.values()
+    assert len(trials) == 23
+    assert trials.attrs["photodiode_mode"] == "square"
+    assert list(trials.columns[:4]) == ["trial", "start_time", "stop_time", "condition"]
+
+    reference = np.load(run.path / "1_stimulusStageRF" / f"legacy_reference_{probe_id}.npz")
+    for column, legacy in (("start_time", "trial_start_samples"), ("stop_time", "trial_stop_samples")):
+        samples = timing.trial_samples("RF", probe_id, column)
+        np.testing.assert_allclose(samples, reference[legacy], atol=5)
+
+
+def test_running_speed(run, timing):
+    """Port of get_wheelspeed.m: speed from the encoder pulses (900 ppr, 8 cm radius)."""
+    speed = timing.running_speed
+    assert speed.shape == (5000,)
+    aux = _aux_signals(run)
+    n_pulses = aux.wheel_rising_edges().size
+    assert speed.sum() / 1000 == pytest.approx(n_pulses * 2 * np.pi * 8 / 900, rel=0.05)
+
+
+def test_running_speed_legacy_artefact(run):
+    """The MATLAB speed is ~9x too high: it resampled the encoder line to 30 kHz and
+    thresholded it at > 0, so filter ringing adds spurious pulses around every real one.
+    Simulating that resampling reproduces the MATLAB output, which validates the port."""
+    aux = _aux_signals(run)
+    ratio = Fraction(30000 / aux.sampling_frequency).limit_denominator(100)
+    resampled = resample_poly(aux.digital("wheel").astype(float), ratio.numerator, ratio.denominator,
+                              window=("kaiser", 5.0)) > 0
+    rising = np.flatnonzero(~resampled[:-1] & resampled[1:]) + 1
+    legacy_like = wheel_speed(rising / 30000, 5.0)
+
+    legacy = np.load(run.path / "1_stimulusStageRF" / "legacy_reference_imec0.npz")["running_velocity_1kHz"]
+    interior = slice(500, 4500)  # away from the smoothing edges of the crop
+    assert np.corrcoef(legacy_like[interior], legacy[interior])[0, 1] > 0.95
+    assert rising.size > 5 * aux.wheel_rising_edges().size

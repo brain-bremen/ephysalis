@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,11 @@ import pandas as pd
 from ephyscon.matfile import read_mat, read_mat_path
 from ephyscon.session import Run
 from ephyscon.stimulus.base import Paradigm, StimulusSystem
+from ephyscon.sync import AUX
+
+if TYPE_CHECKING:
+    from ephyscon.auxsignals import AuxSignals
+    from ephyscon.sync import RunSync
 
 logger = logging.getLogger(__name__)
 
@@ -165,3 +170,36 @@ class StimStageSystem(StimulusSystem):
             )
         # union of fields over parameter sets, missing fields become NaN (as in MATLAB)
         return pd.DataFrame(rows)
+
+    def load_trials(
+        self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None
+    ) -> pd.DataFrame:
+        """Trial times from the screen photodiode on the aux stream.
+
+        Only runs with a single paradigm are supported. The MATLAB pipeline also split old
+        multi-paradigm runs using the "paradigm" digital line; this is not ported yet.
+        """
+        if aux is None:
+            raise ValueError(f"Run {run.name}: stimstage trial times need the aux (photodiode) stream")
+        if len(self._paradigm_dirs(run)) > 1:
+            raise NotImplementedError(
+                f"Run {run.name} contains several paradigms; splitting by the paradigm line is not ported"
+            )
+        conditions = self.load_conditions(paradigm)
+        pulses = aux.photodiode_pulses(n_trials=len(conditions))
+        n = min(len(conditions), pulses.onsets.size)
+        if pulses.onsets.size != len(conditions):
+            logger.warning(
+                "Run %s, paradigm %s: %d photodiode pulses but %d trials in stimulusOrder; "
+                "keeping the first %d",
+                run.name, paradigm.name, pulses.onsets.size, len(conditions), n,
+            )
+        trials = conditions.iloc[:n].copy()
+        trials.insert(1, "start_time", sync.to_reference_time(AUX, pulses.onsets[:n]))
+        trials.insert(2, "stop_time", sync.to_reference_time(AUX, pulses.offsets[:n]))
+        trials.attrs["photodiode_mode"] = pulses.mode
+        missing = trials["start_time"].isna()
+        if missing.any():
+            logger.warning("Run %s: %d trials without photodiode onset dropped", run.name, missing.sum())
+            trials = trials[~missing]
+        return trials.reset_index(drop=True)

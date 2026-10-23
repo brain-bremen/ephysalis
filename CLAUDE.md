@@ -81,6 +81,7 @@ This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline
 - `session.py` — format-independent model: Session → Run → ProbeInfo/streams (`StreamKind`)
 - `io/` — `InputFormat` readers (`spikeglx.py`, `openephys.py`) registered under the `ephyscon.input_formats` entry point group. They return lazy spikeinterface recordings, and discovery parses metadata only.
 - `stimulus/` — `StimulusSystem` plugins (`ephyscon.stimulus_systems`). `stimstage.py` ports the lab's MATLAB `getStimFromIndex.m`, whose conditions are enumerated column-major (MATLAB `ind2sub`), so the field order of `params` matters.
+- `sync.py` — sync edges → `ClockMap` per stream onto the reference probe's clock (`RunSync`). `auxsignals.py` — photodiode pulses, wheel speed, `AuxSignals` (role access via `AuxChannelMap`). `timing.py` — `extract_run_timing` (sync, trials of all paradigms, running speed). Formats provide `sync_edges` and `read_aux_*` on `InputFormat`. Don't name a module `aux.py` (reserved on Windows).
 - `matfile.py` — MAT v5/v7.3 reader that keeps struct field order (`MATLAB_fields`)
 - `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files. This is unrelated to `config.py`, the Open Ephys → DH5 conversion config.
 - CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`)
