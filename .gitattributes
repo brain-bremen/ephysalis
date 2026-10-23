@@ -1,0 +1,7 @@
+# recording/test data: never convert line endings
+*.bin binary
+*.dat binary
+*.npy binary
+*.npz binary
+*.mat binary
+*.dh5 binary

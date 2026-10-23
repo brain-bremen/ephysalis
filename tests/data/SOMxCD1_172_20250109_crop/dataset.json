@@ -1,0 +1,28 @@
+{
+  "source_session": "SOMxCD1_172_20250109_Recording1",
+  "run": "3_rfmappingFine_g0",
+  "start_s": 16.5,
+  "duration_s": 5.0,
+  "neural_channels": {
+    "imec0": [
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89
+    ],
+    "imec1": [
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79
+    ]
+  }
+}

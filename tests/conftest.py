@@ -22,6 +22,7 @@ DATA_FOLDER = _DATA_DIR / _SESSION_NAME
 GOLDEN_DH5_PATH = _DATA_DIR / f"{_SESSION_NAME}_exp1_rec1.dh5"
 GOLDEN_CONFIG_PATH = _DATA_DIR / f"{_SESSION_NAME}_exp1_rec1.config.json"
 SPIKEGLX_TEMPLATES = _DATA_DIR / "spikeglx_np1"
+SPIKEGLX_CROP_SESSION = _DATA_DIR / "SOMxCD1_172_20250109_crop"
 
 skip_if_no_data = pytest.mark.skipif(
     not (DATA_FOLDER.exists() and GOLDEN_DH5_PATH.exists()),

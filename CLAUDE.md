@@ -70,7 +70,7 @@ Both use 1-based indexing in the filenames (exp1, rec1, etc.).
 
 ### Tests
 
-Real-data Open Ephys tests are **skipped** unless `tests/data/Test_2026-03-12_16-32-08` and its golden DH5 exist. `tests/test_realdata_spikeglx.py` runs only when `EPHYSCON_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. All other tests use mocks or synthetic data and run without external data.
+Real-data Open Ephys tests are **skipped** unless `tests/data/Test_2026-03-12_16-32-08` and its golden DH5 exist. `tests/test_realdata_spikeglx.py` runs only when `EPHYSCON_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. `tests/data/SOMxCD1_172_20250109_crop` is a 5 s real SpikeGLX crop (made with `tools/make_spikeglx_test_dataset.py`) with MATLAB reference output, used by `tests/test_spikeglx_crop.py`. All other tests use mocks or synthetic data and run without external data.
 
 The `pytest-plt` fixture (`plt`) is available in tests for inline plotting during development — tests using it will generate plot files when run with `--plt`.
 
