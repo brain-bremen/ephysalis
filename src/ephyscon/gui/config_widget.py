@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QLabel, QFrame,
 )
 
-from gui.widgets import ChannelPickerWidget, DictEditor, ListEditor
+from ephyscon.gui.widgets import ChannelPickerWidget, DictEditor, ListEditor
 
 
 # ---------------------------------------------------------------------------

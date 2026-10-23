@@ -1,12 +1,12 @@
-import oecon.default_mappings as default
-import oecon.version
+import ephyscon.default_mappings as default
+import ephyscon.version
 from pydantic import BaseModel, Field
 from open_ephys.analysis.recording import Continuous
 from open_ephys.analysis.recording import Recording
 from open_ephys.analysis.recording import ContinuousMetadata
 from dhspec.cont import create_channel_info
 import numpy as np
-from oecon.file_writer import FileWriter
+from ephyscon.file_writer import FileWriter
 
 
 class RawConfig(BaseModel):
@@ -158,7 +158,7 @@ def process_oe_raw_data(
     # Add operation using file writer abstraction
     file_writer.add_operation(
         operation_name="Write raw data",
-        tool_version=f"oecon.raw (v{oecon.version.get_version_from_pyproject()})",
+        tool_version=f"ephyscon.raw (v{ephyscon.version.get_version_from_pyproject()})",
     )
 
     return config

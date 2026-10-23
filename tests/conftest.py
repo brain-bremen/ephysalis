@@ -6,8 +6,8 @@ import open_ephys.analysis as oe
 from open_ephys.analysis.formats.BinaryRecording import BinaryRecording
 from dh5io import DH5File
 
-from oecon.config import load_config_from_file
-from oecon.convert_open_ephys_to_dh5 import convert_open_ephys_recording_to_dh5
+from ephyscon.config import load_config_from_file
+from ephyscon.convert_open_ephys_to_dh5 import convert_open_ephys_recording_to_dh5
 
 _DATA_DIR = Path(__file__).parent / "data"
 _SESSION_NAME = "Test_2026-03-12_16-32-08"

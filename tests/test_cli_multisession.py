@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from conftest import DATA_FOLDER, GOLDEN_CONFIG_PATH, skip_if_no_data
-from cli.main import main
+from ephyscon.cli.main import main
 
 
 @skip_if_no_data
@@ -19,7 +19,7 @@ def test_cli_converts_multiple_sessions(tmp_path):
     output = tmp_path / "output"
 
     with patch("sys.argv", [
-        "oecon",
+        "ephyscon",
         str(session1), str(session2),
         "--output-folder", str(output),
         "--config", str(GOLDEN_CONFIG_PATH),

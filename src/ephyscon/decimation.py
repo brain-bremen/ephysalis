@@ -8,9 +8,9 @@ import scipy.signal as signal
 from open_ephys.analysis.recording import Recording
 from pydantic import BaseModel, Field, field_validator
 
-import oecon.version
-from oecon.scaling import scale_to_16_bit_range
-from oecon.file_writer import FileWriter
+import ephyscon.version
+from ephyscon.scaling import scale_to_16_bit_range
+from ephyscon.file_writer import FileWriter
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ def decimate_raw_data(
     # Add operation using file writer abstraction
     file_writer.add_operation(
         operation_name="Decimate raw data",
-        tool_version=f"oecon.decimation (v{oecon.version.get_version_from_pyproject()})",
+        tool_version=f"ephyscon.decimation (v{ephyscon.version.get_version_from_pyproject()})",
     )
 
     config.included_channel_names = included_channel_names

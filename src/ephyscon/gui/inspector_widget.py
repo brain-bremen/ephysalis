@@ -7,8 +7,8 @@ from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QTree
 
 _CHANNEL_NAMES_ROLE = 257  # UserRole: stores list[str] of channel names on stream items
 
-from oecon.inspect import SessionInfo, inspect_session, validate_session_path
-from oecon.inspect import _fmt_duration, _fmt_rate, _fmt_size
+from ephyscon.inspect import SessionInfo, inspect_session, validate_session_path
+from ephyscon.inspect import _fmt_duration, _fmt_rate, _fmt_size
 
 
 _PATH_ROLE = 256  # UserRole: stores Path on top-level session items

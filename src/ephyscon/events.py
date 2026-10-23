@@ -11,8 +11,8 @@ from open_ephys.analysis.formats.BinaryRecording import BinaryRecording
 from open_ephys.analysis.recording import Recording
 from vstim.network_event_codes import VStimEventCode
 
-import oecon.version
-from oecon.file_writer import FileWriter
+import ephyscon.version
+from ephyscon.file_writer import FileWriter
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +311,7 @@ def process_oe_events(
     # Add operation using file writer abstraction
     file_writer.add_operation(
         operation_name="Process events",
-        tool_version=f"oecon.events (v{oecon.version.get_version_from_pyproject()})",
+        tool_version=f"ephyscon.events (v{ephyscon.version.get_version_from_pyproject()})",
     )
 
     return event_config

@@ -1,6 +1,6 @@
 from random import sample
-import oecon
-from oecon.events import (
+import ephyscon
+from ephyscon.events import (
     Event,
     EventMetadata,
     FullWordEvent,

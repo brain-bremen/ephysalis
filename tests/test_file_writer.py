@@ -9,8 +9,8 @@ import pytest
 from dhspec.cont import create_channel_info
 from dhspec.trialmap import TRIALMAP_DATASET_DTYPE
 
-from oecon.config import DH5OutputOptions
-from oecon.file_writer import (
+from ephyscon.config import DH5OutputOptions
+from ephyscon.file_writer import (
     DH5Writer,
     FileWriter,
     create_file_writer,

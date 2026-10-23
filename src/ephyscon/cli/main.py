@@ -1,7 +1,7 @@
 import argparse
-from oecon import convert_open_ephys_session
-from oecon.config import load_config_from_file
-from oecon.inspect import format_session_info, inspect_session, validate_session_path
+from ephyscon import convert_open_ephys_session
+from ephyscon.config import load_config_from_file
+from ephyscon.inspect import format_session_info, inspect_session, validate_session_path
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog

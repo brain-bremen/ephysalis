@@ -8,10 +8,10 @@ from dhspec.cont import create_channel_info
 from open_ephys.analysis.recording import Recording as OERecording
 from pydantic import BaseModel, Field, field_validator
 
-import oecon.default_mappings as default
-import oecon.version
-from oecon.decimation import DecimationConfig, decimate_np_array
-from oecon.file_writer import FileWriter
+import ephyscon.default_mappings as default
+import ephyscon.version
+from ephyscon.decimation import DecimationConfig, decimate_np_array
+from ephyscon.file_writer import FileWriter
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def extract_continuous_mua(
     # Add operation using file writer abstraction
     file_writer.add_operation(
         operation_name="Extract continuous MUA",
-        tool_version=f"oecon.mua (v{oecon.version.get_version_from_pyproject()})",
+        tool_version=f"ephyscon.mua (v{ephyscon.version.get_version_from_pyproject()})",
     )
 
     return config

@@ -10,8 +10,8 @@ from dh5io import DH5File
 from dh5io.create import create_dh_file
 from vstim.tdr import TrialOutcome
 
-from oecon.events import Messages
-from oecon.trialmap import (
+from ephyscon.events import Messages
+from ephyscon.trialmap import (
     TrialEndMessage,
     TrialMapConfig,
     TrialStartMessage,
@@ -41,7 +41,7 @@ def mock_recording():
 @pytest.fixture
 def mock_messages():
     """Create mock trial messages."""
-    from oecon.events import EventMetadata
+    from ephyscon.events import EventMetadata
 
     metadata = EventMetadata(
         channel_name="messages",
@@ -108,12 +108,12 @@ class TestTrialMessageParsing:
 class TestTrialmapOperation:
     """Tests for Operation creation in trialmap processing."""
 
-    @patch("oecon.trialmap.get_messages_from_recording")
+    @patch("ephyscon.trialmap.get_messages_from_recording")
     def test_trialmap_creates_operation(
         self, mock_get_messages, tmp_dh5_file, mock_recording, mock_messages
     ):
         """Verify that process_oe_trialmap creates an Operation in the DH5 file."""
-        from oecon.file_writer import DH5Writer
+        from ephyscon.file_writer import DH5Writer
 
         mock_get_messages.return_value = mock_messages
 
@@ -144,6 +144,6 @@ class TestTrialmapOperation:
         tool_attr = operation_group.attrs["Tool"]
         if isinstance(tool_attr, bytes):
             tool_attr = tool_attr.decode()
-        assert "oecon.trialmap" in tool_attr
+        assert "ephyscon.trialmap" in tool_attr
         assert "(v" in tool_attr  # Check version format
 

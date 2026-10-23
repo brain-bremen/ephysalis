@@ -1,4 +1,4 @@
-from oecon.scaling import scale_to_16_bit_range
+from ephyscon.scaling import scale_to_16_bit_range
 import numpy as np
 import pytest
 

@@ -1,5 +1,5 @@
 import pytest
-from oecon.trialmap import (
+from ephyscon.trialmap import (
     TrialStartMessage,
     TrialEndMessage,
     parse_trial_start_message,

@@ -83,7 +83,7 @@ class FileWriter(ABC):
 
         Args:
             operation_name: Name of the processing operation
-            tool_version: Tool/version string (e.g., "oecon.raw (v0.2.0)")
+            tool_version: Tool/version string (e.g., "ephyscon.raw (v0.2.0)")
             metadata: Optional additional metadata to store
         """
         pass
@@ -111,9 +111,9 @@ class DH5Writer(FileWriter):
 
         Args:
             dh5file: DH5File object from dh5io.create.create_dh_file()
-            options: DH5-specific output options (DH5OutputOptions from oecon.config)
+            options: DH5-specific output options (DH5OutputOptions from ephyscon.config)
         """
-        from oecon.config import DH5OutputOptions
+        from ephyscon.config import DH5OutputOptions
 
         self._dh5file = dh5file  # Keep reference to DH5File wrapper
         self._file = dh5file._file  # h5py.File for compatibility
@@ -246,7 +246,7 @@ def create_file_writer(
         case "dh5":
             import dh5io.create
 
-            from oecon.config import DH5OutputOptions
+            from ephyscon.config import DH5OutputOptions
 
             if dh5_options is None:
                 dh5_options = DH5OutputOptions()

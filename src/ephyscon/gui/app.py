@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-from gui.main_window import MainWindow
+from ephyscon.gui.main_window import MainWindow
 
 
 def _apply_dark_palette(app: QApplication) -> None:
@@ -33,7 +33,7 @@ def _apply_dark_palette(app: QApplication) -> None:
 
 def main() -> None:
     app = QApplication(sys.argv)
-    app.setApplicationName("oecon")
+    app.setApplicationName("ephyscon")
     _apply_dark_palette(app)
     window = MainWindow()
     window.show()

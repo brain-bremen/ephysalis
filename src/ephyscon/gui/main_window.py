@@ -14,23 +14,23 @@ from PySide6.QtWidgets import (
 )
 
 
-from oecon.config import (
+from ephyscon.config import (
     ContinuousMuaConfig, DecimationConfig, EventPreprocessingConfig,
     OpenEphysConversionConfig, OutputFormat, RawConfig,
     TrialMapConfig, load_config_from_file, save_config_to_file,
 )
-from oecon import convert_open_ephys_session
-from oecon.convert_open_ephys_to_dh5 import get_output_paths
-from oecon.version import get_version_from_pyproject
-from oecon.inspect import validate_session_path
+from ephyscon import convert_open_ephys_session
+from ephyscon.convert_open_ephys_to_dh5 import get_output_paths
+from ephyscon.version import get_version_from_pyproject
+from ephyscon.inspect import validate_session_path
 
-from gui.config_widget import ConfigStepWidget
-from gui.inspector_widget import SessionInspectorWidget
-from gui.settings import (
+from ephyscon.gui.config_widget import ConfigStepWidget
+from ephyscon.gui.inspector_widget import SessionInspectorWidget
+from ephyscon.gui.settings import (
     get_last_config_path, get_last_session_dir,
     set_last_config_path, set_last_session_dir, pick_session_dirs,
 )
-from gui.widgets import ChannelPickerWidget
+from ephyscon.gui.widgets import ChannelPickerWidget
 
 # (tab label, OpenEphysConversionConfig field name, model_class, enabled by default)
 _TAB_CONFIGS = [
@@ -162,7 +162,7 @@ class _ConversionWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"oecon {get_version_from_pyproject()}")
+        self.setWindowTitle(f"ephyscon {get_version_from_pyproject()}")
         self.setMinimumSize(720, 680)
         self._worker: _ConversionWorker | None = None
         self._setup_ui()

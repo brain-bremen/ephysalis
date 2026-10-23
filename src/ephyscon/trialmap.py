@@ -11,9 +11,9 @@ from open_ephys.analysis.recording import Recording
 from pydantic import BaseModel, Field
 from vstim.tdr import TrialOutcome
 
-import oecon.version
-from oecon.events import EventMetadata, Messages, event_from_eventfolder
-from oecon.file_writer import FileWriter
+import ephyscon.version
+from ephyscon.events import EventMetadata, Messages, event_from_eventfolder
+from ephyscon.file_writer import FileWriter
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +296,7 @@ def process_oe_trialmap(
 
     file_writer.write_trialmap(
         trial_data=new_trialmap,
-        tool_version=f"oecon.trialmap (v{oecon.version.get_version_from_pyproject()})",
+        tool_version=f"ephyscon.trialmap (v{ephyscon.version.get_version_from_pyproject()})",
     )
 
     return config

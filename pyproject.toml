@@ -1,7 +1,7 @@
 [project]
-name = "oecon"
-version = "0.2.1"
-description = "Python tools to convert and preprocess OpenEphys data to the DAQ-HDF5 (dh5) format"
+name = "ephyscon"
+version = "0.3.0.dev0"
+description = "Preprocessing of extracellular electrophysiology recordings (Open Ephys, SpikeGLX) to DH5 and NWB (successor of oecon)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -36,6 +36,6 @@ dev = [
 
 
 [project.scripts]
-oecon = "cli.main:main"
-oecon-gui = "gui.app:main"
-oecon-inspect = "gui.inspector_app:main"
+ephyscon = "ephyscon.cli.main:main"
+ephyscon-gui = "ephyscon.gui.app:main"
+ephyscon-inspect = "ephyscon.gui.inspector_app:main"

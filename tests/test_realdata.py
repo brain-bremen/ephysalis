@@ -4,7 +4,7 @@ from pathlib import Path
 from dh5io import DH5File
 
 from conftest import skip_if_no_data, DATA_FOLDER, GOLDEN_DH5_PATH
-from oecon.events import EventMetadata, Event, Messages, FullWordEvent, event_from_eventfolder
+from ephyscon.events import EventMetadata, Event, Messages, FullWordEvent, event_from_eventfolder
 
 
 @skip_if_no_data

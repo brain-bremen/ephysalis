@@ -7,11 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from oecon.decimation import DecimationConfig
-from oecon.events import EventPreprocessingConfig
-from oecon.mua import ContinuousMuaConfig
-from oecon.raw import RawConfig
-from oecon.trialmap import TrialMapConfig
+from ephyscon.decimation import DecimationConfig
+from ephyscon.events import EventPreprocessingConfig
+from ephyscon.mua import ContinuousMuaConfig
+from ephyscon.raw import RawConfig
+from ephyscon.trialmap import TrialMapConfig
 
 VERSION = 1
 
@@ -86,16 +86,16 @@ class OpenEphysConversionConfig(BaseModel):
     # General settings
     n_jobs: int = 1
     config_version: int = VERSION
-    oecon_version: str = Field(
+    ephyscon_version: str = Field(
         default_factory=lambda: __import__(
-            "oecon.version"
+            "ephyscon.version"
         ).version.get_version_from_pyproject()
     )
 
     @model_validator(mode="after")
-    def set_oecon_version(self) -> "OpenEphysConversionConfig":
-        self.oecon_version = __import__(
-            "oecon.version"
+    def set_ephyscon_version(self) -> "OpenEphysConversionConfig":
+        self.ephyscon_version = __import__(
+            "ephyscon.version"
         ).version.get_version_from_pyproject()
         return self
 

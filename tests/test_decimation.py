@@ -5,7 +5,7 @@ import os
 import h5py
 from unittest.mock import Mock, patch
 
-from oecon.decimation import decimate_raw_data, decimate_np_array, DecimationConfig
+from ephyscon.decimation import decimate_raw_data, decimate_np_array, DecimationConfig
 from open_ephys.analysis.recording import Recording, Continuous, ContinuousMetadata
 from dh5io.create import create_dh_file
 from dh5io.cont import validate_cont_group
@@ -308,7 +308,7 @@ class TestDecimateRawDataIntegration:
     @patch("dhspec.cont.create_channel_info")
     @patch("dh5io.cont.create_cont_group_from_data_in_file")
     @patch("dh5io.operations.add_operation_to_file")
-    @patch("oecon.version.get_version_from_pyproject")
+    @patch("ephyscon.version.get_version_from_pyproject")
     def test_decimate_raw_data_basic(
         self,
         mock_version,
@@ -376,7 +376,7 @@ class TestDecimateRawDataIntegration:
     @patch("dhspec.cont.create_channel_info")
     @patch("dh5io.cont.create_cont_group_from_data_in_file")
     @patch("dh5io.operations.add_operation_to_file")
-    @patch("oecon.version.get_version_from_pyproject")
+    @patch("ephyscon.version.get_version_from_pyproject")
     def test_decimate_raw_data_channel_selection(
         self,
         mock_version,
@@ -455,7 +455,7 @@ class TestDecimateRawDataIntegration:
     @patch("dhspec.cont.create_channel_info")
     @patch("dh5io.cont.create_cont_group_from_data_in_file")
     @patch("dh5io.operations.add_operation_to_file")
-    @patch("oecon.version.get_version_from_pyproject")
+    @patch("ephyscon.version.get_version_from_pyproject")
     def test_decimate_raw_data_multiple_continuous_streams(
         self,
         mock_version,

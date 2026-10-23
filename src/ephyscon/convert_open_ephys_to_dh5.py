@@ -5,7 +5,7 @@ from pathlib import Path
 from open_ephys.analysis.recording import Recording
 from open_ephys.analysis.session import Session
 
-from oecon.config import (
+from ephyscon.config import (
     DecimationConfig,
     EventPreprocessingConfig,
     OpenEphysConversionConfig,
@@ -14,13 +14,13 @@ from oecon.config import (
     ContinuousMuaConfig,
     save_config_to_file,
 )
-from oecon.decimation import decimate_raw_data
-from oecon.events import process_oe_events
-from oecon.raw import process_oe_raw_data
-from oecon.trialmap import process_oe_trialmap
-from oecon.mua import extract_continuous_mua
-from oecon.version import get_version_from_pyproject
-from oecon.file_writer import create_file_writer
+from ephyscon.decimation import decimate_raw_data
+from ephyscon.events import process_oe_events
+from ephyscon.raw import process_oe_raw_data
+from ephyscon.trialmap import process_oe_trialmap
+from ephyscon.mua import extract_continuous_mua
+from ephyscon.version import get_version_from_pyproject
+from ephyscon.file_writer import create_file_writer
 
 # Configure logging
 logging.basicConfig(
@@ -67,7 +67,7 @@ def convert_open_ephys_recording_to_dh5(
 
     logger.info(
         f"Start converting OpenEphys recording from {recording.directory} to {output_filename} "
-        f"(format: {config.output_format}) using oecon v{get_version_from_pyproject()}"
+        f"(format: {config.output_format}) using ephyscon v{get_version_from_pyproject()}"
     )
 
     # Create format-specific file writer
