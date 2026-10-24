@@ -29,7 +29,7 @@ class FakeKilosort:
         self.calls.append("spikedetect")
         self.allocated["spikedetect"] = spikedetect.np.zeros((10**6, 6)).shape[0]
         ops["wPCA"] = np.random.rand(2)
-        return np.random.rand(5, 3), np.random.rand(5, 2), ops
+        return np.random.rand(500_000, 3), np.random.rand(5, 2), ops
 
     def extract(self, ops, bfile, U, **kwargs):
         self.calls.append("extract")
@@ -97,7 +97,7 @@ def test_spike_arrays_are_preallocated_from_the_previous_step(tmp_path, fake):
     with checkpoints(tmp_path / "ckpt"):
         pipeline(tmp_path)
     assert fake.allocated["spikedetect"] == int(2_000_000 * 1.3)  # from the drift step's spike count
-    assert fake.allocated["extract"] == (10**6, (10**6, 2, 3))  # the fake spikedetect found 5 spikes
+    assert fake.allocated["extract"] == (1_250_000, (1_250_000, 2, 3))  # 2.5 x the spikedetect count
     assert not hasattr(template_matching.np, "_capacity")  # modules restored
 
 

@@ -39,7 +39,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _KILOSORT_CAPACITY = 10**6  # initial number of rows of Kilosort's spike arrays
-CAPACITY_MARGIN = 1.3  # preallocate this many times the spike count of the previous step
+# preallocate this many times the spike count of the previous step: the drift step and the spike
+# detection both use the universal templates; the learned templates find about twice as many
+# spikes (5.5 M -> 10.6 M in SOMxCD1_172_20250109_Recording1)
+CAPACITY_MARGIN = {"spikedetect": 1.3, "extract": 2.5}
 
 
 class CheckpointStore:
@@ -169,8 +172,8 @@ def checkpoints(folder: Path) -> Iterator[None]:
         state["n_spikes"] = n_spikes(result)
         return result
 
-    def capacity() -> int | None:
-        return None if state["n_spikes"] is None else int(state["n_spikes"] * CAPACITY_MARGIN)
+    def capacity(step: str) -> int | None:
+        return None if state["n_spikes"] is None else int(state["n_spikes"] * CAPACITY_MARGIN[step])
 
     def drift(ops: dict, bfile: Any, *args: Any, **kwargs: Any) -> tuple:
         def run() -> tuple:
@@ -188,7 +191,7 @@ def checkpoints(folder: Path) -> Iterator[None]:
             return originals[(spikedetect, "run")](ops, bfile, *args, **kwargs)
 
         def run() -> tuple:
-            with _preallocate(spikedetect, capacity()):
+            with _preallocate(spikedetect, capacity("spikedetect")):
                 return originals[(spikedetect, "run")](ops, bfile, *args, **kwargs)
 
         st, tF, _ = checkpointed("spikedetect", run, ops, lambda r: len(r[0]))
@@ -196,7 +199,7 @@ def checkpoints(folder: Path) -> Iterator[None]:
 
     def extract(ops: dict, bfile: Any, *args: Any, **kwargs: Any) -> tuple:
         def run() -> tuple:
-            with _preallocate(template_matching, capacity()):
+            with _preallocate(template_matching, capacity("extract")):
                 return originals[(template_matching, "extract")](ops, bfile, *args, **kwargs)
 
         st, tF, _ = checkpointed("extract", run, ops, lambda r: len(r[0]))
