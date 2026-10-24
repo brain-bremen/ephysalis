@@ -1,4 +1,4 @@
-"""Session-level commands: ``ephyscon inspect``, ``init``, ``sync``, ``timing``, ``sort`` and ``lfp``."""
+"""Session-level commands: ``ephyscon inspect``, ``init``, ``sync``, ``timing``, ``sort``, ``lfp`` and ``nwb``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ephyscon.session import Run
+from ephyscon.session import Run, Session
 from ephyscon.session_config import (
     SESSION_CONFIG_FILENAME,
     SessionConfig,
@@ -15,7 +15,7 @@ from ephyscon.session_config import (
     save_session_config,
 )
 from ephyscon.io.base import open_session
-from ephyscon.sync import SyncEdgeCache
+from ephyscon.sync import RunSync, SyncEdgeCache
 from ephyscon.stimulus.base import detect_stimulus_system, get_stimulus_system
 
 
@@ -142,23 +142,31 @@ def _parse_value(text: str) -> object:
         return text
 
 
-def _sort(args: argparse.Namespace) -> int:
-    import tempfile
-
-    from ephyscon.sorting import sort_probe
+def _included_run_syncs(session: Session, config: SessionConfig | None, work_dir: Path) -> dict[str, RunSync]:
+    """RunSync of every included run, from the sync edge cache in the work dir."""
     from ephyscon.sync import synchronize_run
-    from ephyscon.timing import WORK_DIR_NAME, aux_channel_map
+    from ephyscon.timing import aux_channel_map
 
-    session = open_session(args.session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
-    config, config_path = _load_config_for(session.path, work_dir, args.config)
-    print(f"Config: {config_path or 'none (sorting all channels)'}")
     cache = SyncEdgeCache(work_dir / "sync")
     syncs = {}
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if run_config is None or run_config.include:
             syncs[run.name] = synchronize_run(run, aux_channel_map(run, config), cache=cache)
+    return syncs
+
+
+def _sort(args: argparse.Namespace) -> int:
+    import tempfile
+
+    from ephyscon.sorting import sort_probe
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    print(f"Config: {config_path or 'none (sorting all channels)'}")
+    syncs = _included_run_syncs(session, config, work_dir)
     params = dict(kv.split("=", 1) for kv in args.param or [])
     scratch = Path(args.scratch_dir) if args.scratch_dir else Path(tempfile.gettempdir()) / "ephyscon"
     for probe_id in args.probes or session.probe_ids:
@@ -222,6 +230,22 @@ def _lfp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _nwb(args: argparse.Namespace) -> int:
+    from ephyscon.nwb import write_session_nwb
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    print(f"Config: {config_path or 'none'}")
+    output = Path(args.output) if args.output else work_dir / f"{session.name}.nwb"
+    syncs = _included_run_syncs(session, config, work_dir) if not args.no_lfp else {}
+    write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                      compression=None if args.no_compression else "gzip")
+    print(f"Output: {output}")
+    return 0
+
+
 def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("inspect", help="Show runs, probes, streams and paradigms of a session")
     p.add_argument("session", type=Path)
@@ -282,6 +306,16 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
     p.add_argument("--force", action="store_true", help="Overwrite existing LFP")
     p.set_defaults(func=_lfp)
+
+    p = sub.add_parser("nwb", help="Write one NWB file with all runs and probes from the outputs in the work dir")
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Folder with the outputs of timing, lfp and sort (default: <session>/ephyscon)")
+    p.add_argument("-o", "--output", help="NWB file (default: <work-dir>/<session>.nwb)")
+    p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
+    p.add_argument("--no-compression", action="store_true", help="Write the LFP without gzip compression")
+    p.set_defaults(func=_nwb)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("session", type=Path)

@@ -1,3 +1,5 @@
+> **Note:** this plan covers NWB output for the Open Ephys → DH5 conversion (`FileWriter`). The session pipeline (SpikeGLX/multi-run sessions) has its own NWB writer, `src/ephyscon/nwb.py` (`ephyscon nwb`).
+
 # NWB Implementation Plan (Phase 3 & 4)
 
 ## Current Status (Phase 1 & 2 Complete)

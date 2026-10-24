@@ -23,6 +23,7 @@ dependencies = [
     "pymatreader>=1.3.2",
     "spikeinterface>=0.105.3",
     "tomli-w>=1.2",
+    "pynwb>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,7 @@ explicit = true
 [dependency-groups]
 dev = [
     "mypy>=1.16.1",
+    "nwbinspector>=0.7.2",
     "pytest>=8.3.5",
     "pytest-plt>=1.1.1",
     "scipy-stubs>=1.15.3.0",

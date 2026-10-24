@@ -45,6 +45,18 @@ class ProbeConfig(BaseModel):
     notes: str = ""
 
 
+class SubjectConfig(BaseModel):
+    """Subject metadata for the NWB file (NWB ``Subject``; DANDI requires species and sex)."""
+
+    species: str | None = Field(default=None, description="Latin binomial, e.g. Mus musculus")
+    sex: str | None = Field(default=None, description="M, F, U or O")
+    age: str | None = Field(default=None, description="ISO 8601 duration, e.g. P90D")
+    date_of_birth: str | None = Field(default=None, description="ISO 8601 date")
+    strain: str | None = None
+    genotype: str | None = None
+    description: str = ""
+
+
 class AuxChannelMap(BaseModel):
     """Roles of the auxiliary (NIDQ) channels.
 
@@ -74,7 +86,10 @@ class SessionConfig(BaseModel):
     subject_id: str
     input_format: str | None = None
     experimenter: list[str] = Field(default_factory=list)
+    lab: str | None = None
+    institution: str | None = None
     description: str = ""
+    subject: SubjectConfig = Field(default_factory=SubjectConfig)
     runs: list[RunConfig] = Field(default_factory=list)
     probes: dict[str, ProbeConfig] = Field(default_factory=dict)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
