@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MAT v5/v7.3 reader that preserves struct field order (`ephyscon.matfile`)
 - **Clock sync** between probes and the aux stream from the sync edges (`ephyscon.sync`), **photodiode trial times** in the stimstage plugin, **running speed** from the wheel encoder (`ephyscon.auxsignals`), combined per run by `ephyscon.timing.extract_run_timing` and shown by `ephyscon inspect --timing`
 - **Sync edge cache**: `ephyscon sync` extracts the sync edges of all streams once (probes read in parallel) into `<session>/ephyscon/sync/`; timing reuses them. `EdgeAccumulator` lets later AP passes (sorting) collect the edges on the way
+- **Spike sorting** (`ephyscon.sorting`, `ephyscon sort`): Kilosort4 per probe over the concatenated runs (channels selected by `insertion_depth_um`, minus `bad_channels`), from a local binary copy; SortingAnalyzer with waveforms, unit locations and quality metrics; spikes cut back into runs on the reference clock (`spikes/<run>_<probe>.npz`). Kilosort4 and CUDA PyTorch are in the optional `sorting` extra (`uv sync --extra sorting`)
+- **Resumable Kilosort4** (`ephyscon.kilosort_checkpoints`): checkpoints after drift correction, spike detection and template matching, so `ephyscon sort` resumes an interrupted run; Kilosort's spike arrays are allocated at the expected size instead of doubling
+- **LFP** (`ephyscon.lfp`, `ephyscon lfp`): per run and probe at 1 kHz with an anti-alias filter (polyphase resampling of the NP1 LF band, or of AP for NP2)
+- `ephyscon timing` writes the trial tables and running speed of every run; all session outputs share one work dir (`sync/`, `trials/`, `running_speed/`, `lfp/`, `sorting/`, `spikes/`)
 - Small real SpikeGLX test dataset (`tests/data/SOMxCD1_172_20250109_crop`, 5 s) with MATLAB reference output, and the crop tool `tools/make_spikeglx_test_dataset.py`
 
 - **GUI** (`ephyscon-gui`, formerly `oecon-gui`): new PySide6 application for converting Open Ephys sessions, with groupboxes for Input, Output, Config, Progress, and Log

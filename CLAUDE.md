@@ -30,6 +30,11 @@ uv run ephyscon inspect <session_path> --conditions
 uv run ephyscon sync <session_path>
 uv run ephyscon inspect <session_path> --timing
 
+# Full preprocessing into a work dir (default <session>/ephyscon); sorting needs `uv sync --extra sorting` and a CUDA GPU
+uv run ephyscon timing <session_path> --work-dir <dir>
+uv run ephyscon lfp <session_path> --work-dir <dir>
+uv run ephyscon sort <session_path> --work-dir <dir> --scratch-dir <fast local disk>
+
 # Type checking (oecon-era modules have known errors; new modules are clean)
 uv run mypy src/
 ```
@@ -86,9 +91,10 @@ This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline
 - `io/` — `InputFormat` readers (`spikeglx.py`, `openephys.py`) registered under the `ephyscon.input_formats` entry point group. They return lazy spikeinterface recordings, and discovery parses metadata only.
 - `stimulus/` — `StimulusSystem` plugins (`ephyscon.stimulus_systems`). `stimstage.py` ports the lab's MATLAB `getStimFromIndex.m`, whose conditions are enumerated column-major (MATLAB `ind2sub`), so the field order of `params` matters.
 - `sync.py` — sync edges → `ClockMap` per stream onto the reference probe's clock (`RunSync`). `auxsignals.py` — photodiode pulses, wheel speed, `AuxSignals` (role access via `AuxChannelMap`). `timing.py` — `extract_run_timing` (sync, trials of all paradigms, running speed). Formats provide `sync_source` (channel + bit) and `read_aux_*` on `InputFormat`. Sync edges are cached per run by `SyncEdgeCache` (default `<session>/ephyscon/sync/<run>.npz`, filled by `ephyscon sync`), because reading a probe's sync channel reads its whole AP file; code that reads AP data anyway should feed an `EdgeAccumulator` and `SyncEdgeCache.store` the result. Don't name a module `aux.py` (reserved on Windows).
+- `sorting.py` — Kilosort4 per probe over the concatenated runs (`concatenate_runs`, `sort_probe`), `cut_spikes` back into runs on the reference clock. Steps reuse existing outputs (local copy, sorter folder) so a crashed run can be resumed; inside Kilosort, `kilosort_checkpoints.py` checkpoints the long steps by temporarily replacing `datashift.run`, `spikedetect.run` and `template_matching.extract` (checked against Kilosort 4.1.7). `lfp.py` — per-run LFP at 1 kHz (spikeinterface polyphase `resample`).
 - `matfile.py` — MAT v5/v7.3 reader that keeps struct field order (`MATLAB_fields`)
 - `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files. This is unrelated to `config.py`, the Open Ephys → DH5 conversion config.
-- CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`)
+- CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`, `sync`, `timing`, `lfp`, `sort`)
 
 Entry points only change when the package is reinstalled (`uv sync`).
 

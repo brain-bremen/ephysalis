@@ -1,4 +1,4 @@
-"""Session-level commands: ``ephyscon inspect``, ``ephyscon init`` and ``ephyscon sync``."""
+"""Session-level commands: ``ephyscon inspect``, ``init``, ``sync``, ``timing``, ``sort`` and ``lfp``."""
 
 from __future__ import annotations
 
@@ -133,6 +133,95 @@ def _sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_value(text: str) -> object:
+    import json
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _sort(args: argparse.Namespace) -> int:
+    import tempfile
+
+    from ephyscon.sorting import sort_probe
+    from ephyscon.sync import synchronize_run
+    from ephyscon.timing import WORK_DIR_NAME, aux_channel_map
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    print(f"Config: {config_path or 'none (sorting all channels)'}")
+    cache = SyncEdgeCache(work_dir / "sync")
+    syncs = {}
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if run_config is None or run_config.include:
+            syncs[run.name] = synchronize_run(run, aux_channel_map(run, config), cache=cache)
+    params = dict(kv.split("=", 1) for kv in args.param or [])
+    scratch = Path(args.scratch_dir) if args.scratch_dir else Path(tempfile.gettempdir()) / "ephyscon"
+    for probe_id in args.probes or session.probe_ids:
+        runs = sort_probe(
+            session, probe_id, work_dir, scratch, config, syncs,
+            sorter_params={k: _parse_value(v) for k, v in params.items()},
+            n_jobs=args.n_jobs, keep_binary=args.keep_binary,
+        )
+        for run_name, spikes in runs.items():
+            print(f"{probe_id} {run_name}: {len(spikes)} spikes, {spikes.unit_id.nunique()} units")
+    print(f"Output: {work_dir}")
+    return 0
+
+
+def _load_config_for(session_path: Path, work_dir: Path, config: str | None) -> tuple[SessionConfig | None, Path | None]:
+    candidates = [Path(config)] if config else [session_path / SESSION_CONFIG_FILENAME, work_dir / SESSION_CONFIG_FILENAME]
+    path = next((p for p in candidates if p.exists() or config), None)
+    return (load_session_config(path) if path else None), path
+
+
+def _timing(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    from ephyscon.timing import WORK_DIR_NAME, extract_run_timing
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, _ = _load_config_for(session.path, work_dir, args.config)
+    cache = SyncEdgeCache(work_dir / "sync")
+    (work_dir / "trials").mkdir(parents=True, exist_ok=True)
+    (work_dir / "running_speed").mkdir(exist_ok=True)
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
+            continue
+        timing = extract_run_timing(run, config, cache)
+        for paradigm, trials in timing.trials.items():
+            trials.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
+            print(f"{run.name} {paradigm}: {len(trials)} trials")
+        if timing.running_speed is not None:
+            np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
+    print(f"Output: {work_dir}")
+    return 0
+
+
+def _lfp(args: argparse.Namespace) -> int:
+    from ephyscon.lfp import extract_lfp
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, _ = _load_config_for(session.path, work_dir, args.config)
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
+            continue
+        for probe_id in args.probes or list(run.probes):
+            lfp = extract_lfp(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
+            print(f"{run.name} {probe_id}: LFP {lfp.get_num_channels()} channels, {lfp.get_total_duration():.0f} s")
+    print(f"Output: {work_dir / 'lfp'}")
+    return 0
+
+
 def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("inspect", help="Show runs, probes, streams and paradigms of a session")
     p.add_argument("session", type=Path)
@@ -155,6 +244,44 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--cache-dir", help="Sync edge cache (default: <session>/ephyscon/sync)")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
     p.set_defaults(func=_sync)
+
+    p = sub.add_parser(
+        "sort",
+        help="Spike sort each probe over all included runs (Kilosort4) and cut the spikes into runs",
+    )
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder with sync/, sorting/, spikes/ (default: <session>/ephyscon)")
+    p.add_argument("--scratch-dir", help="Fast local folder for the concatenated binary (default: system temp)")
+    p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
+    p.add_argument("--param", nargs="+", metavar="KEY=VALUE", help="Kilosort4 parameters, e.g. batch_size=30000")
+    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs for copying and waveforms")
+    p.add_argument("--keep-binary", action="store_true", help="Keep the local binary copy (e.g. for Phy)")
+    p.set_defaults(func=_sort)
+
+    p = sub.add_parser(
+        "timing",
+        help="Write trial tables (reference clock) and running speed (1 kHz, cm/s) of every run",
+    )
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder with sync/, trials/, running_speed/ (default: <session>/ephyscon)")
+    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+    p.set_defaults(func=_timing)
+
+    p = sub.add_parser("lfp", help="Write the LFP of every run and probe, downsampled with an anti-alias filter")
+    p.add_argument("session", type=Path)
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder, LFP goes to <work-dir>/lfp (default: <session>/ephyscon)")
+    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+    p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
+    p.add_argument("--rate", type=float, default=1000.0, help="LFP sampling rate in Hz (default 1000)")
+    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
+    p.add_argument("--force", action="store_true", help="Overwrite existing LFP")
+    p.set_defaults(func=_lfp)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("session", type=Path)

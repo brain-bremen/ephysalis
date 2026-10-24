@@ -208,3 +208,14 @@ def test_cli_sync(tmp_path, capsys):
     assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path)]) == 0
     assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
     assert (tmp_path / f"{RUN}.npz").exists()
+
+
+def test_cli_timing_and_lfp(tmp_path, capsys):
+    from ephyscon.cli.main import main
+
+    assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
+    assert "RF: 23 trials" in capsys.readouterr().out
+    assert (tmp_path / "trials" / f"{RUN}_RF.csv").exists()
+    assert np.load(tmp_path / "running_speed" / f"{RUN}.npy").shape == (5000,)
+    assert main(["lfp", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path), "--n-jobs", "1"]) == 0
+    assert "imec1: LFP 8 channels, 5 s" in capsys.readouterr().out
