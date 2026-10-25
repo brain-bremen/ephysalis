@@ -166,6 +166,7 @@ class SpikeGLXFormat(InputFormat):
                 probe_id=probe_id,
                 part_number=meta.get("imDatPrb_pn"),
                 serial_number=meta.get("imDatPrb_sn"),
+                manufacturer="IMEC",
                 num_shanks=_num_shanks(meta),
                 num_channels=_num_neural_channels(meta),
                 has_lf=StreamKind.LF in kinds,

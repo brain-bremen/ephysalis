@@ -107,7 +107,7 @@ def probes_table(nwbfile: NWBFile) -> pd.DataFrame:
         rows.append({
             "probe_name": name,
             "type": "silicon-probe",
-            "manufacturer": model.manufacturer if model is not None else None,
+            "manufacturer": model.manufacturer if model is not None and model.manufacturer != "unknown" else None,
             "model": (model.model_number or model.name) if model is not None else None,
             "device_serial_number": device.serial_number,
             "associated_brain_region": None if group.location == "unknown" else group.location,
@@ -212,7 +212,7 @@ def ecephys_json(nwbfile: NWBFile, power_line_frequency: float | str) -> dict:
         "SamplingFrequency": sampling_frequency,
         "SoftwareFilters": filters,
         "InstitutionName": nwbfile.institution,
-        "Manufacturer": ", ".join(sorted({m.manufacturer for m in models if m.manufacturer})) or None,
+        "Manufacturer": ", ".join(sorted({m.manufacturer for m in models if m.manufacturer not in (None, "unknown")})) or None,
         "ManufacturersModelName": ", ".join(sorted({m.model_number or m.name for m in models})) or None,
         "DeviceSerialNumber": ", ".join(g.device.serial_number for g in nwbfile.electrode_groups.values()
                                         if g.device.serial_number) or None,

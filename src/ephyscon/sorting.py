@@ -7,9 +7,12 @@ Steps (:func:`sort_probe`):
    tip, minus ``bad_channels``) and concatenate the AP streams of all included runs.
 2. Write the concatenation to a local binary file once (the raw files are usually on a
    network share, and Kilosort reads the data several times).
-3. Run Kilosort4 through spikeinterface, with checkpoints after its long steps
-   (:mod:`ephyscon.kilosort_checkpoints`) so that an interrupted run resumes; then build a
-   SortingAnalyzer (waveforms, templates, unit locations, quality metrics) while the local copy still exists.
+3. Run the spike sorter (``[sorting]`` in ``session.toml``, default Kilosort4; any sorter of
+   ``spikeinterface.sorters``) on the local copy. Kilosort4 gets checkpoints after its long
+   steps (:mod:`ephyscon.kilosort_checkpoints`) so that an interrupted run resumes. Then build
+   a SortingAnalyzer (waveforms, templates, unit locations, quality metrics) on the band-pass
+   filtered local copy, while it still exists; the sorters filter internally, but wideband
+   streams (Neuropixels 2.0, most other probes) need the filter for the waveforms.
 4. Cut the spike trains into runs (:func:`cut_spikes`) and map them onto each run's
    reference clock, the clock of the trial times.
 
@@ -20,6 +23,7 @@ Neuropixels 1.0 bank 0.
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import json
 import logging
@@ -41,11 +45,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SORTER = "kilosort4"
-# Kilosort4 parameters that differ from its defaults
-DEFAULT_SORTER_PARAMS: dict[str, Any] = {
-    "clear_cache": True,  # lower GPU memory peaks (small GPUs)
+DEFAULT_SORTER = "kilosort4"
+# sorter parameters that differ from the sorters' defaults
+DEFAULT_SORTER_PARAMS: dict[str, dict[str, Any]] = {
+    "kilosort4": {"clear_cache": True},  # lower GPU memory peaks (small GPUs)
 }
+ANALYZER_BAND_HZ = (300.0, 6000.0)  # band-pass of the recording the waveforms are taken from
 ANALYZER_EXTENSIONS: dict[str, dict] = {
     "random_spikes": {"max_spikes_per_unit": 500},
     "noise_levels": {},
@@ -64,6 +69,34 @@ class RunSegment:
     run: str
     start_sample: int
     num_samples: int
+
+
+def sorter_settings(
+    config: SessionConfig | None, probe_id: str, sorter: str | None = None, params: dict[str, Any] | None = None
+) -> tuple[str, dict[str, Any]]:
+    """Sorter and parameters of a probe: ``sorter``/``params`` (command line) over the probe's
+    ``sorting`` over the session's ``[sorting]`` over the defaults."""
+    probe_config = config.probes.get(probe_id) if config else None
+    configured = (probe_config.sorting if probe_config and probe_config.sorting else None) or (
+        config.sorting if config else None
+    )
+    name = sorter or (configured.sorter if configured else DEFAULT_SORTER)
+    merged = dict(DEFAULT_SORTER_PARAMS.get(name, {}))
+    if configured is not None and configured.sorter == name:
+        merged.update(configured.params)
+    merged.update(params or {})
+    return name, merged
+
+
+def adapt_sorter_params(sorter: str, params: dict[str, Any], num_channels: int) -> dict[str, Any]:
+    """Limit channel neighbourhoods to the number of channels (probes with few channels)."""
+    params = dict(params)
+    if sorter == "kilosort4":
+        for key, default in (("nearest_chans", 10), ("nearest_templates", 100)):
+            if params.get(key, default) > num_channels:
+                logger.info("kilosort4: %s = %d (number of channels)", key, num_channels)
+                params[key] = num_channels
+    return params
 
 
 def sorting_channels(recording: BaseRecording, probe_config: ProbeConfig | None) -> np.ndarray:
@@ -129,12 +162,14 @@ def load_run_spikes(path: Path) -> pd.DataFrame:
 
 
 def unit_table(analyzer: Any) -> pd.DataFrame:
-    """One row per unit: Kilosort label, peak channel, location (um) and quality metrics."""
+    """One row per unit: the sorter's unit properties (e.g. Kilosort's ``KSLabel``), peak
+    channel, location (um) and quality metrics."""
     sorting = analyzer.sorting
     table = pd.DataFrame(index=pd.Index(sorting.unit_ids, name="unit_id"))
-    for prop in ["KSLabel", "ContamPct", "Amplitude"]:
-        if prop in sorting.get_property_keys():
-            table[prop] = sorting.get_property(prop)
+    for prop in sorting.get_property_keys():
+        values = sorting.get_property(prop)
+        if prop != "original_cluster_id" and values.ndim == 1:
+            table[prop] = values
     templates = analyzer.get_extension("templates").get_data(operator="average")
     peak = np.abs(templates).max(axis=1).argmax(axis=1)
     table["peak_channel"] = np.asarray(analyzer.channel_ids)[peak]
@@ -156,6 +191,7 @@ def sort_probe(
     sorter_params: dict[str, Any] | None = None,
     n_jobs: int = 4,
     keep_binary: bool = False,
+    sorter: str | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Sort one probe over all included runs; writes ``<work_dir>/sorting/<probe>/`` and the
     per-run spike tables ``<work_dir>/spikes/<run>_<probe>.npz``.
@@ -163,7 +199,8 @@ def sort_probe(
     ``scratch_dir`` holds the local binary copy (size: channels x samples x 2 bytes), deleted
     afterwards unless ``keep_binary``, and the Kilosort checkpoints (a few GB), deleted once
     Kilosort has finished. ``syncs`` maps run names to their
-    :class:`RunSync`, needed to put spike times on the reference clock.
+    :class:`RunSync`, needed to put spike times on the reference clock. ``sorter`` and
+    ``sorter_params`` override the sorter of ``config`` (see :func:`sorter_settings`).
     """
     import spikeinterface.core as si
     from spikeinterface.sorters import run_sorter
@@ -174,20 +211,24 @@ def sort_probe(
     ]
     probe_config = config.probes.get(probe_id) if config else None
     recording, segments = concatenate_runs(session, probe_id, run_names, probe_config)
+    sorter, params = sorter_settings(config, probe_id, sorter, sorter_params)
+    params = adapt_sorter_params(sorter, params, recording.get_num_channels())
     out = work_dir / "sorting" / probe_id
     out.mkdir(parents=True, exist_ok=True)
     (out / "segments.json").write_text(json.dumps({
         "runs": [asdict(s) for s in segments],
         "channel_ids": [str(c) for c in recording.channel_ids],
         "sampling_frequency": recording.sampling_frequency,
-    }, indent=2), encoding="utf-8")
+        "sorter": sorter,
+        "sorter_params": params,
+    }, indent=2, default=str), encoding="utf-8")
     logger.info(
         "%s: %d runs, %d channels, %.0f s", probe_id, len(segments), recording.get_num_channels(),
         recording.get_total_duration(),
     )
 
     binary_dir = scratch_dir / f"{session.name}_{probe_id}"
-    checkpoint_dir = scratch_dir / f"{session.name}_{probe_id}_{SORTER}_checkpoints"
+    checkpoint_dir = scratch_dir / f"{session.name}_{probe_id}_{sorter}_checkpoints"
     job = {"n_jobs": n_jobs, "chunk_duration": "1s", "progress_bar": True}
     if (binary_dir / "binary.json").exists() or (binary_dir / "si_folder.json").exists():
         local = si.load(binary_dir)
@@ -196,8 +237,7 @@ def sort_probe(
         logger.info("%s: writing local copy to %s", probe_id, binary_dir)
         local = recording.save(folder=binary_dir, format="binary", dtype="int16", overwrite=True, **job)
 
-    sorter_dir = out / SORTER
-    params = {**DEFAULT_SORTER_PARAMS, **(sorter_params or {})}
+    sorter_dir = out / sorter
     if (sorter_dir / "spikeinterface_log.json").exists() and json.loads(
         (sorter_dir / "spikeinterface_log.json").read_text(encoding="utf-8")
     ).get("error") is False:
@@ -206,17 +246,24 @@ def sort_probe(
         sorting = read_sorter_folder(sorter_dir)
         logger.info("%s: reusing sorting in %s", probe_id, sorter_dir)
     else:
-        from ephyscon.kilosort_checkpoints import checkpoints
+        logger.info("%s: running %s with %s", probe_id, sorter, params)
+        if sorter == "kilosort4":
+            from ephyscon.kilosort_checkpoints import checkpoints
 
-        logger.info("%s: running %s with %s", probe_id, SORTER, params)
-        with checkpoints(checkpoint_dir):
-            sorting = run_sorter(SORTER, local, folder=sorter_dir, remove_existing_folder=True, verbose=True, **params)
+            resumable: Any = checkpoints(checkpoint_dir)
+        else:
+            resumable = contextlib.nullcontext()
+        with resumable:
+            sorting = run_sorter(sorter, local, folder=sorter_dir, remove_existing_folder=True, verbose=True, **params)
         shutil.rmtree(checkpoint_dir, ignore_errors=True)
     sorting = sorting.remove_empty_units()
 
+    from spikeinterface.preprocessing import bandpass_filter
+
     analyzer_dir = out / "analyzer"
+    filtered = bandpass_filter(local, freq_min=ANALYZER_BAND_HZ[0], freq_max=ANALYZER_BAND_HZ[1])
     analyzer = si.create_sorting_analyzer(
-        sorting, local, format="binary_folder", folder=analyzer_dir, sparse=True, overwrite=True, job_kwargs=job
+        sorting, filtered, format="binary_folder", folder=analyzer_dir, sparse=True, overwrite=True, job_kwargs=job
     )
     for name, kwargs in ANALYZER_EXTENSIONS.items():
         analyzer.compute(name, **kwargs, **(job if name in ("noise_levels", "waveforms") else {}))
@@ -234,7 +281,7 @@ def sort_probe(
     )
     if not keep_binary:
         # the recording, sorting and analyzer memory-map the binary; Windows can't delete it before they're gone
-        del local, analyzer, sorting
+        del local, filtered, analyzer, sorting
         gc.collect()
         shutil.rmtree(binary_dir, ignore_errors=True)
         if binary_dir.exists():

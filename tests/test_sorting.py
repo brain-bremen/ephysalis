@@ -60,3 +60,26 @@ def test_run_spikes_roundtrip(tmp_path):
     table = pd.DataFrame({"time": [0.1, 0.2], "sample": [3000, 6000], "unit_id": [1, 2]})
     save_run_spikes(tmp_path / "x.npz", table)
     pd.testing.assert_frame_equal(load_run_spikes(tmp_path / "x.npz"), table)
+
+
+def test_sorter_settings_precedence():
+    from ephyscon.session_config import SessionConfig, SortingConfig
+    from ephyscon.sorting import sorter_settings
+
+    assert sorter_settings(None, "p0") == ("kilosort4", {"clear_cache": True})
+    config = SessionConfig(session_id="s", subject_id="m", sorting=SortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
+    config.probes["p1"] = ProbeConfig(sorting=SortingConfig(sorter="mountainsort5", params={"detect_threshold": 6}))
+    assert sorter_settings(config, "p0") == ("kilosort4", {"clear_cache": True, "Th_universal": 8})
+    assert sorter_settings(config, "p1") == ("mountainsort5", {"detect_threshold": 6})
+    # command line over config; the configured parameters belong to the configured sorter
+    assert sorter_settings(config, "p1", "spykingcircus2", {"a": 1}) == ("spykingcircus2", {"a": 1})
+    assert sorter_settings(config, "p0", params={"Th_universal": 9})[1]["Th_universal"] == 9
+
+
+def test_kilosort_neighbourhoods_limited_to_channel_count():
+    from ephyscon.sorting import adapt_sorter_params
+
+    assert adapt_sorter_params("kilosort4", {}, 8) == {"nearest_chans": 8, "nearest_templates": 8}
+    assert adapt_sorter_params("kilosort4", {"nearest_chans": 4}, 32) == {"nearest_chans": 4, "nearest_templates": 32}
+    assert adapt_sorter_params("kilosort4", {}, 384) == {}
+    assert adapt_sorter_params("mountainsort5", {}, 4) == {}

@@ -173,7 +173,7 @@ def _sort(args: argparse.Namespace) -> int:
         runs = sort_probe(
             session, probe_id, work_dir, scratch, config, syncs,
             sorter_params={k: _parse_value(v) for k, v in params.items()},
-            n_jobs=args.n_jobs, keep_binary=args.keep_binary,
+            n_jobs=args.n_jobs, keep_binary=args.keep_binary, sorter=args.sorter,
         )
         for run_name, spikes in runs.items():
             print(f"{probe_id} {run_name}: {len(spikes)} spikes, {spikes.unit_id.nunique()} units")
@@ -297,7 +297,8 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser(
         "sort",
-        help="Spike sort each probe over all included runs (Kilosort4) and cut the spikes into runs",
+        help="Spike sort each probe over all included runs ([sorting] in session.toml, default Kilosort4) "
+        "and cut the spikes into runs",
     )
     p.add_argument("session", type=Path)
     p.add_argument("--format", help="Input format (default: auto-detect)")
@@ -305,7 +306,8 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--work-dir", help="Output folder with sync/, sorting/, spikes/ (default: <session>/ephyscon)")
     p.add_argument("--scratch-dir", help="Fast local folder for the concatenated binary (default: system temp)")
     p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
-    p.add_argument("--param", nargs="+", metavar="KEY=VALUE", help="Kilosort4 parameters, e.g. batch_size=30000")
+    p.add_argument("--sorter", help="spikeinterface sorter, e.g. kilosort4, mountainsort5 (default: session.toml)")
+    p.add_argument("--param", nargs="+", metavar="KEY=VALUE", help="Sorter parameters, e.g. batch_size=30000")
     p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs for copying and waveforms")
     p.add_argument("--keep-binary", action="store_true", help="Keep the local binary copy (e.g. for Phy)")
     p.set_defaults(func=_sort)

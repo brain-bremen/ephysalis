@@ -34,6 +34,7 @@ class ProbeInfo:
     model_name: str | None = None  # e.g. "Neuropixels 1.0 probe with cap"
     part_number: str | None = None  # e.g. "PRB_1_4_0480_1_C"
     serial_number: str | None = None
+    manufacturer: str | None = None  # e.g. "IMEC"
     num_shanks: int = 1
     num_channels: int = 0
     has_lf: bool = False

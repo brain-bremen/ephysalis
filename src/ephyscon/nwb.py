@@ -55,7 +55,7 @@ RUNNING_SPEED_BIN_S = 0.001  # running speed sample k is the mean over (k, k+1] 
 
 UNIT_COLUMN_DESCRIPTIONS = {
     "probe": "probe id",
-    "unit_id": "unit id in the probe's Kilosort output",
+    "unit_id": "unit id in the probe's spike sorter output",
     "KSLabel": "Kilosort label: good (refractory period respected) or mua",
     "ContamPct": "Kilosort contamination estimate (%)",
     "Amplitude": "Kilosort template amplitude",
@@ -101,6 +101,15 @@ def run_offsets(runs: list[Run]) -> dict[str, float]:
         if offsets[a.name] + (a.duration_s or 0.0) > offsets[b.name]:
             logger.warning("runs %s and %s overlap on the session time axis", a.name, b.name)
     return offsets
+
+
+def sorting_info(work_dir: Path, probe_id: str) -> dict:
+    """``sorting/<probe>/segments.json``: runs, channels, sorter and its parameters (sortings
+    before the sorter was recorded there are Kilosort4)."""
+    import json
+
+    path = work_dir / "sorting" / probe_id / "segments.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def _paradigm(csv: Path, run_name: str) -> str:
@@ -165,13 +174,13 @@ def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config:
         run = next(r for r in runs if probe_id in r.probes)
         info = run.probes[probe_id]
         probe_config = config.probes.get(probe_id) if config else None
-        model_name = info.part_number or info.model_name or "Neuropixels"
+        model_name = info.part_number or info.model_name or "unknown probe"
         model = nwbfile.device_models.get(model_name) or nwbfile.create_device_model(
-            name=model_name, manufacturer="IMEC", model_number=info.part_number,
-            description=info.model_name or f"Neuropixels probe, part number {info.part_number or 'unknown'}",
+            name=model_name, manufacturer=info.manufacturer or "unknown", model_number=info.part_number,
+            description=info.model_name or f"probe, part number {info.part_number or 'unknown'}",
         )
         device = nwbfile.create_device(
-            name=probe_id, description=f"{info.model_name or 'Neuropixels'} ({model_name})",
+            name=probe_id, description=f"{info.model_name or 'probe'} ({model_name})",
             serial_number=info.serial_number, model=model,
         )
         location = probe_config.area if probe_config and probe_config.area else "unknown"
@@ -213,13 +222,15 @@ def _add_units(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[
     probes = [p for p in channel_index if (work_dir / "sorting" / p / "units.csv").exists()]
     if not probes:
         return
-    tables, waveforms, fs = {}, {}, None
+    tables, waveforms, fs, sorters = {}, {}, None, set()
     for probe_id in probes:
         tables[probe_id] = pd.read_csv(work_dir / "sorting" / probe_id / "units.csv")
+        sorters.add(sorting_info(work_dir, probe_id).get("sorter", "kilosort4"))
         waveforms[probe_id], rate = _peak_waveforms(work_dir / "sorting" / probe_id / "analyzer", tables[probe_id])
         fs = fs or rate
     nwbfile.units = Units(
-        name="units", description="Kilosort4 units (uncurated), all probes; spike times on the session time axis",
+        name="units", description=f"{', '.join(sorted(sorters))} units (uncurated), all probes; spike times on the "
+        "session time axis",
         electrode_table=nwbfile.electrodes, waveform_rate=fs, waveform_unit="volts",
         resolution=1 / fs if fs else -1.0,
     )

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import tomli_w
 from pydantic import BaseModel, Field
@@ -30,6 +31,17 @@ class RunConfig(BaseModel):
     notes: str = ""
 
 
+class SortingConfig(BaseModel):
+    """Spike sorter and its parameters (any sorter of ``spikeinterface.sorters``)."""
+
+    sorter: str = Field(
+        default="kilosort4", description="spikeinterface sorter name, e.g. kilosort4, mountainsort5, spykingcircus2"
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="Sorter parameters that differ from the sorter's (and ephyscon's) defaults"
+    )
+
+
 class ProbeConfig(BaseModel):
     area: str | None = Field(default=None, description="Target brain area, e.g. V1")
     insertion_depth_um: float | None = Field(
@@ -42,6 +54,9 @@ class ProbeConfig(BaseModel):
         default_factory=list, description="0-based channel indices excluded from sorting"
     )
     serial_number: str | None = None
+    sorting: SortingConfig | None = Field(
+        default=None, description="Sorter for this probe, instead of the session's [sorting]"
+    )
     notes: str = ""
 
 
@@ -92,6 +107,7 @@ class SessionConfig(BaseModel):
     subject: SubjectConfig = Field(default_factory=SubjectConfig)
     runs: list[RunConfig] = Field(default_factory=list)
     probes: dict[str, ProbeConfig] = Field(default_factory=dict)
+    sorting: SortingConfig = Field(default_factory=SortingConfig)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
     notes: str = ""
 
