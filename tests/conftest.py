@@ -23,6 +23,14 @@ skip_if_no_data = pytest.mark.skipif(
     reason="Real data not available",
 )
 
+# One recording in each Open Ephys format (Binary, NWB, legacy Open Ephys): tests/data of
+# https://github.com/open-ephys/open-ephys-python-tools (CI clones it)
+OE_TOOLS_DATA = Path(os.environ.get("OPEN_EPHYS_TOOLS_TEST_DATA", "")) if os.environ.get("OPEN_EPHYS_TOOLS_TEST_DATA") else None
+skip_if_no_oe_tools_data = pytest.mark.skipif(
+    OE_TOOLS_DATA is None or not OE_TOOLS_DATA.is_dir(),
+    reason="set OPEN_EPHYS_TOOLS_TEST_DATA to the tests/data folder of open-ephys-python-tools",
+)
+
 
 def _write_stream(run_dir: Path, run: str, stream: str, start: str, duration_s: float) -> None:
     template = (SPIKEGLX_TEMPLATES / f"template.{stream}.meta").read_text()

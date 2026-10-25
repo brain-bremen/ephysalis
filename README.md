@@ -1,7 +1,7 @@
 # ephyscon — Electrophysiology Converter
 
-Converts extracellular electrophysiology recordings (SpikeGLX/Neuropixels, Open Ephys with
-Neuropixels or other probes) into one [NWB](https://nwb.org) or
+Converts extracellular electrophysiology recordings (SpikeGLX/Neuropixels, Open Ephys in the
+Binary, NWB or legacy Open Ephys format, with Neuropixels or other probes) into one [NWB](https://nwb.org) or
 [DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) file per session, optionally in a
 [BIDS](https://bids.neuroimaging.io) dataset, with spike sorting via
 [spikeinterface](https://spikeinterface.readthedocs.io) (Kilosort4 by default).

@@ -21,6 +21,7 @@ dependencies = [
     "spikeinterface>=0.105.3",
     "tomli-w>=1.2",
     "pynwb>=3.0",
+    "open-ephys-python-tools>=1.0.1",
 ]
 
 [project.optional-dependencies]

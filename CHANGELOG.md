@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Renamed from oecon to ephyscon.** The package and console scripts are now `ephyscon`, `ephyscon-gui` and `ephyscon-inspect`. The `cli`/`gui` packages moved to `ephyscon.cli`/`ephyscon.gui`.
 - **One converter for all inputs and outputs.** The Open Ephys → DH5 converter of oecon (`ephyscon convert`, its JSON config and GUI tab) is replaced by the session pipeline, which reads SpikeGLX and Open Ephys and writes NWB or DH5 (optionally in a BIDS dataset). Its features are now pipeline parts: raw data (`export --raw`; DH5 CONT 1…, analog aux inputs at CONT 1601…, before CONT 1…), MUA (`ephyscon mua`, CONT 4001…), TTL and VStim network events (`timing` → `events/<run>.csv`, DH5 EV02 with the same codes, NWB `events` table), trials (VStim plugin)
+- **Open Ephys reader on open-ephys-python-tools**: reads all three formats of the Open Ephys GUI (Binary, NWB, legacy Open Ephys `.continuous`), instead of only Binary through neo. Stream names, gains, events and messages of Binary recordings are unchanged (checked on the VStim test session); Neuropixels probes still get their geometry from `settings.xml`
 - **Several sessions per command** (`ephyscon timing S1 S2 --work-dir D:/work/{session}`) and in the GUI (session list, "Apply to sessions…", steps for all sessions; a failing session does not stop the others)
 
 ### Added
