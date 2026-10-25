@@ -11,7 +11,11 @@ One session NWB file becomes::
                                               ..._channels.tsv   one row per LFP channel
                                               ..._events.tsv     runs and trials (session time axis)
 
-All sidecars are made from the NWB file, so they describe what is in it. The NWB files hold
+All sidecars are made from the NWB file, so they describe what is in it. A DH5 file
+(:func:`add_dh5_to_bids`) gets the same layout with ``_ecephys.dh5``, its sidecars made from
+the session metadata (:func:`ephyscon.nwb.session_metadata_nwbfile`) and the channels pointing
+to its CONT blocks. BIDS only allows NWB and NIX data files, so such a dataset is BIDS-like
+and the validator reports the ``.dh5`` files. The NWB files hold
 LFP and sorted units, not the raw AP data; the dataset is still a raw dataset (``DatasetType =
 "raw"``, ``GeneratedBy`` ephyscon), as in the BEP032 examples, because the derivative rules
 of the BIDS schema are written for images (they require ``SpatialReference`` for every file).
@@ -58,9 +62,9 @@ def bids_labels(subject_id: str, session_id: str) -> tuple[str, str]:
     return bids_label(subject_id), bids_label(session)
 
 
-def ecephys_path(root: Path, subject: str, session: str) -> Path:
-    """Path of the session's NWB file in the BIDS dataset at ``root``."""
-    return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"sub-{subject}_ses-{session}_ecephys.nwb"
+def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb") -> Path:
+    """Path of the session's data file in the BIDS dataset at ``root``."""
+    return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"sub-{subject}_ses-{session}_ecephys{extension}"
 
 
 def _na(value: Any) -> Any:
@@ -132,16 +136,21 @@ def electrodes_table(nwbfile: NWBFile) -> pd.DataFrame:
     return table.reset_index(drop=True)
 
 
-def channels_table(nwbfile: NWBFile) -> pd.DataFrame:
-    """One row per electrode that has LFP; ``stream_id`` lists its series in all runs."""
-    electrodes = nwbfile.electrodes.to_dataframe()
-    names = _electrode_names(electrodes).to_numpy()
-    streams: dict[int, list[str]] = {}
-    rates: dict[int, float] = {}
+def lfp_streams(nwbfile: NWBFile) -> dict[int, tuple[list[str], float]]:
+    """``{electrode row: (paths of its LFP series in all runs, rate)}`` of an NWB file."""
+    streams: dict[int, tuple[list[str], float]] = {}
     for series in _lfp_series(nwbfile):
         for row in series.electrodes.data[:]:
-            streams.setdefault(int(row), []).append(f"processing/ecephys/LFP/{series.name}")
-            rates.setdefault(int(row), float(series.rate))
+            streams.setdefault(int(row), ([], float(series.rate)))[0].append(f"processing/ecephys/LFP/{series.name}")
+    return streams
+
+
+def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]] | None = None) -> pd.DataFrame:
+    """One row per electrode that has LFP; ``stream_id`` lists where its data are (default: the
+    NWB file's LFP series, see :func:`lfp_streams`)."""
+    electrodes = nwbfile.electrodes.to_dataframe()
+    names = _electrode_names(electrodes).to_numpy()
+    streams = lfp_streams(nwbfile) if streams is None else streams
     rows = []
     for row in sorted(streams):
         rows.append({
@@ -149,8 +158,8 @@ def channels_table(nwbfile: NWBFile) -> pd.DataFrame:
             "electrode_name": names[row],
             "type": "LFP",
             "units": "V",
-            "sampling_frequency": round(rates[row]),
-            "stream_id": ",".join(streams[row]),
+            "sampling_frequency": round(streams[row][1]),
+            "stream_id": ",".join(streams[row][0]),
             "status": "bad" if bool(electrodes.bad_channel.iloc[row]) else "good",
         })
     columns = ["name", "electrode_name", "type", "units", "sampling_frequency", "stream_id", "status"]
@@ -197,13 +206,17 @@ def events_json(nwbfile: NWBFile, table: pd.DataFrame) -> dict:
     return {k: v for k, v in columns.items() if k in table}
 
 
-def ecephys_json(nwbfile: NWBFile, power_line_frequency: float | str) -> dict:
-    lfp = _lfp_series(nwbfile)
+def ecephys_json(nwbfile: NWBFile, power_line_frequency: float | str,
+                 lfp: tuple[float, str] | None = None) -> dict:
+    """``lfp`` = (rate, filter description) of the LFP (default: from the NWB file's LFP)."""
+    series = _lfp_series(nwbfile)
+    if lfp is None and series:
+        lfp = (float(series[0].rate), series[0].filtering)
     models = [g.device.model for g in nwbfile.electrode_groups.values() if g.device.model is not None]
     epochs = nwbfile.epochs.to_dataframe() if nwbfile.epochs is not None else pd.DataFrame()
     if lfp:
-        sampling_frequency: float | str = round(float(lfp[0].rate))
-        filters: Any = {"LFP": {"Description": lfp[0].filtering}}
+        sampling_frequency: float | str = round(lfp[0])
+        filters: Any = {"LFP": {"Description": lfp[1]}}
     else:
         resolution = nwbfile.units.resolution if nwbfile.units is not None else -1.0
         sampling_frequency, filters = (round(1 / resolution) if resolution > 0 else NA), NA
@@ -275,29 +288,38 @@ def write_bids_sidecars(nwb_path: Path, root: Path, subject: str, session: str,
     """Write the sidecar files of the NWB file at ``nwb_path`` and update the dataset-level files."""
     from pynwb import NWBHDF5IO
 
+    with NWBHDF5IO(str(nwb_path), "r") as io:
+        write_sidecars(io.read(), nwb_path, root, subject, session, power_line_frequency, dataset_name)
+
+
+def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, session: str,
+                   power_line_frequency: float | str = 50.0, dataset_name: str | None = None,
+                   streams: dict[int, tuple[list[str], float]] | None = None,
+                   lfp: tuple[float, str] | None = None) -> None:
+    """Write the sidecars of the data file at ``data_path``, described by ``nwbfile``;
+    ``streams`` and ``lfp`` describe the LFP when it is not in ``nwbfile`` (see
+    :func:`channels_table`, :func:`ecephys_json`)."""
     root.mkdir(parents=True, exist_ok=True)
     _write_dataset_files(root, dataset_name)
-    prefix = nwb_path.parent / nwb_path.name.removesuffix("_ecephys.nwb")
-    with NWBHDF5IO(str(nwb_path), "r") as io:
-        nwbfile = io.read()
-        _write_json(ecephys_json(nwbfile, power_line_frequency), Path(f"{prefix}_ecephys.json"))
-        _write_tsv(probes_table(nwbfile), Path(f"{prefix}_probes.tsv"))
-        _write_tsv(electrodes_table(nwbfile), Path(f"{prefix}_electrodes.tsv"))
-        _write_json({
-            "channel_name": {"Description": "channel id in the AP stream of the recording"},
-            "in_brain": {"Description": "contact closer to the probe tip than the insertion depth"},
-            "bad_channel": {"Description": "excluded from spike sorting"},
-            "x": {"Units": "um"}, "y": {"Units": "um", "Description": "distance from the probe tip"},
-        }, Path(f"{prefix}_electrodes.json"))
-        _write_tsv(channels_table(nwbfile), Path(f"{prefix}_channels.tsv"))
-        events = events_table(nwbfile)
-        _write_tsv(events, Path(f"{prefix}_events.tsv"))
-        _write_json(events_json(nwbfile, events), Path(f"{prefix}_events.json"))
-        _upsert_tsv(root / "participants.tsv", _participant(nwbfile, subject), "participant_id")
-        _upsert_tsv(root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv",
-                    {"session_id": f"ses-{session}", "acq_time": nwbfile.session_start_time.isoformat()},
-                    "session_id")
-    logger.info("wrote the BIDS sidecars of %s", nwb_path)
+    prefix = data_path.parent / data_path.name[:data_path.name.rindex("_ecephys")]
+    _write_json(ecephys_json(nwbfile, power_line_frequency, lfp), Path(f"{prefix}_ecephys.json"))
+    _write_tsv(probes_table(nwbfile), Path(f"{prefix}_probes.tsv"))
+    _write_tsv(electrodes_table(nwbfile), Path(f"{prefix}_electrodes.tsv"))
+    _write_json({
+        "channel_name": {"Description": "channel id in the AP stream of the recording"},
+        "in_brain": {"Description": "contact closer to the probe tip than the insertion depth"},
+        "bad_channel": {"Description": "excluded from spike sorting"},
+        "x": {"Units": "um"}, "y": {"Units": "um", "Description": "distance from the probe tip"},
+    }, Path(f"{prefix}_electrodes.json"))
+    _write_tsv(channels_table(nwbfile, streams), Path(f"{prefix}_channels.tsv"))
+    events = events_table(nwbfile)
+    _write_tsv(events, Path(f"{prefix}_events.tsv"))
+    _write_json(events_json(nwbfile, events), Path(f"{prefix}_events.json"))
+    _upsert_tsv(root / "participants.tsv", _participant(nwbfile, subject), "participant_id")
+    _upsert_tsv(root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv",
+                {"session_id": f"ses-{session}", "acq_time": nwbfile.session_start_time.isoformat()},
+                "session_id")
+    logger.info("wrote the BIDS sidecars of %s", data_path)
 
 
 def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, **kwargs: Any) -> Path:
@@ -309,4 +331,42 @@ def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, **kw
         shutil.copyfile(nwb_path, tmp)
         tmp.replace(target)
     write_bids_sidecars(target, root, subject, session, **kwargs)
+    return target
+
+
+def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, subject: str, session_label: str,
+                    config: Any = None, **kwargs: Any) -> Path:
+    """Copy a session DH5 file (:mod:`ephyscon.dh5`) into a BIDS-like dataset at ``root``
+    (``_ecephys.dh5``, with its ``_trials.csv``/``_units.csv``) and write its sidecars."""
+    import h5py
+
+    from ephyscon.dh5 import sidecar_paths
+    from ephyscon.nwb import session_metadata_nwbfile
+
+    target = ecephys_path(root, subject, session_label, ".dh5")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if dh5_path.resolve() != target.resolve():
+        tmp = target.with_name(target.stem + ".partial.dh5")
+        shutil.copyfile(dh5_path, tmp)
+        tmp.replace(target)
+        for kind, source in sidecar_paths(dh5_path).items():
+            if source.exists():
+                shutil.copyfile(source, sidecar_paths(target)[kind])
+    streams: dict[int, tuple[list[str], float]] = {}
+    lfp = None
+    with h5py.File(target, "r") as file:
+        for name, group in file.items():
+            if name.startswith("CONT") and group.attrs.get("SignalType") == "LFP":
+                row = int(group.attrs["Channels"]["GlobalChanNumber"][0])
+                rate = 1e9 / float(group.attrs["SamplePeriod"])
+                streams[row] = ([name], rate)
+                lfp = (rate, "polyphase resampling to 1 kHz (spikeinterface resample)")
+    nwbfile = session_metadata_nwbfile(session, work_dir, config)
+    write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
+    ignore = root / ".bidsignore"
+    lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []
+    for pattern in ("*_ecephys_trials.csv", "*_ecephys_units.csv"):
+        if pattern not in lines:
+            lines.append(pattern)
+    ignore.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target

@@ -226,7 +226,7 @@ def _add_units(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[
     for probe_id in probes:
         tables[probe_id] = pd.read_csv(work_dir / "sorting" / probe_id / "units.csv")
         sorters.add(sorting_info(work_dir, probe_id).get("sorter", "kilosort4"))
-        waveforms[probe_id], rate = _peak_waveforms(work_dir / "sorting" / probe_id / "analyzer", tables[probe_id])
+        waveforms[probe_id], rate, _ = peak_waveforms(work_dir / "sorting" / probe_id / "analyzer", tables[probe_id])
         fs = fs or rate
     nwbfile.units = Units(
         name="units", description=f"{', '.join(sorted(sorters))} units (uncurated), all probes; spike times on the "
@@ -267,20 +267,22 @@ def _add_units(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[
             )
 
 
-def _peak_waveforms(analyzer_dir: Path, units: pd.DataFrame) -> tuple[np.ndarray | None, float | None]:
-    """Mean waveform of each unit on its peak channel (volts), in the order of ``units``."""
+def peak_waveforms(analyzer_dir: Path, units: pd.DataFrame) -> tuple[np.ndarray | None, float | None, int]:
+    """Mean waveform of each unit on its peak channel (volts), in the order of ``units``; with
+    the sampling rate and the number of samples before the peak."""
     if not analyzer_dir.exists():
-        return None, None
+        return None, None, 0
     import spikeinterface.core as si
 
     analyzer = si.load_sorting_analyzer(analyzer_dir, load_extensions=False)
-    templates = analyzer.load_extension("templates").get_data(operator="average")  # units x samples x channels, uV
+    extension = analyzer.load_extension("templates")
+    templates = extension.get_data(operator="average")  # units x samples x channels, uV
     unit_pos = {u: i for i, u in enumerate(analyzer.unit_ids)}
     channel_pos = {str(c): i for i, c in enumerate(analyzer.channel_ids)}
     waveforms = np.stack([
         templates[unit_pos[u], :, channel_pos[c]] for u, c in zip(units.unit_id, units.peak_channel)
     ]) * 1e-6
-    return waveforms, float(analyzer.sampling_frequency)
+    return waveforms, float(analyzer.sampling_frequency), int(extension.nbefore)
 
 
 def _add_lfp(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
@@ -344,6 +346,18 @@ def _add_running_speed(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offset
     if series:
         module = nwbfile.create_processing_module("behavior", "behavioural signals")
         module.add(BehavioralTimeSeries(time_series=series, name="RunningSpeed"))
+
+
+def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionConfig | None = None) -> NWBFile:
+    """In-memory NWBFile with the session metadata only: subject, devices, electrodes, epochs
+    and trials (no LFP or units); the source of the BIDS sidecars of other formats."""
+    runs = included_runs(session, config)
+    offsets = run_offsets(runs)
+    assert runs[0].start_time is not None  # checked by run_offsets
+    nwbfile = _new_nwbfile(session, config, runs[0].start_time - timedelta(seconds=SESSION_START_MARGIN_S))
+    _add_electrodes(nwbfile, session, runs, config)
+    _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
+    return nwbfile
 
 
 def write_session_nwb(

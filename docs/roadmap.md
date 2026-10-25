@@ -28,7 +28,7 @@ pipeline is still available as `ephyscon convert`.
 | 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
 | 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephyscon sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
 | 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | LFP done (`ephyscon lfp`); open: MUA |
-| 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB writer (`ephyscon nwb`) and BIDS ecephys layout (`ephyscon bids`) done; open: DH5 spikes/trials, raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
+| 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephyscon export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
 | 6 | CLI/GUI batch processing for SpikeGLX sessions, re-running single steps (`rerun_steps_plan.md`), provenance | |
 
 ## Legacy behaviour (phase 2)

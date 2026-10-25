@@ -1,4 +1,4 @@
-"""Session-level commands: ``ephyscon inspect``, ``init``, ``sync``, ``timing``, ``sort``, ``lfp``, ``nwb`` and ``bids``."""
+"""Session-level commands: ``ephyscon inspect``, ``init``, ``sync``, ``timing``, ``sort``, ``lfp`` and ``export``."""
 
 from __future__ import annotations
 
@@ -230,44 +230,45 @@ def _lfp(args: argparse.Namespace) -> int:
     return 0
 
 
-def _nwb(args: argparse.Namespace) -> int:
-    from ephyscon.nwb import write_session_nwb
+def _export(args: argparse.Namespace) -> int:
+    """NWB or DH5 file of a session, optionally in a BIDS (NWB) or BIDS-like (DH5) dataset."""
     from ephyscon.timing import WORK_DIR_NAME
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
     print(f"Config: {config_path or 'none'}")
-    output = Path(args.output) if args.output else work_dir / f"{session.name}.nwb"
-    syncs = _included_run_syncs(session, config, work_dir) if not args.no_lfp else {}
-    write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                      compression=None if args.no_compression else "gzip")
-    print(f"Output: {output}")
-    return 0
+    extension = f".{args.output_format}"
+    if args.bids:
+        from ephyscon.bids import bids_labels, ecephys_path
 
-
-def _bids(args: argparse.Namespace) -> int:
-    from ephyscon.bids import add_nwb_to_bids, bids_labels, ecephys_path, write_bids_sidecars
-    from ephyscon.nwb import write_session_nwb
-    from ephyscon.timing import WORK_DIR_NAME
-
-    session = open_session(args.session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
-    config, config_path = _load_config_for(session.path, work_dir, args.config)
-    print(f"Config: {config_path or 'none'}")
-    subject, session_label = bids_labels(
-        config.subject_id if config else session.name, config.session_id if config else session.name)
-    subject, session_label = args.subject or subject, args.session_label or session_label
-    root = Path(args.bids_root)
-    options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
-    if args.nwb:
-        output = add_nwb_to_bids(Path(args.nwb), root, subject, session_label, **options)
+        subject, session_label = bids_labels(
+            config.subject_id if config else session.name, config.session_id if config else session.name)
+        subject, session_label = args.subject or subject, args.session_label or session_label
+        output = ecephys_path(Path(args.bids), subject, session_label, extension)
     else:
-        output = ecephys_path(root, subject, session_label)
+        output = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
+    existing = Path(args.existing) if args.existing else None
+    if existing is None:
         syncs = _included_run_syncs(session, config, work_dir) if not args.no_lfp else {}
-        write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                          compression=None if args.no_compression else "gzip")
-        write_bids_sidecars(output, root, subject, session_label, **options)
+        if args.output_format == "nwb":
+            from ephyscon.nwb import write_session_nwb
+
+            write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                              compression=None if args.no_compression else "gzip")
+        else:
+            from ephyscon.dh5 import write_session_dh5
+
+            write_session_dh5(session, work_dir, output, config, syncs, lfp=not args.no_lfp)
+        existing = output
+    if args.bids:
+        from ephyscon.bids import add_dh5_to_bids, add_nwb_to_bids
+
+        options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
+        if args.output_format == "nwb":
+            add_nwb_to_bids(existing, Path(args.bids), subject, session_label, **options)
+        else:
+            add_dh5_to_bids(session, work_dir, existing, Path(args.bids), subject, session_label, config, **options)
     print(f"Output: {output}")
     return 0
 
@@ -335,30 +336,27 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--force", action="store_true", help="Overwrite existing LFP")
     p.set_defaults(func=_lfp)
 
-    p = sub.add_parser("nwb", help="Write one NWB file with all runs and probes from the outputs in the work dir")
+    p = sub.add_parser(
+        "export",
+        help="Write one NWB or DH5 file with all runs and probes from the outputs in the work dir, "
+        "optionally into a BIDS dataset",
+    )
     p.add_argument("session", type=Path)
+    p.add_argument("--output-format", choices=["nwb", "dh5"], default="nwb", help="File format (default nwb)")
+    p.add_argument("--bids", metavar="ROOT", help="Put the file into this BIDS dataset (BIDS-like for DH5: "
+                   "BIDS only allows NWB and NIX data files)")
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Folder with the outputs of timing, lfp and sort (default: <session>/ephyscon)")
-    p.add_argument("-o", "--output", help="NWB file (default: <work-dir>/<session>.nwb)")
-    p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
-    p.add_argument("--no-compression", action="store_true", help="Write the LFP without gzip compression")
-    p.set_defaults(func=_nwb)
-
-    p = sub.add_parser("bids", help="Write the session NWB file and its sidecars into a BIDS (ecephys) dataset")
-    p.add_argument("session", type=Path)
-    p.add_argument("bids_root", help="BIDS dataset folder (created if needed)")
-    p.add_argument("--format", help="Input format (default: auto-detect)")
-    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
-    p.add_argument("--work-dir", help="Folder with the outputs of timing, lfp and sort (default: <session>/ephyscon)")
-    p.add_argument("--nwb", help="Copy this existing session NWB file instead of writing a new one")
+    p.add_argument("-o", "--output", help="Output file without --bids (default: <work-dir>/<session>.<format>)")
+    p.add_argument("--existing", help="With --bids: copy this existing session file instead of writing a new one")
     p.add_argument("--subject", help="BIDS subject label (default: subject id without non-alphanumerics)")
     p.add_argument("--session-label", help="BIDS session label (default: session id without the subject prefix)")
     p.add_argument("--power-line-frequency", type=float, default=50.0, help="Mains frequency in Hz (default 50)")
     p.add_argument("--dataset-name", help="Name in dataset_description.json (default: folder name)")
     p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
-    p.add_argument("--no-compression", action="store_true", help="Write the LFP without gzip compression")
-    p.set_defaults(func=_bids)
+    p.add_argument("--no-compression", action="store_true", help="NWB: write the LFP without gzip compression")
+    p.set_defaults(func=_export)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("session", type=Path)
