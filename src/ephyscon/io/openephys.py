@@ -201,6 +201,41 @@ class OpenEphysFormat(InputFormat):
         line[previous:] = level
         return line
 
+    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+        if run.aux_stream is None:
+            raise KeyError(f"Run {run.name} has no auxiliary stream")
+        folder = self.stream_folder(run, run.aux_stream)
+        ttl = self._recording_folder(run) / "events" / folder.name / "TTL"
+        if not (ttl / "states.npy").exists():
+            return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "line": np.zeros(0, np.int64),
+                                 "state": np.zeros(0, np.int64)})
+        first_sample = int(np.load(folder / "sample_numbers.npy", mmap_mode="r")[0])
+        states = np.load(ttl / "states.npy").astype(np.int64)
+        events = pd.DataFrame({"aux_sample": np.load(ttl / "sample_numbers.npy").astype(np.int64) - first_sample,
+                               "line": np.abs(states), "state": (states > 0).astype(np.int64)})
+        return events.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True)
+
+    def read_network_events(self, run: Run) -> pd.DataFrame:
+        """Network Events words; the plugin sets the lines of a word one by one in the same
+        sample, so the last full word of each sample is the word that was sent."""
+        empty = super().read_network_events(run)
+        if run.aux_stream is None:
+            return empty
+        folders = sorted((self._recording_folder(run) / "events").glob("Network_Events*/TTL"))
+        if not folders or not (folders[0] / "full_words.npy").exists():
+            return empty
+        words = np.load(folders[0] / "full_words.npy").astype(np.int64)
+        samples = np.load(folders[0] / "sample_numbers.npy").astype(np.int64)
+        last = np.r_[samples[1:] != samples[:-1], True]
+        aux = self.stream_folder(run, run.aux_stream)
+        if folders[0].parent.name.split(".", 1)[-1] == aux.name.split(".", 1)[-1]:  # events of the aux stream
+            aux_samples = samples[last] - int(np.load(aux / "sample_numbers.npy", mmap_mode="r")[0])
+        else:
+            aux_times = np.load(aux / "timestamps.npy", mmap_mode="r")
+            aux_samples = np.searchsorted(aux_times, np.load(folders[0] / "timestamps.npy")[last])
+        events = pd.DataFrame({"aux_sample": aux_samples.astype(np.int64), "word": words[last]})
+        return events.sort_values("aux_sample", kind="stable", ignore_index=True)
+
     def read_messages(self, run: Run) -> pd.DataFrame:
         folder = self._recording_folder(run) / "events" / "MessageCenter"
         if not (folder / "text.npy").exists() or run.aux_stream is None:

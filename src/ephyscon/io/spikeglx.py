@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+import pandas as pd
 
 from ephyscon.io.base import InputFormat
 from ephyscon.session import ProbeInfo, Run, Session, StreamKind
@@ -239,6 +240,35 @@ class SpikeGLXFormat(InputFormat):
         recording = self.get_recording(run, StreamKind.AUX)
         word = recording.get_traces(channel_ids=[recording.channel_ids[self._digital_channel(run)]])[:, 0]
         return ((word.astype(np.int64) >> bit) & 1).astype(bool)
+
+    def aux_analog_recording(self, run: Run) -> BaseRecording:
+        recording = self.get_recording(run, StreamKind.AUX)
+        return recording.select_channels(recording.channel_ids[: run.extra["aux"]["n_analog"]])
+
+    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+        recording = self.get_recording(run, StreamKind.AUX)
+        channel = recording.channel_ids[self._digital_channel(run)]
+        n = recording.get_num_samples()
+        samples, lines, states = [], [], []
+        previous = None
+        for start in range(0, n, _DIGITAL_CHUNK):
+            word = recording.get_traces(start_frame=start, end_frame=min(n, start + _DIGITAL_CHUNK),
+                                        channel_ids=[channel])[:, 0].astype(np.int64) & 0xFFFF
+            full = np.r_[word[0] if previous is None else previous, word]
+            for bit in range(16):
+                level = (full >> bit) & 1
+                change = np.flatnonzero(level[1:] != level[:-1])
+                samples.append(start + change)
+                lines.append(np.full(change.size, bit + 1))
+                states.append(level[change + 1])
+            previous = word[-1]
+        events = pd.DataFrame({"aux_sample": np.concatenate(samples).astype(np.int64),
+                               "line": np.concatenate(lines).astype(np.int64),
+                               "state": np.concatenate(states).astype(np.int64)})
+        return events.sort_values(["aux_sample", "line"], ignore_index=True)
+
+
+_DIGITAL_CHUNK = 10_000_000  # samples of the digital word read at once
 
 
 @cache

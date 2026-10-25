@@ -15,6 +15,7 @@ STEPS = [
     ("sync", "Sync", "extract the sync edges of all streams once (reads the AP files)"),
     ("timing", "Timing", "trial times of all paradigms, running speed and eye position"),
     ("lfp", "LFP", "LFP of every run and probe at 1 kHz"),
+    ("mua", "MUA", "MUA envelope of every run and probe at 1 kHz (300 Hz high-pass, rectified)"),
     ("sort", "Spike sorting", "spike sorting per probe over all runs, cut back into runs"),
     ("export", "Export", "one NWB or DH5 file, optionally in a BIDS dataset"),
 ]
@@ -32,6 +33,7 @@ class PipelineOptions:
     output_format: str = "nwb"
     bids_root: Path | None = None
     export_lfp: bool = True
+    export_raw: bool = False
 
 
 def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
@@ -44,7 +46,7 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
         if step not in options.steps:
             continue
         args = [step, str(options.session), *common]
-        if step in ("lfp", "sort"):
+        if step in ("lfp", "mua", "sort"):
             args += ["--n-jobs", str(options.n_jobs)]
         if step == "sort":
             if options.scratch_dir is not None:
@@ -57,6 +59,8 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
                 args += ["--bids", str(options.bids_root)]
             if not options.export_lfp:
                 args.append("--no-lfp")
+            if options.export_raw:
+                args.append("--raw")
         commands.append((step, [sys.executable, "-u", "-m", "ephyscon.cli.main", *args]))
     return commands
 
@@ -76,9 +80,13 @@ def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]
         files = sorted((work_dir / kind).glob("*.npy"))
         if files:
             rows.append((kind, f"{unit} of {len(files)} runs"))
-    lfp = sorted(p for p in (work_dir / "lfp").glob("*") if (p / "binary.json").exists())
-    if lfp:
-        rows.append(("lfp", f"{len(lfp)} run × probe recordings"))
+    for kind in ("lfp", "mua"):
+        folders = sorted(p for p in (work_dir / kind).glob("*") if (p / "binary.json").exists())
+        if folders:
+            rows.append((kind, f"{len(folders)} run × probe recordings"))
+    events = sorted((work_dir / "events").glob("*.csv"))
+    if events:
+        rows.append(("events", f"{sum(len(pd.read_csv(p)) for p in events):,} events in {len(events)} runs"))
     for units_csv in sorted((work_dir / "sorting").glob("*/units.csv")):
         units = pd.read_csv(units_csv)
         good = f", {int((units.KSLabel == 'good').sum())} good" if "KSLabel" in units else ""

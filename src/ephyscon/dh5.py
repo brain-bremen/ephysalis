@@ -7,15 +7,21 @@ first run):
 =====================  =========================================================================
 DH5                    content
 =====================  =========================================================================
-``CONT2001``...        LFP, one block per channel (ids ``2001 +`` channel index over all probes,
-                       as ``ephyscon convert``); one INDEX region per run, or more if the probe's
-                       clock is off its nominal rate (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
+``CONT1``...           with ``raw``: raw AP (wideband) data, one block per channel (ids ``1 +``
+                       channel index over all probes)
+``CONT1601``...        with ``raw``: analog inputs of the aux stream
+``CONT2001``...        LFP, one block per channel (ids ``2001 +`` channel index over all probes)
+``CONT4001``...        MUA envelope (``ephyscon mua``), ids ``4001 +`` channel index
+                       All CONT blocks have one INDEX region per run, or more if the stream's
+                       clock is off the block's sample period (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
 ``CONT6001``           running speed (calibration: cm/s per bit)
 ``CONT6002``, ``6003``   eye position x, y (uncalibrated volts of the eye tracker outputs)
 ``SPIKE<n>``           one block per sorted unit, ``n = 10000 * probe index + unit id``;
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
 ``TRIALMAP``           trials of all runs (``StimNo`` = condition)
+``EV02``               events (``events/<run>.csv``): TTL edges ``+line`` / ``-line``, network
+                       events ``word + 1000``; the code names are attributes (:mod:`ephyscon.events`)
 ``Operations``         ``nnn_ephyscon_export`` with the processing record (JSON) in its
                        ``Processing`` attribute (:mod:`ephyscon.provenance`)
 =====================  =========================================================================
@@ -37,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from ephyscon.lfp import lfp_folder
+from ephyscon.mua import mua_folder
 from ephyscon.nwb import (
     RUNNING_SPEED_BIN_S,
     SESSION_START_MARGIN_S,
@@ -47,16 +54,22 @@ from ephyscon.nwb import (
 )
 from ephyscon.session import Run, Session, StreamKind
 from ephyscon.sorting import load_run_spikes
+from ephyscon.sync import AUX
 
 if TYPE_CHECKING:
     import h5py
+    from dhspec.cont import ContSignalType
+    from spikeinterface.core import BaseRecording
 
     from ephyscon.session_config import SessionConfig
     from ephyscon.sync import RunSync
 
 logger = logging.getLogger(__name__)
 
+RAW_FIRST_CONT_ID = 1
+ANALOG_FIRST_CONT_ID = 1601
 LFP_FIRST_CONT_ID = 2001
+MUA_FIRST_CONT_ID = 4001
 RUNNING_SPEED_CONT_ID = 6001
 EYE_CONT_IDS = (6002, 6003)
 SPIKE_IDS_PER_PROBE = 10000
@@ -88,61 +101,167 @@ def lfp_regions(start_s: float, rate: float, nominal_rate: float, num_samples: i
     return [(int(_ns(start_s + k / rate)), k) for k in range(0, num_samples, length)]
 
 
-def _lfp_timing(run: Run, probe_id: str, lfp_rate: float, offset: float, syncs: dict[str, RunSync]) -> tuple[float, float]:
-    """Start (s, session axis) and true rate of the LFP of a run on the reference clock."""
-    clock = syncs[run.name].maps[probe_id] if run.name in syncs else None
+def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[str, RunSync]) -> tuple[float, float]:
+    """Start (s, session axis) and true rate of a signal at nominal ``rate`` that is
+    sample-locked to stream ``key`` (a probe's AP stream, or ``AUX``) of a run."""
+    clock = syncs[run.name].maps.get(key) if run.name in syncs else None
     if clock is None:
-        return offset, lfp_rate
-    ap_rate = run.get_recording(StreamKind.AP, probe_id).sampling_frequency
-    return (offset + float(clock.to_reference_time(0.0)),
-            lfp_rate * clock.effective_sampling_frequency / ap_rate)
+        return offset, rate
+    stream_rate = (run.format.aux_sampling_frequency(run) if key == AUX
+                   else run.get_recording(StreamKind.AP, key).sampling_frequency)
+    return offset + float(clock.to_reference_time(0.0)), rate * clock.effective_sampling_frequency / stream_rate
 
 
-def _write_lfp(file: h5py.File, session: Session, work_dir: Path, runs: list[Run], offsets: dict[str, float],
-               syncs: dict[str, RunSync]) -> int:
+def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, float]], first_id: int,
+                       first_global: int, label: str, signal_type: ContSignalType | None, comment: str,
+                       to_int16: bool = False) -> int:
+    """One CONT block per channel of the recordings ``parts`` = ``[(recording, start s, true
+    rate)]`` (the runs, in order), ids ``first_id + channel``. int16 recordings are copied with
+    their gains as calibration; with ``to_int16`` (float µV, e.g. MUA) each channel is scaled to
+    the int16 range. Returns the number of blocks."""
     import dh5io.cont
-    import spikeinterface.core as si
-    from dhspec.cont import ContSignalType, create_empty_index_array
+    from dhspec.cont import create_empty_index_array
 
-    global_index, n_blocks = 0, 0
-    for probe_id in session.probe_ids:
-        parts = [(run, si.load(lfp_folder(work_dir, run.name, probe_id))) for run in runs
-                 if (lfp_folder(work_dir, run.name, probe_id) / "binary.json").exists()]
-        if not parts:
-            global_index += len(next(r for r in runs if probe_id in r.probes).get_recording(StreamKind.AP, probe_id).channel_ids)
-            continue
-        first = parts[0][1]
-        nominal = first.sampling_frequency
-        gains, channel_ids = first.get_channel_gains(), [str(c) for c in first.channel_ids]
-        regions, total = [], 0
-        for run, recording in parts:
-            start, rate = _lfp_timing(run, probe_id, nominal, offsets[run.name], syncs)
-            regions += [(t, total + k) for t, k in lfp_regions(start, rate, nominal, recording.get_num_samples())]
-            total += recording.get_num_samples()
-        index = create_empty_index_array(len(regions))
-        index["time"], index["offset"] = [r[0] for r in regions], [r[1] for r in regions]
-        groups = []
-        for channel, channel_id in enumerate(channel_ids):
-            group = dh5io.cont.create_empty_cont_group_in_file(
-                file, LFP_FIRST_CONT_ID + global_index + channel, nSamples=total, nChannels=1,
-                sample_period_ns=np.int32(round(1e9 / nominal)), n_index_items=len(regions),
-                calibration=np.array([gains[channel] * 1e-6]), channels=_channel_info(global_index + channel, channel),
-                name=f"{probe_id} {channel_id} LFP", signal_type=ContSignalType.LFP,
-                comment="LFP (spikeinterface resample); INDEX regions placed on the session time axis",
-            )
-            group["INDEX"][:] = index
-            groups.append(group["DATA"])
-        written = 0
-        for _, recording in parts:
+    first = parts[0][0]
+    period_ns = int(round(1e9 / first.sampling_frequency))
+    stored_rate = 1e9 / period_ns  # the rate a DH5 reader assumes; regions correct the rest
+    regions, total = [], 0
+    for recording, start, rate in parts:
+        regions += [(t, total + k) for t, k in lfp_regions(start, rate, stored_rate, recording.get_num_samples())]
+        total += recording.get_num_samples()
+    index = create_empty_index_array(len(regions))
+    index["time"], index["offset"] = [r[0] for r in regions], [r[1] for r in regions]
+    channel_ids = [str(c) for c in first.channel_ids]
+    if to_int16:
+        peak = np.zeros(len(channel_ids))
+        for recording, _, _ in parts:
             n = recording.get_num_samples()
-            for start in range(0, n, CHUNK_SAMPLES):
-                traces = recording.get_traces(start_frame=start, end_frame=min(n, start + CHUNK_SAMPLES), return_in_uV=False)
-                for channel, data in enumerate(groups):
-                    data[written + start: written + start + len(traces), 0] = traces[:, channel]
-            written += n
-        global_index += len(channel_ids)
-        n_blocks += len(channel_ids)
+            for begin in range(0, n, CHUNK_SAMPLES):
+                traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES))
+                peak = np.maximum(peak, np.nanmax(np.abs(traces), axis=0))
+        calibration = np.maximum(peak, 1e-3) * 1e-6 / 32000  # V per bit
+    else:
+        calibration = first.get_channel_gains() * 1e-6
+    groups = []
+    for channel, channel_id in enumerate(channel_ids):
+        group = dh5io.cont.create_empty_cont_group_in_file(
+            file, first_id + channel, nSamples=total, nChannels=1, sample_period_ns=np.int32(period_ns),
+            n_index_items=len(regions), calibration=np.array([calibration[channel]]),
+            channels=_channel_info(first_global + channel, channel), name=f"{label} {channel_id}",
+            signal_type=signal_type, comment=comment,
+        )
+        group["INDEX"][:] = index
+        groups.append(group["DATA"])
+    written = 0
+    for recording, _, _ in parts:
+        n = recording.get_num_samples()
+        for begin in range(0, n, CHUNK_SAMPLES):
+            traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES), return_in_uV=False)
+            if to_int16:
+                traces = np.round(np.nan_to_num(traces) * 1e-6 / calibration).astype(np.int16)
+            for channel, data in enumerate(groups):
+                data[written + begin: written + begin + len(traces), 0] = traces[:, channel]
+        written += n
+    return len(channel_ids)
+
+
+def _probe_channel_counts(session: Session, runs: list[Run]) -> dict[str, int]:
+    return {p: len(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)
+            for p in session.probe_ids}
+
+
+def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+                   syncs: dict[str, RunSync], kind: str) -> int:
+    """LFP (``kind="lfp"``) or MUA (``"mua"``) of all probes from the work dir."""
+    import spikeinterface.core as si
+    from dhspec.cont import ContSignalType
+
+    folder, first_id, signal_type, comment = {
+        "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, "LFP (spikeinterface resample)"),
+        "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA,
+                "MUA envelope (300 Hz high-pass, rectified, resampled)"),
+    }[kind]
+    global_index, n_blocks = 0, 0
+    for probe_id, n_channels in _probe_channel_counts(session, runs).items():
+        parts = []
+        for run in runs:
+            path = folder(work_dir, run.name, probe_id)
+            if (path / "binary.json").exists():
+                recording = si.load(path)
+                parts.append((recording, *stream_timing(run, probe_id, recording.sampling_frequency,
+                                                        offsets[run.name], syncs)))
+        if parts:
+            n_blocks += _write_cont_blocks(
+                file, parts, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
+                f"{comment}; INDEX regions placed on the session time axis", to_int16=kind == "mua")
+        global_index += n_channels
     return n_blocks
+
+
+def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict[str, float],
+               syncs: dict[str, RunSync]) -> int:
+    """Raw AP (wideband) data of all probes (CONT 1...) and the analog aux inputs (CONT 1601...)."""
+    from dhspec.cont import ContSignalType
+
+    counts = _probe_channel_counts(session, runs)
+    if sum(counts.values()) > ANALOG_FIRST_CONT_ID - RAW_FIRST_CONT_ID:
+        raise ValueError(f"{sum(counts.values())} probe channels do not fit the raw CONT ids")
+    global_index, n_blocks = 0, 0
+    for probe_id, n_channels in counts.items():
+        parts = []
+        for run in runs:
+            if probe_id in run.probes:
+                recording = run.get_recording(StreamKind.AP, probe_id)
+                parts.append((recording, *stream_timing(run, probe_id, recording.sampling_frequency,
+                                                        offsets[run.name], syncs)))
+        n_blocks += _write_cont_blocks(file, parts, RAW_FIRST_CONT_ID + global_index, global_index,
+                                       f"{probe_id} raw", None, "raw data of the AP (wideband) stream")
+        global_index += n_channels
+    parts = []
+    for run in runs:
+        if run.aux_stream is not None:
+            recording = run.format.aux_analog_recording(run)
+            parts.append((recording, *stream_timing(run, AUX, recording.sampling_frequency, offsets[run.name], syncs)))
+    if parts:
+        n_blocks += _write_cont_blocks(file, parts, ANALOG_FIRST_CONT_ID, -1, "aux", ContSignalType.ANALOG,
+                                       "analog input of the aux stream")
+    return n_blocks
+
+
+def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+                  config: SessionConfig | None) -> int:
+    """EV02 from ``events/<run>.csv``, with the names of the codes as attributes."""
+    import dh5io.event_triggers
+    from dhspec.event_triggers import EV_DATASET_NAME
+
+    from ephyscon.events import event_code_names, load_run_events
+    from ephyscon.session_config import EventsConfig
+
+    events_config = config.events if config is not None else EventsConfig()
+    times, codes, names = [], [], {}
+    network = False
+    for run in runs:
+        path = work_dir / "events" / f"{run.name}.csv"
+        if not path.exists():
+            continue
+        events = load_run_events(path)
+        times.append(_ns(events.time.to_numpy(float) + offsets[run.name]))
+        codes.append(events.code.to_numpy(np.int32))
+        ttl = events[(events.source == "ttl") & (events.name != "")]
+        for line, name in ttl.groupby("line").name.first().items():
+            names[f"{name}On"], names[f"{name}Off"] = int(line), -int(line)
+        network |= bool((events.source == "network").any())
+    if not times:
+        return 0
+    if network:
+        names.update(event_code_names(events_config.network_events_offset))
+    all_times, all_codes = np.concatenate(times), np.concatenate(codes)
+    order = np.argsort(all_times, kind="stable")
+    dh5io.event_triggers.add_event_triggers_to_file(file, timestamps_ns=all_times[order].astype(np.int64),
+                                                    event_codes=all_codes[order])
+    for name, code in names.items():
+        file[EV_DATASET_NAME].attrs[name] = np.int32(code)
+    return len(all_times)
 
 
 def _write_running_speed(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> bool:
@@ -275,13 +394,15 @@ def write_session_dh5(
     syncs: dict[str, RunSync] | None = None,
     lfp: bool = True,
     processing: dict | None = None,
+    raw: bool = False,
 ) -> Path:
     """Write the DH5 file of a session from the outputs in ``work_dir`` (see the module docs),
     plus ``<name>_trials.csv`` and ``<name>_units.csv`` next to it.
 
     ``syncs`` maps run names to their :class:`RunSync`; it places the LFP of probes other than
     the reference probe. Missing outputs (e.g. no sorting yet) are skipped. ``processing`` is
-    the processing record (:func:`ephyscon.provenance.processing_record`).
+    the processing record (:func:`ephyscon.provenance.processing_record`). ``raw`` adds the raw
+    data (large: about the size of the recording).
     """
     import dh5io.operations
     from dh5io.create import create_dh_file
@@ -300,7 +421,10 @@ def write_session_dh5(
     with create_dh_file(tmp, overwrite=True, boards=session.probe_ids) as dh5file:
         file = dh5file._file
         file.attrs["SessionStartTime"] = session_start.isoformat()
-        n_lfp = _write_lfp(file, session, work_dir, runs, offsets, syncs or {}) if lfp else 0
+        n_raw = _write_raw(file, session, runs, offsets, syncs or {}) if raw else 0
+        n_lfp = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "lfp") if lfp else 0
+        n_mua = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "mua")
+        n_events = _write_events(file, work_dir, runs, offsets, config)
         _write_running_speed(file, work_dir, runs, offsets)
         _write_eye_position(file, work_dir, runs, offsets)
         units = _write_spikes(file, session, work_dir, runs, offsets)
@@ -319,5 +443,6 @@ def write_session_dh5(
         trials.to_csv(sidecars["trials"], index=False)
     if not units.empty:
         units.to_csv(sidecars["units"], index=False)
-    logger.info("wrote %s (%d LFP blocks, %d units, %d trials)", path, n_lfp, len(units), len(trials))
+    logger.info("wrote %s (%d raw, %d LFP, %d MUA blocks, %d units, %d trials, %d events)", path, n_raw, n_lfp,
+                n_mua, len(units), len(trials), n_events)
     return path

@@ -91,9 +91,10 @@ def test_schema_migration(tmp_path):
     path = tmp_path / "session.toml"
     path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n')
     config = load_session_config(path)
-    assert config.schema_version == SCHEMA_VERSION == 2 and config.runs[0].name == "r"
+    assert config.schema_version == SCHEMA_VERSION == 3 and config.runs[0].name == "r"
+    assert config.events.exclude_roles == ["sync", "wheel"]
     save_session_config(config, path)
-    assert "schema_version = 2" in path.read_text()
+    assert "schema_version = 3" in path.read_text()
 
     migrations = {1: lambda d: {k: v for k, v in d.items() if k != "a"} | {"b": d["a"]}, 2: lambda d: {**d, "b": d["b"] * 2}}
     assert migrate({"schema_version": 1, "a": 3}, 3, migrations) == {"schema_version": 3, "b": 6}

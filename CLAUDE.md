@@ -13,15 +13,9 @@ uv sync
 # Run all tests
 uv run pytest
 
-# Run a single test file
-uv run pytest tests/test_decimation.py
-
-# Run a single test by name
-uv run pytest tests/test_decimation.py::TestDecimateNpArray::test_decimate_np_array_basic
-
-# Run the CLI tool
-uv run ephyscon convert <oe_session_path>
-uv run ephyscon convert <oe_session_path> --config config.json --output-folder /output/dir
+# Run a single test file / test
+uv run pytest tests/test_dh5.py
+uv run pytest tests/test_dh5.py::test_lfp_blocks
 
 # Inspect a (SpikeGLX or Open Ephys) session
 uv run ephyscon inspect <session_path> --conditions
@@ -30,64 +24,32 @@ uv run ephyscon inspect <session_path> --conditions
 uv run ephyscon sync <session_path>
 uv run ephyscon inspect <session_path> --timing
 
-# Full preprocessing into a work dir (default <session>/ephyscon); sorting needs `uv sync --extra sorting` and a CUDA GPU
-uv run ephyscon timing <session_path> --work-dir <dir>
+# Full preprocessing into a work dir (default <session>/ephyscon); sorting needs `uv sync --extra sorting` and a CUDA GPU.
+# Every step takes several sessions; per-session paths then need {session}, e.g. --work-dir D:/work/{session}
+uv run ephyscon timing <session_path> [<session_path> ...] --work-dir <dir>
 uv run ephyscon lfp <session_path> --work-dir <dir>
+uv run ephyscon mua <session_path> --work-dir <dir>
 uv run ephyscon sort <session_path> --work-dir <dir> --scratch-dir <fast local disk>
-uv run ephyscon export <session_path> --work-dir <dir> [--output-format nwb|dh5] [--bids <root>]   # one file from the outputs above
+uv run ephyscon export <session_path> --work-dir <dir> [--output-format nwb|dh5] [--raw] [--bids <root>]   # one file from the outputs above
 
 # Redo the processing of an output file from its embedded processing record (dry run without --run)
 uv run ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--session <path>] [--run]
 
-# Type checking (oecon-era modules have known errors; new modules are clean)
+# Type checking
 uv run mypy src/
 ```
 
 ## Architecture
 
-**ephyscon** (formerly oecon) converts [Open Ephys GUI](https://open-ephys.github.io/gui-docs/) binary recordings into the in-house DAQ-HDF5 (DH5) format used by the cognitive neurophysiology lab.
-
-### Conversion pipeline
-
-The main entry point is `convert_open_ephys_recording_to_dh5()` in `src/ephyscon/convert_open_ephys_to_dh5.py`. It orchestrates the following steps, each controlled by a config dataclass that is `None` to skip that step:
-
-1. **Raw data** (`raw.py`, `RawConfig`) — copies continuous data into DH5 CONT blocks
-2. **Events** (`events.py`, `EventPreprocessingConfig`) — extracts TTL triggers (NI-DAQmx / Acquisition Board) and Network Events (VStim), merges and sorts by timestamp, stores as DH5 event triggers
-3. **Trial map** (`trialmap.py`, `TrialMapConfig`) — parses `TRIAL_START`/`TRIAL_END` messages from the Open Ephys Message Center (sent by VStim) and writes a structured trial map to DH5
-4. **Decimation** (`decimation.py`, `DecimationConfig`) — FIR/IIR anti-alias filter + downsample to produce LFP data; default factor 30×, stored starting at CONT block 2001
-5. **Continuous MUA** (`mua.py`, `ContinuousMuaConfig`) — extracts MUA/ESA envelope from raw data; stored starting at CONT block 4001
-
-Each processing function takes a `(config, recording, dh5file)` signature and returns the (potentially updated) config, which is then serialised alongside each output file as `<session>_exp<n>_rec<n>.config.json`.
-
-### Configuration
-
-`OpenEphysConversionConfig` (in `src/ephyscon/config.py`) is the top-level config dataclass — a container of all per-step configs. It serialises/deserialises via `save_config_to_file` / `load_config_from_file` using plain JSON. Enums are not yet fully handled in round-trip deserialization (see TODO in `config.py`).
-
-### Event types
-
-Three event classes in `events.py`:
-- `Event` — TTL events with `full_words`, `states`, `sample_numbers`, `timestamps`
-- `FullWordEvent` — Network Events after deduplication (no `states` field)
-- `Messages` — Open Ephys Message Center text messages
-
-`event_from_eventfolder()` dispatches on `metadata.source_processor` to return the appropriate type.
-
-### Output file naming
-
-Each Open Ephys recording produces one DH5 file and config JSON:
-```
-<session_name>_exp<experiment_index+1>_rec<recording_index+1>.dh5
-<session_name>_exp<experiment_index+1>_rec<recording_index+1>.config.json
-```
-Both use 1-based indexing in the filenames (exp1, rec1, etc.).
+**ephyscon** (formerly oecon) converts extracellular electrophysiology sessions (SpikeGLX, Open Ephys) into one NWB or DH5 (the lab's DAQ-HDF5 format) file per session, optionally inside a BIDS dataset. The former Open Ephys → DH5 converter (`ephyscon convert`) was replaced by this pipeline; `tests/data/Test_2026-03-12_16-32-08_exp1_rec1.dh5` (and its `.config.json`) is its output, kept as reference for the raw data and EV02 of the new DH5 writer (`tests/test_raw_mua_events.py`).
 
 ### Tests
 
-Real-data Open Ephys tests are **skipped** unless `tests/data/Test_2026-03-12_16-32-08` and its golden DH5 exist. `tests/test_realdata_spikeglx.py` runs only when `EPHYSCON_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. `tests/data/SOMxCD1_172_20250109_crop` is a 5 s real SpikeGLX crop (made with `tools/make_spikeglx_test_dataset.py`) with MATLAB reference output, used by `tests/test_spikeglx_crop.py`. All other tests use mocks or synthetic data and run without external data.
+The Open Ephys tests use `tests/data/Test_2026-03-12_16-32-08` (NI-DAQ aux stream, VStim). `tests/test_realdata_spikeglx.py` runs only when `EPHYSCON_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. `tests/data/SOMxCD1_172_20250109_crop` is a 5 s real SpikeGLX crop (made with `tools/make_spikeglx_test_dataset.py`) with MATLAB reference output, used by `tests/test_spikeglx_crop.py` and most pipeline tests. All other tests use synthetic data.
 
 The `pytest-plt` fixture (`plt`) is available in tests for inline plotting during development — tests using it will generate plot files when run with `--plt`.
 
-## Session pipeline (SpikeGLX / multi-run sessions)
+## Pipeline
 
 This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline (see `docs/roadmap.md`):
 
@@ -95,14 +57,15 @@ This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline
 - `io/` — `InputFormat` readers (`spikeglx.py`, `openephys.py`) registered under the `ephyscon.input_formats` entry point group. They return lazy spikeinterface recordings, and discovery parses metadata only. Readers detect Neuropixels probes; other probes are defined in `session.toml` (`io/probes.py`, `configure_probes` after loading the config; `Run.get_recording` selects their channels and attaches the probeinterface geometry). Formats with synchronised timestamps (Open Ephys) provide `clock_maps` instead of sync pulses.
 - `stimulus/` — `StimulusSystem` plugins (`ephyscon.stimulus_systems`). `vstim.py` reads VStim TDR files (vstim package) and times trials with the trial start trigger line (role `trial_start`) matched to the Open Ephys `TRIAL_START` messages. `stimstage.py` ports the lab's MATLAB `getStimFromIndex.m`, whose conditions are enumerated column-major (MATLAB `ind2sub`), so the field order of `params` matters.
 - `sync.py` — sync edges → `ClockMap` per stream onto the reference probe's clock (`RunSync`). `auxsignals.py` — photodiode pulses, wheel speed, `AuxSignals` (role access via `AuxChannelMap`). `timing.py` — `extract_run_timing` (sync, trials of all paradigms, running speed). Formats provide `sync_source` (channel + bit) and `read_aux_*` on `InputFormat`. Sync edges are cached per run by `SyncEdgeCache` (default `<session>/ephyscon/sync/<run>.npz`, filled by `ephyscon sync`), because reading a probe's sync channel reads its whole AP file; code that reads AP data anyway should feed an `EdgeAccumulator` and `SyncEdgeCache.store` the result. Don't name a module `aux.py` (reserved on Windows).
-- `sorting.py` — spike sorting per probe over the concatenated runs (sorter from `[sorting]` in `session.toml`, default Kilosort4, via spikeinterface `run_sorter`; SortingAnalyzer on the 300–6000 Hz band-pass filtered copy) (`concatenate_runs`, `sort_probe`), `cut_spikes` back into runs on the reference clock. Steps reuse existing outputs (local copy, sorter folder) so a crashed run can be resumed; inside Kilosort, `kilosort_checkpoints.py` checkpoints the long steps by temporarily replacing `datashift.run`, `spikedetect.run` and `template_matching.extract` (checked against Kilosort 4.1.7). `lfp.py` — per-run LFP at 1 kHz (spikeinterface polyphase `resample`). `nwb.py` — session NWB file from the work-dir outputs; session time 0 is 1 s before the first run, runs are placed by their start times (SpikeGLX `fileCreateTime`, 1 s resolution). `dh5.py` — session DH5 file (LFP CONT blocks per channel with extra INDEX regions for drifting probe clocks, one timestamps-only SPIKE block per unit with `MEAN_WAVEFORM`, TRIALMAP; parameters and unit metrics in `_trials.csv`/`_units.csv` next to it); needs dh5io with SPIKE writing (branch `add-spike-blocks`). `bids.py` — BIDS `ecephys` dataset around the NWB files (sidecars read from the NWB file); DH5 files get a BIDS-like layout with sidecars from `nwb.session_metadata_nwbfile`. `ecephys` is only in BEP032 (unreleased), so validate with the BEP032 schema: `uv run bids-validator-deno <root> --schema https://bids-specification.readthedocs.io/en/bep032/schema.json` (`tests/test_bids.py` does this). The packaged validator lacks permissions for UNC paths (X: share); there, run `deno run -A <venv>/Lib/site-packages/bids_validator_deno/bids-validator.js <root> --schema ...`.
+- `sorting.py` — spike sorting per probe over the concatenated runs (sorter from `[sorting]` in `session.toml`, default Kilosort4, via spikeinterface `run_sorter`; SortingAnalyzer on the 300–6000 Hz band-pass filtered copy) (`concatenate_runs`, `sort_probe`), `cut_spikes` back into runs on the reference clock. Steps reuse existing outputs (local copy, sorter folder) so a crashed run can be resumed; inside Kilosort, `kilosort_checkpoints.py` checkpoints the long steps by temporarily replacing `datashift.run`, `spikedetect.run` and `template_matching.extract` (checked against Kilosort 4.1.7). `lfp.py` — per-run LFP at 1 kHz (spikeinterface polyphase `resample`). `nwb.py` — session NWB file from the work-dir outputs; session time 0 is 1 s before the first run, runs are placed by their start times (SpikeGLX `fileCreateTime`, 1 s resolution). `dh5.py` — session DH5 file (raw (`--raw`), LFP and MUA CONT blocks per channel with extra INDEX regions for drifting clocks and for sample periods that are not whole ns (30 kHz), one timestamps-only SPIKE block per unit with `MEAN_WAVEFORM`, TRIALMAP; parameters and unit metrics in `_trials.csv`/`_units.csv` next to it); needs dh5io with SPIKE writing (branch `add-spike-blocks`). `bids.py` — BIDS `ecephys` dataset around the NWB files (sidecars read from the NWB file); DH5 files get a BIDS-like layout with sidecars from `nwb.session_metadata_nwbfile`. `ecephys` is only in BEP032 (unreleased), so validate with the BEP032 schema: `uv run bids-validator-deno <root> --schema https://bids-specification.readthedocs.io/en/bep032/schema.json` (`tests/test_bids.py` does this). The packaged validator lacks permissions for UNC paths (X: share); there, run `deno run -A <venv>/Lib/site-packages/bids_validator_deno/bids-validator.js <root> --schema ...`.
 - `matfile.py` — MAT v5/v7.3 reader that keeps struct field order (`MATLAB_fields`)
 - `provenance.py` — reproducibility: every step appends its invocation (argv, options, `session.toml`, all installed package versions, ephyscon git commit, input file sizes and SHA-256 of the metadata files) to `<work>/provenance/<step>.json`; `export` embeds all of it as JSON in the output (NWB `scratch/ephyscon_processing`, DH5 attribute `Processing` of `/Operations/nnn_ephyscon_export`); `ephyscon reproduce` replays it. Keep new processing deterministic (fixed seeds, e.g. `sorting.ANALYZER_SEED`); Kilosort on a GPU is not bit-exact.
 - `schema.py` — schema versions of the config files (`session.toml`: `schema_version`, `session_config.SCHEMA_VERSION`; conversion JSON: `config_version`, `config.VERSION`). Raise the version and add a migration (`MIGRATIONS[n]`: raw data n → n+1) whenever a config format changes (fields added, removed, renamed, or meanings changed), and list the change in the `session_config` docstring; newer files are rejected.
-- `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files. This is unrelated to `config.py`, the Open Ephys → DH5 conversion config.
-- CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`, `sync`, `timing`, `lfp`, `sort`, `export`)
+- `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files.
+- `events.py` — TTL edges of the aux stream (`InputFormat.read_ttl_events`) and network events (`read_network_events`, Open Ephys Network Events from VStim) per run on the reference clock (`events/<run>.csv`, written by `timing`); DH5 codes `+line`/`-line` and `word + 1000` as in the old converter. `mua.py` — MUA envelope like `lfp.py` (300 Hz Butterworth high-pass forward-backward, rectified, resampled to 1 kHz).
+- CLI: `cli/main.py` (subcommand dispatcher), `cli/session_commands.py` (`inspect`, `init`, `sync`, `timing`, `lfp`, `mua`, `sort`, `export`, `reproduce`); `per_session` runs a step for several sessions (placeholder `{session}` in per-session paths, failures don't stop the others).
 
-GUI (`gui/`, PySide6): `main_window.py` has two tabs, the session pipeline (`session_page.py`) and the Open Ephys → DH5 conversion. The pipeline page runs each step as `python -m ephyscon.cli.main <step>` in a `QProcess` (`pipeline.step_commands`), so sorting cannot take the GUI down; `config_widget.ConfigStepWidget` generates forms from pydantic models (used for `session.toml`). GUI tests run offscreen (`tests/test_gui_session.py`).
+GUI (`gui/`, PySide6): `main_window.py` shows the converter page (`session_page.py`): a session list with a work dir template, the `session.toml` of the selected session ("Apply to sessions…" copies sorting, aux channels, events etc. to the others), and the steps for all sessions. Each step runs as `python -m ephyscon.cli.main <step>` in a `QProcess` (`pipeline.step_commands`), so sorting cannot take the GUI down; a failing session is skipped and the rest continue; `config_widget.ConfigStepWidget` generates forms from pydantic models (used for `session.toml`). GUI tests run offscreen (`tests/test_gui_session.py`).
 
 Entry points only change when the package is reinstalled (`uv sync`).
 

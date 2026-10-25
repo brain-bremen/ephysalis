@@ -1,7 +1,7 @@
 """Schema versions of config files.
 
-Every config file format carries its schema version (``schema_version`` in ``session.toml``,
-``config_version`` in the Open Ephys conversion JSON). Raise the version whenever the format
+Every config file format carries its schema version (``schema_version`` in ``session.toml``).
+Raise the version whenever the format
 changes: fields added, removed or renamed, or a value's meaning changed. Files of a newer
 version are rejected, so an older ephyscon cannot silently drop fields it does not know.
 Older files are upgraded on loading by a chain of migrations, one per version step, that

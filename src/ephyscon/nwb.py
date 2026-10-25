@@ -13,7 +13,12 @@ trials                      ``trials/<run>_<paradigm>.csv`` of all runs, with ``
                             ``paradigm`` columns; parameters missing in a paradigm are NaN
 units                       ``sorting/<probe>/units.csv`` and ``spikes/<run>_<probe>.npz``;
                             mean waveform on the peak channel from the SortingAnalyzer
+acquisition                 with ``raw``: raw AP (wideband) data per run and probe
+                            (``ElectricalSeries_<run>_<probe>``) and the analog aux inputs per run
+                            (``aux_analog_<run>``, volts)
 processing/ecephys/LFP      ``lfp/<run>_<probe>/``, one ElectricalSeries per run and probe
+processing/ecephys/MUA      ``mua/<run>_<probe>/`` (``FilteredEphys``), MUA envelope per run and probe
+processing/events           ``events`` table from ``events/<run>.csv`` (TTL edges, network events)
 processing/behavior         running speed per run (``running_speed/<run>.npy``); eye position per
                             run (``eye/<run>.npy``, uncalibrated volts) in ``EyeTracking``
 scratch/ephyscon_processing processing record (JSON): configs, options and software versions of
@@ -42,6 +47,7 @@ import pandas as pd
 from hdmf.data_utils import GenericDataChunkIterator
 
 from ephyscon.lfp import lfp_folder
+from ephyscon.mua import mua_folder
 from ephyscon.session import Run, Session, StreamKind
 from ephyscon.sorting import load_run_spikes, sorting_channels
 
@@ -291,50 +297,127 @@ def peak_waveforms(analyzer_dir: Path, units: pd.DataFrame) -> tuple[np.ndarray 
     return waveforms, float(analyzer.sampling_frequency), int(extension.nbefore)
 
 
-def _add_lfp(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
-             syncs: dict[str, RunSync], electrode_rows: dict, compression: str | None) -> None:
-    import spikeinterface.core as si
-    from hdmf.backends.hdf5 import H5DataIO
-    from pynwb.ecephys import LFP, ElectricalSeries
+def _ecephys_module(nwbfile: NWBFile) -> Any:
+    if "ecephys" not in nwbfile.processing:
+        nwbfile.create_processing_module("ecephys", "LFP and MUA per run and probe")
+    return nwbfile.processing["ecephys"]
 
-    container = LFP(name="LFP")
+
+def _electrical_series(nwbfile: NWBFile, name: str, recording: BaseRecording, probe_id: str, electrode_rows: dict,
+                       start: float, rate: float, compression: str | None, **kwargs: Any) -> Any:
+    from hdmf.backends.hdf5 import H5DataIO
+    from pynwb.ecephys import ElectricalSeries
+
+    gains, offsets_uv = recording.get_channel_gains(), recording.get_channel_offsets()  # uV per bit, uV
+    uniform = bool(np.allclose(gains, gains[0]))
+    region = nwbfile.create_electrode_table_region(
+        [electrode_rows[(probe_id, i)] for i in range(recording.get_num_channels())], f"{probe_id} electrodes")
+    data = RecordingDataChunkIterator(recording, buffer_gb=0.2, display_progress=False)
+    return ElectricalSeries(
+        name=name, data=H5DataIO(data, compression=compression) if compression else data, electrodes=region,
+        starting_time=start, rate=rate, conversion=1e-6 * float(gains[0]) if uniform else 1e-6,
+        channel_conversion=None if uniform else gains, offset=1e-6 * float(offsets_uv[0]), **kwargs,
+    )
+
+
+def _add_derived(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+                 syncs: dict[str, RunSync], electrode_rows: dict, compression: str | None, kind: str) -> int:
+    """LFP (``kind="lfp"``, ``LFP`` container) or MUA (``"mua"``, ``FilteredEphys``) from the work dir."""
+    import spikeinterface.core as si
+    from pynwb.ecephys import LFP, FilteredEphys
+
+    from ephyscon.dh5 import stream_timing
+
+    folder, container, filtering = {
+        "lfp": (lfp_folder, LFP(name="LFP"), "polyphase resampling to 1 kHz (spikeinterface resample)"),
+        "mua": (mua_folder, FilteredEphys(name="MUA"),
+                "4th-order Butterworth high-pass 300 Hz (zero phase), rectified, polyphase resampling to 1 kHz"),
+    }[kind]
+    n = 0
     for run in runs:
         for probe_id in run.probes:
-            folder = lfp_folder(work_dir, run.name, probe_id)
-            if not (folder / "binary.json").exists():
+            path = folder(work_dir, run.name, probe_id)
+            if not (path / "binary.json").exists():
                 continue
-            recording = si.load(folder)
-            ap = run.get_recording(StreamKind.AP, probe_id)
-            # LFP sample k is AP sample k * fs_ap / fs_lfp; map that onto the reference clock (linear fit)
-            clock = syncs[run.name].maps[probe_id] if run.name in syncs else None
-            samples_per_lfp = ap.sampling_frequency / recording.sampling_frequency
-            if clock is not None:
-                start = float(clock.to_reference_time(0.0))  # before the first sync edge: the linear fit
-                rate = recording.sampling_frequency * clock.effective_sampling_frequency / ap.sampling_frequency
-            else:
-                start, rate = 0.0, recording.sampling_frequency
-            gains, offsets_uv = recording.get_channel_gains(), recording.get_channel_offsets()  # uV per bit, uV
-            uniform = bool(np.allclose(gains, gains[0]))
-            region = nwbfile.create_electrode_table_region(
-                [electrode_rows[(probe_id, i)] for i in range(recording.get_num_channels())],
-                f"{probe_id} electrodes",
-            )
-            data = RecordingDataChunkIterator(recording, buffer_gb=0.2, display_progress=False)
-            if "ecephys" not in nwbfile.processing:  # only when there is LFP
-                nwbfile.create_processing_module("ecephys", "LFP per run and probe (1 kHz, anti-alias filtered)")
-                nwbfile.processing["ecephys"].add(container)
-            container.add_electrical_series(ElectricalSeries(
-                name=f"LFP_{run.name}_{probe_id}",
-                data=H5DataIO(data, compression=compression) if compression else data,
-                electrodes=region,
-                starting_time=offsets[run.name] + start,
-                rate=rate,
-                conversion=1e-6 * float(gains[0]) if uniform else 1e-6,
-                channel_conversion=None if uniform else gains,
-                offset=1e-6 * float(offsets_uv[0]),
-                filtering="polyphase resampling to 1 kHz (spikeinterface resample)",
-                description=f"LFP of {probe_id} in run {run.name} ({samples_per_lfp:g} AP samples per sample)",
+            recording = si.load(path)
+            # sample k is AP sample k * fs_ap / fs; mapped onto the reference clock (linear fit)
+            start, rate = stream_timing(run, probe_id, recording.sampling_frequency, offsets[run.name], syncs)
+            if n == 0:
+                _ecephys_module(nwbfile).add(container)
+            container.add_electrical_series(_electrical_series(
+                nwbfile, f"{kind.upper()}_{run.name}_{probe_id}", recording, probe_id, electrode_rows, start, rate,
+                compression, filtering=filtering, description=f"{kind.upper()} of {probe_id} in run {run.name}",
             ))
+            n += 1
+    return n
+
+
+def _add_raw(nwbfile: NWBFile, runs: list[Run], offsets: dict[str, float], syncs: dict[str, RunSync],
+             electrode_rows: dict, compression: str | None) -> None:
+    """Raw AP (wideband) data of every run and probe and the analog aux inputs in ``acquisition``."""
+    import spikeinterface.preprocessing as spre
+    from hdmf.backends.hdf5 import H5DataIO
+    from pynwb import TimeSeries
+
+    from ephyscon.dh5 import stream_timing
+    from ephyscon.sync import AUX
+
+    for run in runs:
+        for probe_id in run.probes:
+            recording = run.get_recording(StreamKind.AP, probe_id)
+            start, rate = stream_timing(run, probe_id, recording.sampling_frequency, offsets[run.name], syncs)
+            nwbfile.add_acquisition(_electrical_series(
+                nwbfile, f"ElectricalSeries_{run.name}_{probe_id}", recording, probe_id, electrode_rows, start, rate,
+                compression, description=f"raw AP (wideband) data of {probe_id} in run {run.name}",
+            ))
+        if run.aux_stream is not None:
+            analog = run.format.aux_analog_recording(run)
+            start, rate = stream_timing(run, AUX, analog.sampling_frequency, offsets[run.name], syncs)
+            gains = analog.get_channel_gains()
+            uniform = bool(np.allclose(gains, gains[0]))
+            source = analog if uniform else spre.scale_to_uV(analog)
+            data = RecordingDataChunkIterator(source, buffer_gb=0.2, display_progress=False)
+            nwbfile.add_acquisition(TimeSeries(
+                name=f"aux_analog_{run.name}", data=H5DataIO(data, compression=compression) if compression else data,
+                unit="volts", conversion=1e-6 * float(gains[0]) if uniform else 1e-6, starting_time=start, rate=rate,
+                description=f"analog inputs {', '.join(map(str, analog.channel_ids))} of the aux stream in run {run.name}",
+            ))
+
+
+def _add_events(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> int:
+    from hdmf.common import DynamicTable, VectorData
+
+    from ephyscon.events import load_run_events
+
+    parts = []
+    for run in runs:
+        path = work_dir / "events" / f"{run.name}.csv"
+        if path.exists():
+            events = load_run_events(path)
+            events["time"] += offsets[run.name]
+            events.insert(1, "run", run.name)
+            parts.append(events)
+    if not parts:
+        return 0
+    events = pd.concat(parts, ignore_index=True)
+    descriptions = {
+        "timestamp": "time in s on the session time axis", "run": "run of the event", "source": "ttl or network",
+        "line": "TTL line (1-based), -1 for network events",
+        "state": "TTL level after the edge (1 rising, 0 falling), -1 for network events",
+        "word": "network event word (VStim event code), -1 for TTL edges",
+        "code": "DH5 event code (+line / -line, word + offset)", "label": "role of the TTL line or VStim event name",
+    }
+    values = {
+        "timestamp": events.time.to_numpy(float), "run": events.run.to_numpy(str),
+        "source": events.source.to_numpy(str), "label": events["name"].fillna("").to_numpy(str),
+        **{c: events[c].fillna(-1).to_numpy(np.int64) for c in ("line", "state", "word", "code")},
+    }
+    table = DynamicTable(
+        name="events", description="TTL edges of the aux stream and network events (see ephyscon.events)",
+        columns=[VectorData(name=c, description=d, data=values[c]) for c, d in descriptions.items()],
+    )
+    nwbfile.create_processing_module("events", "events of the runs").add(table)
+    return len(events)
 
 
 def _add_running_speed(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
@@ -398,12 +481,14 @@ def write_session_nwb(
     lfp: bool = True,
     compression: str | None = "gzip",
     processing: dict | None = None,
+    raw: bool = False,
 ) -> Path:
     """Write the NWB file of a session from the outputs in ``work_dir`` (see the module docs).
 
     ``syncs`` maps run names to their :class:`RunSync`; it is needed to place the LFP of
     probes other than the reference probe. Missing outputs (e.g. no sorting yet) are skipped.
     ``processing`` is the processing record (:func:`ephyscon.provenance.processing_record`).
+    ``raw`` adds the raw data (large: about the size of the recording).
     """
     from pynwb import NWBHDF5IO
 
@@ -420,8 +505,12 @@ def write_session_nwb(
     _add_units(nwbfile, work_dir, runs, offsets, electrode_rows, channel_index)
     _add_running_speed(nwbfile, work_dir, runs, offsets)
     _add_eye_position(nwbfile, work_dir, runs, offsets)
+    if raw:
+        _add_raw(nwbfile, runs, offsets, syncs or {}, electrode_rows, compression)
     if lfp:
-        _add_lfp(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression)
+        _add_derived(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression, "lfp")
+    _add_derived(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression, "mua")
+    _add_events(nwbfile, work_dir, runs, offsets)
     if processing is not None:
         from ephyscon.provenance import NWB_SCRATCH_NAME
 

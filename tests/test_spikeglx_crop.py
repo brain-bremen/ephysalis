@@ -205,7 +205,7 @@ def test_sync_edge_cache(run, tmp_path, monkeypatch):
 def test_cli_sync(tmp_path, capsys):
     from ephyscon.cli.main import main
 
-    assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path)]) == 0
+    assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path), "--work-dir", str(tmp_path / "work")]) == 0
     assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
     assert (tmp_path / f"{RUN}.npz").exists()
 

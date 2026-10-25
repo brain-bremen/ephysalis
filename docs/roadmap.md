@@ -3,8 +3,9 @@
 ephyscon replaces the MATLAB preprocessing pipeline
 (`Combine_SortScript_ChockaNpx2_KS4_mPC.m` →
 `multiParadigmArtefactRemovalAndSpikesortingComb_contEye_CRSE.m`). It is a fork of
-[oecon](https://github.com/brain-bremen/oecon) (Open Ephys → DH5 only), whose conversion
-pipeline is still available as `ephyscon convert`.
+[oecon](https://github.com/brain-bremen/oecon) (Open Ephys → DH5 only). The oecon conversion
+pipeline (`ephyscon convert`) was replaced by the session pipeline; its raw data, MUA and event
+(EV02) outputs are part of the session DH5/NWB files.
 
 ## Decisions
 
@@ -27,9 +28,9 @@ pipeline is still available as `ephyscon convert`.
 | 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, stimstage conditions | done |
 | 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
 | 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephyscon sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
-| 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | LFP done (`ephyscon lfp`); open: MUA |
+| 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | done (`ephyscon lfp`, `ephyscon mua`) |
 | 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephyscon export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
-| 6 | CLI/GUI batch processing for SpikeGLX sessions, re-running single steps (`rerun_steps_plan.md`), provenance | GUI session page (one session, steps as processes), provenance and `ephyscon reproduce`, config schema versions done; open: batch over many sessions |
+| 6 | CLI/GUI batch processing, provenance, replacing `ephyscon convert` | done: several sessions per command and in the GUI (one converter page), provenance and `ephyscon reproduce`, config schema versions, raw data/MUA/events in DH5 and NWB, `ephyscon convert` removed |
 
 ## Legacy behaviour (phase 2)
 

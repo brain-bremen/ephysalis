@@ -1,18 +1,25 @@
 # ephyscon — Electrophysiology Converter
 
-Preprocessing of extracellular electrophysiology recordings (Open Ephys, SpikeGLX/Neuropixels)
-into [DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) and, soon,
-[NWB](https://nwb.org), with spike sorting via [spikeinterface](https://spikeinterface.readthedocs.io)
-and Kilosort4.
+Converts extracellular electrophysiology recordings (SpikeGLX/Neuropixels, Open Ephys with
+Neuropixels or other probes) into one [NWB](https://nwb.org) or
+[DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) file per session, optionally in a
+[BIDS](https://bids.neuroimaging.io) dataset, with spike sorting via
+[spikeinterface](https://spikeinterface.readthedocs.io) (Kilosort4 by default).
 
-ephyscon is the successor of [oecon](https://github.com/brain-bremen/oecon) and will also replace
-the lab's MATLAB Neuropixels preprocessing scripts. See [docs/roadmap.md](docs/roadmap.md) for
-scope and status.
+ephyscon is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
+MATLAB Neuropixels preprocessing scripts. See [docs/roadmap.md](docs/roadmap.md) for scope and
+status.
 
-- **Open Ephys → DH5** (`ephyscon convert`): LFP decimation, MUA/ESA envelope, TTL events, VStim
-  network events, trial map and raw data copy. This is the former oecon pipeline.
-- **SpikeGLX / multi-run sessions** (`ephyscon inspect`, `ephyscon init`): session discovery,
-  `session.toml` configuration and stimulus conditions. Sync, sorting and NWB output are in progress.
+Steps (each one optional, outputs in a work dir per session):
+
+| Step | Output |
+|---|---|
+| `sync` | sync edges of all streams (clock maps between probes and the aux stream) |
+| `timing` | trials of all paradigms (stimulus system plugins: stimstage, VStim), running speed, eye position, events (TTL lines, VStim network events) |
+| `lfp` | LFP per run and probe, 1 kHz |
+| `mua` | MUA envelope per run and probe, 1 kHz (300 Hz high-pass, rectified) |
+| `sort` | spike sorting per probe over all runs |
+| `export` | one NWB or DH5 file (optionally with the raw data), optionally into a BIDS dataset |
 
 ## Installation
 
@@ -20,45 +27,45 @@ Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
 uv tool install git+https://github.com/brain-bremen/ephyscon.git
-```
-
-### Update
-
-```bash
-uv tool upgrade ephyscon
+uv tool upgrade ephyscon   # update
 ```
 
 ## GUI
 
 ```bash
-ephyscon-gui       # Open Ephys → DH5 converter
+ephyscon-gui       # converter: sessions, session.toml, steps, outputs
 ephyscon-inspect   # Open Ephys session inspector
 ```
 
-![](docs/oecon-gui.png)
-
 ## CLI
 
+Every step takes one or more sessions. With several sessions, per-session paths contain
+`{session}` (the session folder name); without `--work-dir` each session uses
+`<session>/ephyscon`.
+
 ```bash
-# Open Ephys -> DH5
-ephyscon convert <session_path> [<session_path> ...]
-ephyscon convert <session_path> --config config.json --output-folder /out
-ephyscon convert <session_path> --inspect
+ephyscon inspect <session> --conditions             # runs, probes, streams, paradigms
+ephyscon init <session> [--excel CR_Experiments25.xlsx]   # create session.toml
 
-# any supported format (SpikeGLX, Open Ephys): runs, probes, streams, paradigms
-ephyscon inspect <session_path> --conditions
+ephyscon sync    <session> [<session> ...] --work-dir D:/work/{session}
+ephyscon timing  <session> [<session> ...] --work-dir D:/work/{session}
+ephyscon lfp     <session> [<session> ...] --work-dir D:/work/{session}
+ephyscon mua     <session> [<session> ...] --work-dir D:/work/{session}
+ephyscon sort    <session> [<session> ...] --work-dir D:/work/{session} --scratch-dir <fast local disk>
+ephyscon export  <session> [<session> ...] --work-dir D:/work/{session} --output-format nwb|dh5 [--raw] [--bids <root>]
 
-# create session.toml, optionally migrating the legacy lab Excel sheet
-ephyscon init <session_path> --excel CR_Experiments25.xlsx -o session.toml
+# redo the processing of an output file from its embedded processing record
+ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--run]
 ```
 
 ### `session.toml`
 
-One file per session describes which runs are used and what is known about the probes. It
-replaces the Excel font-colour convention, `Depths.txt`, `BrokenChannelsProbe<N>_0Index.txt`
-and `folders2Combine.txt` of the MATLAB pipeline:
+One file per session describes which runs are used, the probes, the sorter, the roles of the
+aux channels and the events. It replaces the Excel font-colour convention, `Depths.txt`,
+`BrokenChannelsProbe<N>_0Index.txt` and `folders2Combine.txt` of the MATLAB pipeline:
 
 ```toml
+schema_version = 3
 session_id = "SOMxCD1_172_20250109_Recording1"
 subject_id = "SOMxCD1_172"
 
@@ -71,18 +78,36 @@ area = "V1"
 insertion_depth_um = 2000.0
 bad_channels = []          # 0-based
 
-[aux_channels.analog]      # NIDQ analog input per role
+[sorting]
+sorter = "kilosort4"
+
+[aux_channels.analog]      # analog input per role
 photodiode = 2
-[aux_channels.digital]     # NIDQ digital bit per role
+[aux_channels.digital]     # digital bit per role
 wheel = 7
+
+[events]
+exclude_roles = ["sync", "wheel"]
 ```
+
+## DH5 layout
+
+| Block | Content |
+|---|---|
+| CONT 1 – 1600 | raw AP/wideband data (`export --raw`), one block per channel over all probes |
+| CONT 1601 – 2000 | analog inputs of the aux stream (`export --raw`) |
+| CONT 2001 – 4000 | LFP |
+| CONT 4001 – 6000 | MUA envelope |
+| CONT 6001 | running speed; CONT 6002/6003 eye position x/y |
+| SPIKE `10000 · probe index + unit id` | spike times and mean waveform per unit |
+| TRIALMAP | trials of all runs |
+| EV02 | TTL edges (`+line`/`-line`), VStim network events (`word + 1000`), names as attributes |
+
+Trial parameters and unit metrics are in `<file>_trials.csv` and `<file>_units.csv` next to it.
 
 ## Library
 
 ```python
-from ephyscon import convert_open_ephys_session
-convert_open_ephys_session("/path/to/session")
-
 from ephyscon.io.base import open_session
 from ephyscon.stimulus.base import detect_stimulus_system
 
@@ -103,18 +128,6 @@ myformat = "mypackage.reader:MyFormat"          # subclass of ephyscon.io.base.I
 [project.entry-points."ephyscon.stimulus_systems"]
 mystim = "mypackage.stimulus:MyStimulusSystem"  # subclass of ephyscon.stimulus.base.StimulusSystem
 ```
-
-## Default CONT block ranges (DH5)
-
-| Range       | Purpose |
-|---|---|
-|    1 – 2000 | Raw neural/analog data |
-| 2001 – 3600 | LFP |
-| 3601 – 4000 | Downsampled analog |
-| 4001 – 5600 | MUA/ESA |
-| 6001 – 7600 | High-pass filtered raw (reserved) |
-
-Sorted spikes: SPIKE 1–1000.
 
 ## Development
 

@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Renamed from oecon to ephyscon.** The package and console scripts are now `ephyscon`, `ephyscon-gui` and `ephyscon-inspect`. The `cli`/`gui` packages moved to `ephyscon.cli`/`ephyscon.gui`.
-- **CLI uses subcommands.** The previous `oecon <session>` is now `ephyscon convert <session>`.
-- The conversion config field `oecon_version` is now `ephyscon_version`. Old config files still load.
+- **One converter for all inputs and outputs.** The Open Ephys → DH5 converter of oecon (`ephyscon convert`, its JSON config and GUI tab) is replaced by the session pipeline, which reads SpikeGLX and Open Ephys and writes NWB or DH5 (optionally in a BIDS dataset). Its features are now pipeline parts: raw data (`export --raw`; DH5 CONT 1…, analog aux inputs at CONT 1601…, before CONT 1…), MUA (`ephyscon mua`, CONT 4001…), TTL and VStim network events (`timing` → `events/<run>.csv`, DH5 EV02 with the same codes, NWB `events` table), trials (VStim plugin)
+- **Several sessions per command** (`ephyscon timing S1 S2 --work-dir D:/work/{session}`) and in the GUI (session list, "Apply to sessions…", steps for all sessions; a failing session does not stop the others)
 
 ### Added
 
@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stimulus system plugins** (`ephyscon.stimulus`, entry point group `ephyscon.stimulus_systems`), with a first plugin for the lab's MATLAB "stimulusStage" system
 - **`session.toml`** per-session configuration, `ephyscon init` (with `--excel` migration of the legacy lab Excel sheets) and `ephyscon inspect`
 - **Reproducible processing:** every step records its command line, options, `session.toml`, the complete Python environment (and ephyscon git commit) and a fingerprint of the input files in `<work>/provenance/`; `ephyscon export` embeds this processing record in the NWB (`scratch/ephyscon_processing`) and DH5 (`/Operations/nnn_ephyscon_export`, attribute `Processing`) file; `ephyscon reproduce <file> --work-dir <dir> [--run]` replays it and warns about changed software or inputs (`ephyscon.provenance`)
-- **Schema versions with migrations** for `session.toml` and the conversion config (`ephyscon.schema`); `session.toml` is now schema version 2 (version 1 files are upgraded on loading)
+- **Schema versions with migrations** for `session.toml` (`ephyscon.schema`); `session.toml` is now schema version 3 (`[events]`; older files are upgraded on loading)
 - GUI session page: open and save the session config anywhere (Open…, Save as…); it remembers the config file of each session
 - MAT v5/v7.3 reader that preserves struct field order (`ephyscon.matfile`)
 - **Clock sync** between probes and the aux stream from the sync edges (`ephyscon.sync`), **photodiode trial times** in the stimstage plugin, **running speed** from the wheel encoder (`ephyscon.auxsignals`), combined per run by `ephyscon.timing.extract_run_timing` and shown by `ephyscon inspect --timing`
@@ -54,8 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DH5 CONT blocks at 30 kHz got one INDEX region for the whole recording although 33333 ns is not 1/30 kHz (about 36 ms error per hour); new regions are added before the error reaches 0.1 sample
 - SortingAnalyzer waveforms and noise levels used unseeded random spikes and chunks; now seeded (`sorting.ANALYZER_SEED`)
-- Config JSON filename now uses 1-based experiment/recording indices (`_exp1_rec1.config.json`) consistent with the DH5 output filename
 
 ---
 

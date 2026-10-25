@@ -10,6 +10,7 @@ Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
 1. first version
 2. ``lab``, ``institution``, ``[subject]``, ``[sorting]``; probes: ``stream``, ``channels``,
    ``geometry``, ``sorting`` (non-Neuropixels probes, per-probe sorter)
+3. ``[events]`` (TTL lines left out of the events, offset of the network event codes)
 """
 
 from __future__ import annotations
@@ -25,11 +26,12 @@ from pydantic import BaseModel, Field
 from ephyscon.schema import Migration, migrate
 from ephyscon.session import Session
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
     1: lambda data: data,  # 2 only added fields, all with defaults
+    2: lambda data: data,  # 3 added [events], with defaults
 }
 
 
@@ -127,6 +129,19 @@ class AuxChannelMap(BaseModel):
         return cls()
 
 
+class EventsConfig(BaseModel):
+    """Events of the runs (``events/<run>.csv``, DH5 ``EV02``, NWB ``events`` table)."""
+
+    exclude_roles: list[str] = Field(
+        default_factory=lambda: ["sync", "wheel"],
+        description="Digital line roles ([aux_channels]) left out of the events, e.g. fast pulse trains",
+    )
+    network_events_offset: int = Field(
+        default=1000, description="Added to the VStim network event words for the DH5 event codes "
+        "(TTL lines are +line / -line)"
+    )
+
+
 class SessionConfig(BaseModel):
     schema_version: int = SCHEMA_VERSION
     session_id: str
@@ -141,6 +156,7 @@ class SessionConfig(BaseModel):
     probes: dict[str, ProbeConfig] = Field(default_factory=dict)
     sorting: SortingConfig = Field(default_factory=SortingConfig)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
+    events: EventsConfig = Field(default_factory=EventsConfig)
     notes: str = ""
 
     def run_config(self, name: str) -> RunConfig | None:

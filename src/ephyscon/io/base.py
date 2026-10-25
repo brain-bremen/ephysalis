@@ -75,6 +75,21 @@ class InputFormat(ABC):
         """One digital line (bit of the digital word) of the aux stream as a bool array."""
         raise NotImplementedError(f"{self.name} does not support aux digital lines yet")
 
+    def aux_analog_recording(self, run: Run) -> BaseRecording:
+        """Lazy recording of the analog inputs of the aux stream (gains in µV per bit), e.g.
+        for the raw data in DH5 / NWB."""
+        return self.get_recording(run, StreamKind.AUX)
+
+    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+        """Edges of all digital lines of the aux stream: ``aux_sample``, ``line`` (1-based,
+        bit + 1) and ``state`` (1 rising, 0 falling), in time order."""
+        raise NotImplementedError(f"{self.name} does not support TTL events yet")
+
+    def read_network_events(self, run: Run) -> pd.DataFrame:
+        """Network event words of a run (e.g. Open Ephys Network Events, sent by VStim):
+        ``aux_sample`` and ``word``. Empty for formats without network events."""
+        return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "word": np.zeros(0, np.int64)})
+
 
 def open_session(session_path: str | Path, format_name: str | None = None) -> Session:
     """Open a session, auto-detecting the input format unless ``format_name`` is given."""

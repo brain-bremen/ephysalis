@@ -1,4 +1,5 @@
-"""Per-run timing: clock sync, trial times of all paradigms, running speed and eye position.
+"""Per-run timing: clock sync, trial times of all paradigms, running speed, eye position and
+events (TTL lines, network events; :mod:`ephyscon.events`).
 
 Everything is expressed on the run's reference clock (the first probe unless configured
 otherwise) in seconds from the start of that probe's recording.
@@ -15,7 +16,8 @@ import pandas as pd
 
 from ephyscon.auxsignals import AuxSignals, bin_means_on_reference, wheel_speed
 from ephyscon.session import Run, StreamKind
-from ephyscon.session_config import AuxChannelMap, SessionConfig
+from ephyscon.events import run_events
+from ephyscon.session_config import AuxChannelMap, EventsConfig, SessionConfig
 from ephyscon.stimulus.base import Paradigm, detect_stimulus_system, get_stimulus_system
 from ephyscon.sync import AUX, RunSync, SyncEdgeCache, synchronize_run
 
@@ -38,6 +40,7 @@ class RunTiming:
     trials: dict[str, pd.DataFrame] = field(default_factory=dict)  # paradigm name -> trials
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
     eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
+    events: pd.DataFrame | None = None  # see ephyscon.events
 
     def trial_samples(self, paradigm: str, stream: str, column: str = "start_time") -> np.ndarray:
         """Trial times of a paradigm as fractional sample indices of another stream."""
@@ -73,6 +76,7 @@ def extract_run_timing(
         eye = np.stack([aux.analog_volts("eye_x"), aux.analog_volts("eye_y")], axis=1)
         bin_edges = np.arange(int(np.floor(duration_s * RUNNING_SPEED_RATE)) + 1) / RUNNING_SPEED_RATE
         timing.eye_position = bin_means_on_reference(eye, sync.to_samples(AUX, bin_edges)).astype(np.float32)
+    timing.events = run_events(run, sync, aux_channels, config.events if config is not None else EventsConfig())
 
     run_config = config.run_config(run.name) if config is not None else None
     system = (

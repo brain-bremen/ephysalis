@@ -1,4 +1,4 @@
-"""Session pipeline page of the GUI (offscreen), on the 5 s SpikeGLX crop."""
+"""Converter page of the GUI (offscreen), on the 5 s SpikeGLX crop and the Open Ephys test session."""
 
 import os
 import sys
@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from conftest import SPIKEGLX_CROP_SESSION  # noqa: E402
+from conftest import DATA_FOLDER, SPIKEGLX_CROP_SESSION  # noqa: E402
 from ephyscon.gui import session_page  # noqa: E402
 from ephyscon.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
 from ephyscon.session_config import load_session_config, save_session_config  # noqa: E402
@@ -29,8 +29,8 @@ def page(app, tmp_path, monkeypatch):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     monkeypatch.setattr(session_page, "_settings", lambda: settings)
     widget = session_page.SessionPipelinePage()
-    widget._session_edit.setText(str(SPIKEGLX_CROP_SESSION))
     widget._work_edit.setText(str(tmp_path / "work"))
+    widget.add_sessions([SPIKEGLX_CROP_SESSION])
     yield widget
     widget.deleteLater()
 
@@ -109,10 +109,9 @@ def test_save_as_and_open_config(app, page, tmp_path):
     assert page._editor.config().probes["imec0"].area == "LGN"
 
     # a new page finds the config file last used for the session
-    again = session_page.SessionPipelinePage()
-    again._session_edit.setText(str(SPIKEGLX_CROP_SESSION))
-    again._work_edit.setText(str(tmp_path / "work"))
-    assert again._find_config() == other
+    again = session_page.SessionPipelinePage()  # sessions and work dir from the settings
+    assert again.sessions() == [SPIKEGLX_CROP_SESSION] and again.work_dir(SPIKEGLX_CROP_SESSION) == tmp_path / "work"
+    assert again._find_config(SPIKEGLX_CROP_SESSION) == other
     again.deleteLater()
 
     elsewhere = tmp_path / "v1.toml"
@@ -136,3 +135,39 @@ def test_run_timing_step(app, page, tmp_path):
     assert len(pd.read_csv(tmp_path / "work" / "trials" / "3_rfmappingFine_g0_RF.csv")) == 23
     outputs = [page._results.topLevelItem(i).text(0) for i in range(page._results.topLevelItemCount())]
     assert "trials/3_rfmappingFine_g0_RF.csv" in outputs
+
+
+def test_apply_to_sessions(app, page, tmp_path):
+    _wait(app, lambda: page._overview is not None)
+    page._work_edit.setText(str(tmp_path / "{session}"))
+    page.add_sessions([DATA_FOLDER], show=False)
+    config = page._editor.config()
+    config.sorting.sorter = "mountainsort5"
+    config.events.exclude_roles = ["sync"]
+    config.probes["imec0"].area = "V1"  # probes are not copied
+    page._editor.set_config(config)
+    [written] = page.apply_to_sessions(["sorting", "events"], [SPIKEGLX_CROP_SESSION, DATA_FOLDER])
+    assert written == tmp_path / DATA_FOLDER.name / "session.toml"
+    other = load_session_config(written)
+    assert other.sorting.sorter == "mountainsort5" and other.events.exclude_roles == ["sync"]
+    assert [r.name for r in other.runs] == ["experiment1_recording1"] and other.probes == {}
+    assert page._find_config(DATA_FOLDER) == written
+
+
+def test_run_several_sessions(app, page, tmp_path):
+    _wait(app, lambda: page._overview is not None)
+    page._work_edit.setText(str(tmp_path / "{session}"))
+    missing = tmp_path / "missing_session"
+    missing.mkdir()
+    page.add_sessions([missing, DATA_FOLDER], show=False)
+    for step, box in page._step_boxes.items():
+        box.setChecked(step == "timing")
+    page._run_or_cancel()
+    _wait(app, lambda: page._process is None and page._run_btn.text().startswith("▶"), timeout_s=300)
+    log = page._log.toPlainText()
+    assert "failed: missing_session" in log, log[-2000:]
+    status = {page.sessions()[r].name: page._sessions.item(r, 3).text() for r in range(page._sessions.rowCount())}
+    assert status == {SPIKEGLX_CROP_SESSION.name: "done", "missing_session": "failed in timing",
+                      DATA_FOLDER.name: "done"}
+    assert (tmp_path / DATA_FOLDER.name / "events" / "experiment1_recording1.csv").exists()
+    assert (tmp_path / SPIKEGLX_CROP_SESSION.name / "trials").is_dir()

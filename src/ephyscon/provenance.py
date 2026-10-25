@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
 # steps in pipeline order, as replayed by ``ephyscon reproduce``
-REPLAY_STEPS = ("sync", "timing", "lfp", "sort", "export")
+REPLAY_STEPS = ("sync", "timing", "lfp", "mua", "sort", "export")
 # options not replayed: outputs and caches outside the work dir
 _NOT_REPLAYED = {"output", "bids", "existing", "cache_dir", "subject", "session_label", "dataset_name"}
 NWB_SCRATCH_NAME = "ephyscon_processing"
@@ -230,7 +230,7 @@ def replay_argv(invocation: dict[str, Any], session: Path, work_dir: Path, confi
     """Command line (without ``ephyscon``) that redoes ``invocation`` into ``work_dir``, with
     the session at ``session`` and the recorded config saved at ``config``."""
     options = dict(invocation["options"], work_dir=str(work_dir), config=str(config) if config else None)
-    argv = [invocation["step"], str(session)]
+    argv = [invocation["step"], str(session)]  # positional: one session
     for action in _step_parser(invocation["step"])._actions:
         if not action.option_strings or action.dest in _NOT_REPLAYED or action.dest == "help":
             continue

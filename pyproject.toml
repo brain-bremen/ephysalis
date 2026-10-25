@@ -6,14 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "dh5io>=0.4.1",
-    "open-ephys-python-tools",
     "scipy>=1.15.2",
     "numpy>2.0",
     "vstim>=0.2.0",
-    "psutil>=7.2.2",
     "pydantic>=2.0",
     "pyside6>=6.7",
-    "tqdm>=4.67.3",
     "comtypes>=1.4.0; sys_platform == 'win32'",
     "h5py>=3.12",
     "neo>=0.14.6",
@@ -57,7 +54,6 @@ dev = [
     "pytest>=8.3.5",
     "pytest-plt>=1.1.1",
     "scipy-stubs>=1.15.3.0",
-    "types-tqdm>=4.67.3.20260303",
 ]
 
 
