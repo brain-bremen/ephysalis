@@ -7,6 +7,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from pydantic import ValidationError
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QThread, QUrl, Signal
@@ -140,12 +141,13 @@ class _RunsTable(QTableWidget):
     def runs(self) -> list[RunConfig]:
         result = []
         for row in range(self.rowCount()):
-            system = self.cellWidget(row, 2).currentText()
+            system = cast(QComboBox, self.cellWidget(row, 2)).currentText()
+            notes = self.item(row, 3)
             result.append(RunConfig(
-                name=self.item(row, 0).text(),
-                include=self.cellWidget(row, 1).isChecked(),
+                name=cast(QTableWidgetItem, self.item(row, 0)).text(),
+                include=cast(QCheckBox, self.cellWidget(row, 1)).isChecked(),
                 stimulus_system=None if system == _AUTO else system,
-                notes=self.item(row, 3).text() if self.item(row, 3) else "",
+                notes=notes.text() if notes is not None else "",
             ))
         return result
 
@@ -317,7 +319,7 @@ class SessionPipelinePage(QWidget):
         open_work = QPushButton("Open &work dir")
         open_work.clicked.connect(lambda: self._open_folder(self.work_dir()))
         self._open_bids = QPushButton("Open &BIDS dataset")
-        self._open_bids.clicked.connect(lambda: self._open_folder(Path(self._bids_edit.text())))
+        self._open_bids.clicked.connect(self._open_bids_dataset)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_results)
         open_row.addWidget(open_work)
@@ -450,6 +452,9 @@ class SessionPipelinePage(QWidget):
 
     def _browse_bids(self) -> None:
         self._browse(self._bids_edit, "BIDS dataset folder")
+
+    def _open_bids_dataset(self) -> None:
+        self._open_folder(Path(self._bids_edit.text()))
 
     @staticmethod
     def _open_folder(path: Path) -> None:
