@@ -16,6 +16,8 @@ DH5                    content
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
 ``TRIALMAP``           trials of all runs (``StimNo`` = condition)
+``Operations``         ``nnn_ephyscon_export`` with the processing record (JSON) in its
+                       ``Processing`` attribute (:mod:`ephyscon.provenance`)
 =====================  =========================================================================
 
 DH5 has no place for stimulus parameters and unit metrics; they are written next to the file
@@ -25,8 +27,9 @@ the SPIKE block id). Calibration values convert to volts, as the DH5 specificati
 
 from __future__ import annotations
 
+import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -271,17 +274,20 @@ def write_session_dh5(
     config: SessionConfig | None = None,
     syncs: dict[str, RunSync] | None = None,
     lfp: bool = True,
+    processing: dict | None = None,
 ) -> Path:
     """Write the DH5 file of a session from the outputs in ``work_dir`` (see the module docs),
     plus ``<name>_trials.csv`` and ``<name>_units.csv`` next to it.
 
     ``syncs`` maps run names to their :class:`RunSync`; it places the LFP of probes other than
-    the reference probe. Missing outputs (e.g. no sorting yet) are skipped.
+    the reference probe. Missing outputs (e.g. no sorting yet) are skipped. ``processing`` is
+    the processing record (:func:`ephyscon.provenance.processing_record`).
     """
     import dh5io.operations
     from dh5io.create import create_dh_file
     from dh5io.validation import validate_dh5_file
 
+    from ephyscon.provenance import DH5_ATTRIBUTE_NAME, DH5_OPERATION_NAME
     from ephyscon.version import get_version_from_pyproject
 
     runs = included_runs(session, config)
@@ -300,7 +306,11 @@ def write_session_dh5(
         units = _write_spikes(file, session, work_dir, runs, offsets)
         if not trials.empty:
             _write_trialmap(file, trials)
-        dh5io.operations.add_operation_to_file(file, "ephyscon_export", tool=f"ephyscon {get_version_from_pyproject()}")
+        dh5io.operations.add_operation_to_file(file, DH5_OPERATION_NAME, tool=f"ephyscon {get_version_from_pyproject()}",
+                                               date=datetime.now())
+        if processing is not None:
+            operation = file["Operations"][sorted(file["Operations"])[-1]]
+            operation.attrs[DH5_ATTRIBUTE_NAME] = json.dumps(processing, default=str)
         validate_dh5_file(file)
     tmp.replace(path)
     sidecars = sidecar_paths(path)

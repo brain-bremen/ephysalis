@@ -11,9 +11,12 @@ from ephyscon.decimation import DecimationConfig
 from ephyscon.events import EventPreprocessingConfig
 from ephyscon.mua import ContinuousMuaConfig
 from ephyscon.raw import RawConfig
+from ephyscon.schema import Migration, migrate
 from ephyscon.trialmap import TrialMapConfig
 
+# schema version (``config_version``) of the conversion config, see ephyscon.schema
 VERSION = 1
+MIGRATIONS: dict[int, Migration] = {}  # MIGRATIONS[n]: raw data of version n -> n + 1
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +121,8 @@ def load_config_from_file(config_path: PathLike) -> OpenEphysConversionConfig:
 
     if "config_version" not in config_data:
         logger.warning(
-            "Configuration file does not contain a version. Assuming version {VERSION}. This may fail."
+            f"Configuration file does not contain a version. Assuming version {VERSION}. This may fail."
         )
-        config_data["config_version"] = VERSION
-
-    if config_data["config_version"] > VERSION:
-        raise ValueError(
-            f"Configuration file version {config_data['config_version']} is newer than supported version {VERSION}."
-        )
-
+    config_data = migrate(config_data, VERSION, MIGRATIONS, key="config_version", missing=VERSION,
+                          source=config_path)
     return OpenEphysConversionConfig.model_validate(config_data)

@@ -2,8 +2,14 @@
 
 The session config replaces the legacy Excel sheets (font colour = run included),
 ``Depths.txt``, ``BrokenChannelsProbe<N>_0Index.txt`` and ``folders2Combine.txt``. It is
-created once per session (``ephyscon init``), can be edited by hand, and is versioned
-alongside the outputs for provenance.
+created once per session (``ephyscon init``) and can be edited by hand. The outputs embed
+the config they were made with (:mod:`ephyscon.provenance`).
+
+Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
+
+1. first version
+2. ``lab``, ``institution``, ``[subject]``, ``[sorting]``; probes: ``stream``, ``channels``,
+   ``geometry``, ``sorting`` (non-Neuropixels probes, per-probe sorter)
 """
 
 from __future__ import annotations
@@ -16,10 +22,15 @@ from typing import Any
 import tomli_w
 from pydantic import BaseModel, Field
 
+from ephyscon.schema import Migration, migrate
 from ephyscon.session import Session
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SESSION_CONFIG_FILENAME = "session.toml"
+# MIGRATIONS[n]: raw data of schema version n -> n + 1
+MIGRATIONS: dict[int, Migration] = {
+    1: lambda data: data,  # 2 only added fields, all with defaults
+}
 
 
 class RunConfig(BaseModel):
@@ -145,14 +156,14 @@ def save_session_config(config: SessionConfig, path: str | Path) -> None:
     Path(path).write_text(tomli_w.dumps(data), encoding="utf-8")
 
 
+def session_config_from_dict(data: dict[str, Any], source: object = "session config") -> SessionConfig:
+    """Config from raw data of any supported schema version (older ones are migrated)."""
+    return SessionConfig.model_validate(migrate(data, SCHEMA_VERSION, MIGRATIONS, source=source))
+
+
 def load_session_config(path: str | Path) -> SessionConfig:
     data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-    version = data.get("schema_version", SCHEMA_VERSION)
-    if version > SCHEMA_VERSION:
-        raise ValueError(
-            f"{path} has schema version {version}, newer than supported ({SCHEMA_VERSION})"
-        )
-    return SessionConfig.model_validate(data)
+    return session_config_from_dict(data, source=path)
 
 
 _SESSION_NAME_RE = re.compile(r"^(?P<subject>.+?)_(?P<date>\d{8})(?:_|$)")

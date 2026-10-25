@@ -82,3 +82,23 @@ def test_excel_migration(make_spikeglx_session, tmp_path):
     assert probe.bad_channels == [5, 12]
     assert any("differs from serial number" in w for w in result.warnings)
     assert any("7_Missing_g0" in w for w in result.warnings)
+
+
+def test_schema_migration(tmp_path):
+    from ephyscon.schema import migrate
+    from ephyscon.session_config import SCHEMA_VERSION
+
+    path = tmp_path / "session.toml"
+    path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n')
+    config = load_session_config(path)
+    assert config.schema_version == SCHEMA_VERSION == 2 and config.runs[0].name == "r"
+    save_session_config(config, path)
+    assert "schema_version = 2" in path.read_text()
+
+    migrations = {1: lambda d: {k: v for k, v in d.items() if k != "a"} | {"b": d["a"]}, 2: lambda d: {**d, "b": d["b"] * 2}}
+    assert migrate({"schema_version": 1, "a": 3}, 3, migrations) == {"schema_version": 3, "b": 6}
+    assert migrate({"a": 3}, 2, migrations)["b"] == 3  # no version: oldest
+    with pytest.raises(ValueError, match="no migration"):
+        migrate({"schema_version": 1, "a": 1}, 4, migrations)
+    with pytest.raises(ValueError, match="invalid"):
+        migrate({"schema_version": "2"}, 2, migrations)

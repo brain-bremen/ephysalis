@@ -96,7 +96,7 @@ def test_load_config_with_newer_version(tmp_path):
 
     with pytest.raises(ValueError) as excinfo:
         config_mod.load_config_from_file(config_path)
-    assert "newer than supported version" in str(excinfo.value)
+    assert "newer than supported" in str(excinfo.value)
 
 
 def test_old_config_with_stream_mapping_is_ignored(tmp_path):

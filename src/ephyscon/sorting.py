@@ -51,9 +51,10 @@ DEFAULT_SORTER_PARAMS: dict[str, dict[str, Any]] = {
     "kilosort4": {"clear_cache": True},  # lower GPU memory peaks (small GPUs)
 }
 ANALYZER_BAND_HZ = (300.0, 6000.0)  # band-pass of the recording the waveforms are taken from
+ANALYZER_SEED = 0  # fixed seeds: the same spikes and noise chunks every time (reproducible waveforms)
 ANALYZER_EXTENSIONS: dict[str, dict] = {
-    "random_spikes": {"max_spikes_per_unit": 500},
-    "noise_levels": {},
+    "random_spikes": {"max_spikes_per_unit": 500, "seed": ANALYZER_SEED},
+    "noise_levels": {"random_slices_kwargs": {"seed": ANALYZER_SEED}},
     "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
     "templates": {},
     "unit_locations": {"method": "monopolar_triangulation"},

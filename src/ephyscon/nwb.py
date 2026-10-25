@@ -16,6 +16,8 @@ units                       ``sorting/<probe>/units.csv`` and ``spikes/<run>_<pr
 processing/ecephys/LFP      ``lfp/<run>_<probe>/``, one ElectricalSeries per run and probe
 processing/behavior         running speed per run (``running_speed/<run>.npy``); eye position per
                             run (``eye/<run>.npy``, uncalibrated volts) in ``EyeTracking``
+scratch/ephyscon_processing processing record (JSON): configs, options and software versions of
+                            all steps (:mod:`ephyscon.provenance`)
 ==========================  ===============================================================
 
 Time base: seconds from ``session_start_time``, which is 1 s before the start of the first
@@ -28,6 +30,7 @@ the linear fit of the run's sync clock map.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -394,11 +397,13 @@ def write_session_nwb(
     syncs: dict[str, RunSync] | None = None,
     lfp: bool = True,
     compression: str | None = "gzip",
+    processing: dict | None = None,
 ) -> Path:
     """Write the NWB file of a session from the outputs in ``work_dir`` (see the module docs).
 
     ``syncs`` maps run names to their :class:`RunSync`; it is needed to place the LFP of
     probes other than the reference probe. Missing outputs (e.g. no sorting yet) are skipped.
+    ``processing`` is the processing record (:func:`ephyscon.provenance.processing_record`).
     """
     from pynwb import NWBHDF5IO
 
@@ -417,6 +422,12 @@ def write_session_nwb(
     _add_eye_position(nwbfile, work_dir, runs, offsets)
     if lfp:
         _add_lfp(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression)
+    if processing is not None:
+        from ephyscon.provenance import NWB_SCRATCH_NAME
+
+        nwbfile.add_scratch(json.dumps(processing, default=str), name=NWB_SCRATCH_NAME,
+                            description="ephyscon processing record (JSON): session.toml, options and "
+                            "software versions of every pipeline step")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.stem + ".partial.nwb")

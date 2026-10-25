@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     add_session_commands(sub)
 
     args = parser.parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)  # for the processing record
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     return args.func(args) or 0

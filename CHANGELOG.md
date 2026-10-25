@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Session model and readers** for SpikeGLX and Open Ephys (`ephyscon.io`), pluggable via the `ephyscon.input_formats` entry point group
 - **Stimulus system plugins** (`ephyscon.stimulus`, entry point group `ephyscon.stimulus_systems`), with a first plugin for the lab's MATLAB "stimulusStage" system
 - **`session.toml`** per-session configuration, `ephyscon init` (with `--excel` migration of the legacy lab Excel sheets) and `ephyscon inspect`
+- **Reproducible processing:** every step records its command line, options, `session.toml`, the complete Python environment (and ephyscon git commit) and a fingerprint of the input files in `<work>/provenance/`; `ephyscon export` embeds this processing record in the NWB (`scratch/ephyscon_processing`) and DH5 (`/Operations/nnn_ephyscon_export`, attribute `Processing`) file; `ephyscon reproduce <file> --work-dir <dir> [--run]` replays it and warns about changed software or inputs (`ephyscon.provenance`)
+- **Schema versions with migrations** for `session.toml` and the conversion config (`ephyscon.schema`); `session.toml` is now schema version 2 (version 1 files are upgraded on loading)
+- GUI session page: open and save the session config anywhere (Open…, Save as…); it remembers the config file of each session
 - MAT v5/v7.3 reader that preserves struct field order (`ephyscon.matfile`)
 - **Clock sync** between probes and the aux stream from the sync edges (`ephyscon.sync`), **photodiode trial times** in the stimstage plugin, **running speed** from the wheel encoder (`ephyscon.auxsignals`), combined per run by `ephyscon.timing.extract_run_timing` and shown by `ephyscon inspect --timing`
 - **Sync edge cache**: `ephyscon sync` extracts the sync edges of all streams once (probes read in parallel) into `<session>/ephyscon/sync/`; timing reuses them. `EdgeAccumulator` lets later AP passes (sorting) collect the edges on the way
@@ -51,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SortingAnalyzer waveforms and noise levels used unseeded random spikes and chunks; now seeded (`sorting.ANALYZER_SEED`)
 - Config JSON filename now uses 1-based experiment/recording indices (`_exp1_rec1.config.json`) consistent with the DH5 output filename
 
 ---

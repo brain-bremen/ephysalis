@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from conftest import SPIKEGLX_CROP_SESSION  # noqa: E402
 from ephyscon.gui import session_page  # noqa: E402
 from ephyscon.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
-from ephyscon.session_config import load_session_config  # noqa: E402
+from ephyscon.session_config import load_session_config, save_session_config  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -91,6 +91,36 @@ def test_load_edit_and_save_session_config(app, page, tmp_path):
     assert saved.probes["imec0"].area == "V1" and saved.probes["imec0"].bad_channels == [1]
     assert saved.sorting.sorter == "mountainsort5" and saved.subject.species == "Mus musculus"
     assert saved.probes["imec1"].serial_number == config.probes["imec1"].serial_number
+
+
+def test_save_as_and_open_config(app, page, tmp_path):
+    page.load_session()
+    _wait(app, lambda: page._overview is not None)
+    config = page._editor.config()
+    config.probes["imec0"].area = "LGN"
+    page._editor.set_config(config)
+    other = tmp_path / "templates" / "lgn.toml"
+    assert page.save_config(other)
+    assert page._config_path == other and load_session_config(other).probes["imec0"].area == "LGN"
+
+    config.probes["imec0"].area = "changed"
+    page._editor.set_config(config)
+    page._reload_config()  # back to the file
+    assert page._editor.config().probes["imec0"].area == "LGN"
+
+    # a new page finds the config file last used for the session
+    again = session_page.SessionPipelinePage()
+    again._session_edit.setText(str(SPIKEGLX_CROP_SESSION))
+    again._work_edit.setText(str(tmp_path / "work"))
+    assert again._find_config() == other
+    again.deleteLater()
+
+    elsewhere = tmp_path / "v1.toml"
+    config.probes["imec0"].area = "V1"
+    save_session_config(config, elsewhere)
+    assert page.open_config(elsewhere)
+    assert page._config_path == elsewhere and page._editor.config().probes["imec0"].area == "V1"
+    assert page.pipeline_options().config == elsewhere
 
 
 def test_run_timing_step(app, page, tmp_path):

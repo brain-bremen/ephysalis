@@ -132,8 +132,21 @@ def _sync(args: argparse.Namespace) -> int:
         edges = load_or_extract_edges(run, aux_channel_map(run, config), cache)
         counts = ", ".join(f"{stream} {e.samples.size}" for stream, e in edges.items())
         print(f"{run.name}: sync edges {counts}")
+    _record_step("sync", args, session, work_dir, config, config_path)
     print(f"Cache: {cache.directory}")
     return 0
+
+
+def _record_step(step: str, args: argparse.Namespace, session: Session, work_dir: Path,
+                 config: SessionConfig | None, config_path: Path | None) -> dict:
+    """Append this invocation to ``<work dir>/provenance/<step>.json``; returns its record."""
+    from ephyscon.provenance import step_record, write_step_record
+
+    options = {k: v for k, v in vars(args).items()
+               if k not in ("func", "command", "session", "argv", "verbose") and not callable(v)}
+    record = step_record(step, session, config, config_path, options, getattr(args, "argv", None), work_dir)
+    write_step_record(work_dir, record)
+    return record
 
 
 def _parse_value(text: str) -> object:
@@ -181,6 +194,7 @@ def _sort(args: argparse.Namespace) -> int:
         )
         for run_name, spikes in runs.items():
             print(f"{probe_id} {run_name}: {len(spikes)} spikes, {spikes.unit_id.nunique()} units")
+    _record_step("sort", args, session, work_dir, config, config_path)
     print(f"Output: {work_dir}")
     return 0
 
@@ -216,6 +230,7 @@ def _timing(args: argparse.Namespace) -> int:
             np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
         if timing.eye_position is not None:
             np.save(work_dir / "eye" / f"{run.name}.npy", timing.eye_position)
+    _record_step("timing", args, session, work_dir, config, config_path)
     print(f"Output: {work_dir}")
     return 0
 
@@ -235,6 +250,7 @@ def _lfp(args: argparse.Namespace) -> int:
         for probe_id in args.probes or list(run.probes):
             lfp = extract_lfp(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
             print(f"{run.name} {probe_id}: LFP {lfp.get_num_channels()} channels, {lfp.get_total_duration():.0f} s")
+    _record_step("lfp", args, session, work_dir, config, config_path)
     print(f"Output: {work_dir / 'lfp'}")
     return 0
 
@@ -260,16 +276,20 @@ def _export(args: argparse.Namespace) -> int:
         output = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
     existing = Path(args.existing) if args.existing else None
     if existing is None:
+        from ephyscon.provenance import processing_record
+
+        processing = processing_record(work_dir, _record_step("export", args, session, work_dir, config, config_path))
         syncs = _included_run_syncs(session, config, work_dir) if not args.no_lfp else {}
         if args.output_format == "nwb":
             from ephyscon.nwb import write_session_nwb
 
             write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                              compression=None if args.no_compression else "gzip")
+                              compression=None if args.no_compression else "gzip", processing=processing)
         else:
             from ephyscon.dh5 import write_session_dh5
 
-            write_session_dh5(session, work_dir, output, config, syncs, lfp=not args.no_lfp)
+            write_session_dh5(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                              processing=processing)
         existing = output
     if args.bids:
         from ephyscon.bids import add_dh5_to_bids, add_nwb_to_bids
@@ -280,6 +300,45 @@ def _export(args: argparse.Namespace) -> int:
         else:
             add_dh5_to_bids(session, work_dir, existing, Path(args.bids), subject, session_label, config, **options)
     print(f"Output: {output}")
+    return 0
+
+
+def _reproduce(args: argparse.Namespace) -> int:
+    """Redo the processing of an NWB/DH5 file from its processing record."""
+    import subprocess
+
+    from ephyscon.provenance import (
+        compare_environment, compare_inputs, input_fingerprint, read_processing_record, write_replay_configs,
+    )
+
+    record = read_processing_record(args.file)
+    if record is None:
+        print(f"{args.file} has no ephyscon processing record", file=sys.stderr)
+        return 1
+    export = record["export"]
+    session = Path(args.session or export["session"])
+    work_dir = Path(args.work_dir)
+    if work_dir.resolve() == Path(record["work_dir"]).resolve():
+        print("--work-dir must differ from the recorded work dir (its outputs would be reused)", file=sys.stderr)
+        return 1
+    for line in compare_environment(export.get("environment", {})):
+        print(f"WARNING environment: {line}", file=sys.stderr)
+    if session.is_dir():
+        for line in compare_inputs(export.get("inputs", {}), input_fingerprint(session, [work_dir])):
+            print(f"WARNING inputs: {line}", file=sys.stderr)
+    else:
+        print(f"WARNING: session {session} not found (use --session)", file=sys.stderr)
+    commands = write_replay_configs(record, session, work_dir)
+    for argv in commands:
+        print("ephyscon " + " ".join(f'"{a}"' if " " in a else a for a in argv))
+    if not args.run:
+        print("(dry run: add --run to run these commands)")
+        return 0
+    for argv in commands:
+        code = subprocess.call([sys.executable, "-u", "-m", "ephyscon.cli.main", *argv])
+        if code != 0:
+            print(f"failed: ephyscon {' '.join(argv)}", file=sys.stderr)
+            return code
     return 0
 
 
@@ -369,6 +428,16 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
     p.add_argument("--no-compression", action="store_true", help="NWB: write the LFP without gzip compression")
     p.set_defaults(func=_export)
+
+    p = sub.add_parser(
+        "reproduce",
+        help="Redo the processing of an NWB/DH5 file from its processing record (configs, options, versions)",
+    )
+    p.add_argument("file", type=Path, help="NWB or DH5 file written by `ephyscon export`")
+    p.add_argument("--work-dir", required=True, help="New work dir (gets the recorded session.toml)")
+    p.add_argument("--session", help="Session folder (default: the recorded path)")
+    p.add_argument("--run", action="store_true", help="Run the commands (default: only print them)")
+    p.set_defaults(func=_reproduce)
 
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("session", type=Path)

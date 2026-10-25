@@ -31,8 +31,16 @@ _AUTO = "(auto-detect)"
 COMMON_SORTERS = ["kilosort4", "mountainsort5", "spykingcircus2", "tridesclous2"]
 
 
+_TOML_FILTER = "Session config (*.toml);;All files (*)"
+
+
 def _settings() -> QSettings:
     return QSettings("brain-bremen", "ephyscon")
+
+
+def _config_key(session: Path) -> str:
+    """QSettings key of the config file last used for ``session``."""
+    return "pipeline/config/" + str(session.resolve()).replace("\\", "/").replace("/", "|")
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -339,14 +347,20 @@ class SessionPipelinePage(QWidget):
         self._editor.setEnabled(False)
         config_layout.addWidget(self._editor)
         buttons = QHBoxLayout()
+        self._open_btn = QPushButton("&Open…")
+        self._open_btn.setToolTip("Use another config file for this session (e.g. one of a similar session as a template)")
+        self._open_btn.clicked.connect(self._open_config_dialog)
         self._save_btn = QPushButton("&Save")
         self._save_btn.clicked.connect(self.save_config)
+        self._save_as_btn = QPushButton("Save &as…")
+        self._save_as_btn.clicked.connect(self._save_config_as_dialog)
         self._reload_btn = QPushButton("Re&load")
+        self._reload_btn.setToolTip("Discard the changes: read the config file again")
         self._reload_btn.clicked.connect(self._reload_config)
         self._defaults_btn = QPushButton("Reset to &defaults")
         self._defaults_btn.setToolTip("Config from the recording files (all runs included, probes from the metadata)")
         self._defaults_btn.clicked.connect(self._reset_to_defaults)
-        for b in (self._save_btn, self._reload_btn, self._defaults_btn):
+        for b in (self._open_btn, self._save_btn, self._save_as_btn, self._reload_btn, self._defaults_btn):
             b.setEnabled(False)
             buttons.addWidget(b)
         buttons.addStretch()
@@ -464,11 +478,23 @@ class SessionPipelinePage(QWidget):
     # --- session and config ---------------------------------------------
 
     def _find_config(self) -> Path | None:
+        """The config file last opened or saved for this session, else ``session.toml`` in
+        the session folder or the work dir."""
         session = self.session_path()
         candidates = [self.work_dir() / SESSION_CONFIG_FILENAME]
         if session is not None:
             candidates.insert(0, session / SESSION_CONFIG_FILENAME)
+            remembered = _settings().value(_config_key(session))
+            if remembered:
+                candidates.insert(0, Path(str(remembered)))
         return next((p for p in candidates if p.exists()), None)
+
+    def _set_config_path(self, path: Path) -> None:
+        self._config_path = path
+        self._config_label.setText(str(path))
+        session = self.session_path()
+        if session is not None:
+            _settings().setValue(_config_key(session), str(path))
 
     def load_session(self) -> None:
         session = self.session_path()
@@ -519,11 +545,14 @@ class SessionPipelinePage(QWidget):
         assert config is not None
         self._editor.set_config(config)
         self._editor.setEnabled(True)
-        for b in (self._save_btn, self._reload_btn, self._defaults_btn, self._run_btn):
+        for b in (self._open_btn, self._save_btn, self._save_as_btn, self._reload_btn, self._defaults_btn,
+                  self._run_btn):
             b.setEnabled(True)
         self.refresh_results()
 
-    def save_config(self) -> bool:
+    def save_config(self, path: Path | None = None) -> bool:
+        """Save the editor to ``path`` (default: the current config file, else
+        ``<work dir>/session.toml``), which becomes the config file of the session."""
         try:
             config = self._editor.config()
         except ValidationError as exc:
@@ -532,17 +561,47 @@ class SessionPipelinePage(QWidget):
         except ValueError as exc:
             QMessageBox.critical(self, "Invalid config", str(exc))
             return False
-        path = self._config_path or (self.work_dir() / SESSION_CONFIG_FILENAME)
+        path = path or self._config_path or (self.work_dir() / SESSION_CONFIG_FILENAME)
         path.parent.mkdir(parents=True, exist_ok=True)
         save_session_config(config, path)
-        self._config_path = path
-        self._config_label.setText(str(path))
+        self._set_config_path(path)
         self._append(f"Saved {path}")
         return True
 
+    def open_config(self, path: Path) -> bool:
+        """Show the config in ``path``, which becomes the config file of the session."""
+        try:
+            config = load_session_config(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid config", f"{path}:\n{exc}")
+            return False
+        self._editor.set_config(config)
+        self._set_config_path(path)
+        self._append(f"Opened {path}")
+        known = {run["name"] for run in self._overview.runs} if self._overview else set()
+        unknown = [run.name for run in config.runs if known and run.name not in known]
+        if unknown:
+            QMessageBox.warning(self, "Runs not in this session",
+                                "The config lists runs that this session does not have:\n" + "\n".join(unknown))
+        return True
+
+    def _config_dialog_dir(self) -> str:
+        return str(self._config_path.parent if self._config_path else self.work_dir())
+
+    def _open_config_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Open session config", self._config_dialog_dir(), _TOML_FILTER)
+        if path:
+            self.open_config(Path(path))
+
+    def _save_config_as_dialog(self) -> None:
+        initial = self._config_path or (self.work_dir() / SESSION_CONFIG_FILENAME)
+        path, _ = QFileDialog.getSaveFileName(self, "Save session config", str(initial), _TOML_FILTER)
+        if path:
+            self.save_config(Path(path))
+
     def _reload_config(self) -> None:
         if self._config_path is not None and self._config_path.exists():
-            self._editor.set_config(load_session_config(self._config_path))
+            self.open_config(self._config_path)
 
     def _reset_to_defaults(self) -> None:
         if self._overview is not None and self._overview.default_config is not None:
