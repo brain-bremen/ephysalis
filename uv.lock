@@ -641,7 +641,7 @@ requires-dist = [
     { name = "torch", marker = "(sys_platform == 'linux' and extra == 'sorting') or (sys_platform == 'win32' and extra == 'sorting')", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'sorting'", specifier = ">=2.4" },
     { name = "tqdm", specifier = ">=4.67.3" },
-    { name = "vstim", specifier = ">=0.1.0" },
+    { name = "vstim", specifier = ">=0.2.0" },
 ]
 provides-extras = ["sorting"]
 
@@ -3392,11 +3392,11 @@ wheels = [
 
 [[package]]
 name = "vstim"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a9/73/cda6f5f0c16ad01419cd2db3d656b63bcb7364f457f332fa4f7f23420e9f/vstim-0.1.0.tar.gz", hash = "sha256:ecaae0530edf9a76923363703ad2bad535b2b964dbd17b8018c4e2bbc15841f5", size = 518117, upload-time = "2026-04-17T14:36:23.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/ee/d07f24dbcacfad823391ec7930fd73f53ff68b848a072970cd88735a94cd/vstim-0.2.0.tar.gz", hash = "sha256:6cfd54403f1a0fed654815234dbdde57e0ff1a747274cf817f3c85fddf7ae9e8", size = 520311, upload-time = "2026-06-17T08:30:42.411Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/57/5f88894335314de9b621f7185a6baa6f615e0543a7b78db8847c8e74421d/vstim-0.1.0-py3-none-any.whl", hash = "sha256:1fa55d6b1dd865089d7de6120a254d8a06f4754c4582442a5e843ddb23d5de3a", size = 9231, upload-time = "2026-04-17T14:36:24.684Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/8b/ceefd87edf22bb5b3303caf8f95afa5b420f53c0161dea1a6347cbb14976/vstim-0.2.0-py3-none-any.whl", hash = "sha256:3592951f996a7f7ce029e52d1a3291d196bea0af64f0b3c48915dda32f0fdd2d", size = 10779, upload-time = "2026-06-17T08:30:40.457Z" },
 ]
 
 [[package]]
