@@ -10,7 +10,13 @@ from ephyscon.io.base import open_session
 from ephyscon.stimulus.base import detect_stimulus_system
 from ephyscon.timing import extract_run_timing
 
-pytestmark = skip_if_no_data
+from importlib.metadata import version
+
+pytestmark = [
+    skip_if_no_data,
+    # 0.3.0: TrialHeader v6 and outcome 10 (Cancelled) of the test TDR
+    pytest.mark.skipif(tuple(map(int, version("vstim").split(".")[:2])) < (0, 3), reason="needs vstim>=0.3.0"),
+]
 RUN = "experiment1_recording1"
 
 

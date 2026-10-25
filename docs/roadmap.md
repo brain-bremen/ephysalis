@@ -29,7 +29,7 @@ pipeline is still available as `ephyscon convert`.
 | 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephyscon sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
 | 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | LFP done (`ephyscon lfp`); open: MUA |
 | 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephyscon export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
-| 6 | CLI/GUI batch processing for SpikeGLX sessions, re-running single steps (`rerun_steps_plan.md`), provenance | |
+| 6 | CLI/GUI batch processing for SpikeGLX sessions, re-running single steps (`rerun_steps_plan.md`), provenance | GUI session page (one session, steps as processes), provenance and `ephyscon reproduce`, config schema versions done; open: batch over many sessions |
 
 ## Legacy behaviour (phase 2)
 

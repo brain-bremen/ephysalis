@@ -19,6 +19,8 @@ from ephyscon.provenance import (
 from ephyscon.session_config import SCHEMA_VERSION, load_session_config, save_session_config
 
 RUN = "3_rfmappingFine_g0"
+# DH5 export needs dh5io with SPIKE block writing (dh5io PR #15)
+FORMATS = ["nwb", "dh5"] if hasattr(__import__("dh5io"), "Spike") else ["nwb"]
 
 
 @pytest.fixture(scope="module")
@@ -38,14 +40,14 @@ def processed(tmp_path_factory):
     (work / "sorting" / "imec0" / "segments.json").write_text(json.dumps(
         {"runs": [], "sorter": "kilosort4", "sorter_params": {"clear_cache": True, "nearest_chans": 8}}))
     files = {}
-    for fmt in ("nwb", "dh5"):
+    for fmt in FORMATS:
         files[fmt] = work / f"out.{fmt}"
         assert main(["export", str(SPIKEGLX_CROP_SESSION), *common, "--output-format", fmt,
                      "-o", str(files[fmt])]) == 0
     return work, config, files
 
 
-@pytest.mark.parametrize("fmt", ["nwb", "dh5"])
+@pytest.mark.parametrize("fmt", FORMATS)
 def test_record_in_output(processed, fmt):
     work, config, files = processed
     record = read_processing_record(files[fmt])
@@ -93,17 +95,17 @@ def test_replay_argv(processed, tmp_path):
 def test_reproduce(processed, tmp_path, capsys):
     work, config, files = processed
     new = tmp_path / "again"
-    assert main(["reproduce", str(files["dh5"]), "--work-dir", str(new)]) == 0  # dry run
+    assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new)]) == 0  # dry run
     out = capsys.readouterr().out
     assert [line.split()[1] for line in out.splitlines() if line.startswith("ephyscon ")] == ["timing", "lfp", "export"]
     assert load_session_config(new / "session.toml") == config
-    assert main(["reproduce", str(files["dh5"]), "--work-dir", str(work)]) == 1  # same work dir
+    assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(work)]) == 1  # same work dir
 
-    assert main(["reproduce", str(files["dh5"]), "--work-dir", str(new), "--run"]) == 0
+    assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new), "--run"]) == 0
     pd.testing.assert_frame_equal(pd.read_csv(new / "trials" / f"{RUN}_RF.csv"),
                                   pd.read_csv(work / "trials" / f"{RUN}_RF.csv"))
     lfp_files = sorted((work / "lfp").rglob("*.raw"))
     assert len(lfp_files) == 2  # imec0, imec1
     for original in lfp_files:
         assert (new / original.relative_to(work)).read_bytes() == original.read_bytes()
-    assert (new / f"{SPIKEGLX_CROP_SESSION.name}.dh5").exists()
+    assert (new / f"{SPIKEGLX_CROP_SESSION.name}.{FORMATS[-1]}").exists()
