@@ -103,6 +103,12 @@ class AuxChannelMap(BaseModel):
     )
 
     @classmethod
+    def vstim_openephys_default(cls) -> AuxChannelMap:
+        """Open Ephys rigs with VStim: eye position on AI0/AI2, VStim trigger line 1 (bit 0)
+        marks trial starts, line 8 (bit 7) the screen frames."""
+        return cls(analog={"eye_x": 0, "eye_y": 2}, digital={"trial_start": 0, "frame": 7})
+
+    @classmethod
     def legacy_default(cls, n_analog: int) -> AuxChannelMap:
         if n_analog == 4:
             # older 4-channel rigs: AI0..AI3 = red laser, photodiode, green laser, blue laser
@@ -163,11 +169,13 @@ def default_session_config(session: Session) -> SessionConfig:
             probes.setdefault(pid, ProbeConfig(serial_number=info.serial_number))
 
     n_analog = next((r.extra["aux"]["n_analog"] for r in session.runs if r.extra.get("aux")), 8)
+    aux_channels = (AuxChannelMap.vstim_openephys_default() if session.format.name == "openephys"
+                    else AuxChannelMap.legacy_default(n_analog))
     return SessionConfig(
         session_id=session.name,
         subject_id=subject,
         input_format=session.format.name,
         runs=[RunConfig(name=run.name) for run in session.runs],
         probes=probes,
-        aux_channels=AuxChannelMap.legacy_default(n_analog),
+        aux_channels=aux_channels,
     )

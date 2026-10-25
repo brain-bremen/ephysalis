@@ -17,7 +17,7 @@ pipeline is still available as `ephyscon convert`.
 - **Output**: one NWB file per session (all probes; paradigms as epochs plus a trials
   table). NWB first, DH5 second. BIDS microephys layout on top of the NWB files.
 - **No backwards compatibility** with the legacy `mergedCombined_*.mat` files.
-- **Later**: artefact removal, eye tracking, automatic curation.
+- **Later**: artefact removal, eye calibration (eye position is stored as uncalibrated volts), automatic curation.
 
 ## Phases
 

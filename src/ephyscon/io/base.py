@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+import pandas as pd
 
 from ephyscon.plugins import INPUT_FORMAT_GROUP, available, get_plugin
 from ephyscon.session import Run, Session, StreamKind
@@ -64,6 +65,11 @@ class InputFormat(ABC):
     def aux_analog_gain_v(self, run: Run, index: int) -> float:
         """Volts per ADC count of analog input ``index``."""
         raise NotImplementedError(f"{self.name} does not support aux analog channels yet")
+
+    def read_messages(self, run: Run) -> pd.DataFrame:
+        """Text messages of a run (e.g. Open Ephys Message Center, sent by VStim):
+        ``aux_sample`` (sample of the aux stream at the message time) and ``text``."""
+        raise NotImplementedError(f"{self.name} has no messages")
 
     def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
         """One digital line (bit of the digital word) of the aux stream as a bool array."""

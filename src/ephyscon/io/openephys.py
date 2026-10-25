@@ -10,6 +10,11 @@ Open Ephys synchronises all streams of a recording itself (``timestamps.npy`` of
 in seconds on the main stream's clock), so the clock maps come from these timestamps instead
 of from sync pulses (:meth:`OpenEphysFormat.clock_maps`).
 
+Auxiliary signals: analog input ``n`` is the aux stream's channel ``AI<n>`` (NI-DAQmx) or
+``ADC<n+1>`` (acquisition board); digital bit ``b`` is TTL line ``b + 1`` of the aux stream's
+``events/<stream>/TTL`` (Open Ephys numbers lines from 1). Messages come from
+``events/MessageCenter``.
+
 Run start times come from ``sync_messages.txt`` of each recording ("Software Time", ms since
 1970 UTC, written by Open Ephys >= 0.6), or else from ``<DATE>`` in ``settings.xml`` (start of
 the experiment, 1 s resolution). They are naive local times, like those of SpikeGLX.
@@ -26,6 +31,9 @@ from datetime import datetime
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
+
+import numpy as np
+import pandas as pd
 
 from ephyscon.io.base import InputFormat
 from ephyscon.session import ProbeInfo, Run, Session, StreamKind
@@ -129,8 +137,6 @@ class OpenEphysFormat(InputFormat):
                 / "continuous" / stream_name.split("#", 1)[-1])
 
     def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
-        import numpy as np
-
         from ephyscon.sync import AUX, ClockMap, RunSync
 
         streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
@@ -153,6 +159,56 @@ class OpenEphysFormat(InputFormat):
             samples = np.unique(np.r_[np.arange(0, len(ts), step), len(ts) - 1])
             maps[key] = ClockMap(samples.astype(float), np.asarray(ts[samples], dtype=float) - t0, rate)
         return RunSync(reference=reference, maps=maps)
+
+    def _recording_folder(self, run: Run) -> Path:
+        node = run.extra["record_node"]
+        return node / f"experiment{run.extra['block_index'] + 1}" / f"recording{run.extra['segment_index'] + 1}"
+
+    def _aux_channel_id(self, run: Run, index: int) -> str:
+        channel_ids = [str(c) for c in self.get_recording(run, StreamKind.AUX).channel_ids]
+        for candidate in (f"AI{index}", f"ADC{index + 1}"):
+            if candidate in channel_ids:
+                return candidate
+        raise IndexError(f"Run {run.name}: no analog input {index} (AI{index}/ADC{index + 1}) in {channel_ids}")
+
+    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
+        recording = self.get_recording(run, StreamKind.AUX)
+        return recording.get_traces(channel_ids=[self._aux_channel_id(run, index)], return_in_uV=False)[:, 0]
+
+    def aux_analog_gain_v(self, run: Run, index: int) -> float:
+        recording = self.get_recording(run, StreamKind.AUX)
+        position = [str(c) for c in recording.channel_ids].index(self._aux_channel_id(run, index))
+        return float(recording.get_channel_gains()[position]) * 1e-6  # spikeinterface gains are uV per bit
+
+    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
+        if run.aux_stream is None:
+            raise KeyError(f"Run {run.name} has no auxiliary stream")
+        folder = self.stream_folder(run, run.aux_stream)
+        ttl = self._recording_folder(run) / "events" / folder.name / "TTL"
+        first_sample = int(np.load(folder / "sample_numbers.npy", mmap_mode="r")[0])
+        n = self.get_recording(run, StreamKind.AUX).get_num_samples()
+        line = np.zeros(n, dtype=bool)
+        if not ttl.exists():
+            return line
+        states = np.load(ttl / "states.npy")
+        samples = np.load(ttl / "sample_numbers.npy").astype(np.int64) - first_sample
+        mine = np.abs(states) == bit + 1
+        level = False
+        previous = 0
+        for sample, state in zip(np.clip(samples[mine], 0, n), states[mine]):
+            line[previous:sample] = level
+            level, previous = bool(state > 0), int(sample)
+        line[previous:] = level
+        return line
+
+    def read_messages(self, run: Run) -> pd.DataFrame:
+        folder = self._recording_folder(run) / "events" / "MessageCenter"
+        if not (folder / "text.npy").exists() or run.aux_stream is None:
+            return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
+        text = [m.decode("utf-8", errors="replace") if isinstance(m, bytes) else str(m) for m in np.load(folder / "text.npy")]
+        times = np.load(folder / "timestamps.npy")
+        aux_times = np.load(self.stream_folder(run, run.aux_stream) / "timestamps.npy", mmap_mode="r")
+        return pd.DataFrame({"aux_sample": np.searchsorted(aux_times, times).astype(np.int64), "text": text})
 
     def get_recording(
         self, run: Run, kind: StreamKind, probe_id: str | None = None

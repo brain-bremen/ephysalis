@@ -14,7 +14,8 @@ trials                      ``trials/<run>_<paradigm>.csv`` of all runs, with ``
 units                       ``sorting/<probe>/units.csv`` and ``spikes/<run>_<probe>.npz``;
                             mean waveform on the peak channel from the SortingAnalyzer
 processing/ecephys/LFP      ``lfp/<run>_<probe>/``, one ElectricalSeries per run and probe
-processing/behavior         running speed per run (``running_speed/<run>.npy``)
+processing/behavior         running speed per run (``running_speed/<run>.npy``); eye position per
+                            run (``eye/<run>.npy``, uncalibrated volts) in ``EyeTracking``
 ==========================  ===============================================================
 
 Time base: seconds from ``session_start_time``, which is 1 s before the start of the first
@@ -166,6 +167,8 @@ def _new_nwbfile(session: Session, config: SessionConfig | None, start_time: dat
 
 def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config: SessionConfig | None) -> dict:
     """Devices, electrode groups and electrodes; returns ``{(probe, channel index): row}``."""
+    if not session.probe_ids:  # behaviour-only sessions
+        return {}
     nwbfile.add_electrode_column("channel_name", "channel id in the AP stream")
     nwbfile.add_electrode_column("in_brain", "contact closer to the tip than the insertion depth")
     nwbfile.add_electrode_column("bad_channel", "excluded from sorting (session.toml bad_channels)")
@@ -291,9 +294,7 @@ def _add_lfp(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[st
     from hdmf.backends.hdf5 import H5DataIO
     from pynwb.ecephys import LFP, ElectricalSeries
 
-    module = nwbfile.create_processing_module("ecephys", "LFP per run and probe (1 kHz, anti-alias filtered)")
     container = LFP(name="LFP")
-    module.add(container)
     for run in runs:
         for probe_id in run.probes:
             folder = lfp_folder(work_dir, run.name, probe_id)
@@ -316,6 +317,9 @@ def _add_lfp(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[st
                 f"{probe_id} electrodes",
             )
             data = RecordingDataChunkIterator(recording, buffer_gb=0.2, display_progress=False)
+            if "ecephys" not in nwbfile.processing:  # only when there is LFP
+                nwbfile.create_processing_module("ecephys", "LFP per run and probe (1 kHz, anti-alias filtered)")
+                nwbfile.processing["ecephys"].add(container)
             container.add_electrical_series(ElectricalSeries(
                 name=f"LFP_{run.name}_{probe_id}",
                 data=H5DataIO(data, compression=compression) if compression else data,
@@ -344,8 +348,30 @@ def _add_running_speed(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offset
                 description="running speed from the wheel encoder, mean over 1 ms bins (time = bin centre)",
             ))
     if series:
-        module = nwbfile.create_processing_module("behavior", "behavioural signals")
-        module.add(BehavioralTimeSeries(time_series=series, name="RunningSpeed"))
+        _behavior_module(nwbfile).add(BehavioralTimeSeries(time_series=series, name="RunningSpeed"))
+
+
+def _behavior_module(nwbfile: NWBFile) -> Any:
+    if "behavior" not in nwbfile.processing:
+        nwbfile.create_processing_module("behavior", "behavioural signals")
+    return nwbfile.processing["behavior"]
+
+
+def _add_eye_position(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
+    from pynwb.behavior import EyeTracking, SpatialSeries
+
+    series = []
+    for run in runs:
+        path = work_dir / "eye" / f"{run.name}.npy"
+        if path.exists():
+            series.append(SpatialSeries(
+                name=f"eye_position_{run.name}", data=np.load(path), unit="volts",
+                reference_frame="eye tracker analog outputs x, y (uncalibrated)",
+                starting_time=offsets[run.name] + RUNNING_SPEED_BIN_S / 2, rate=1 / RUNNING_SPEED_BIN_S,
+                description="eye position from the eye tracker's analog outputs, mean over 1 ms bins (time = bin centre)",
+            ))
+    if series:
+        _behavior_module(nwbfile).add(EyeTracking(spatial_series=series, name="EyeTracking"))
 
 
 def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionConfig | None = None) -> NWBFile:
@@ -388,6 +414,7 @@ def write_session_nwb(
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
     _add_units(nwbfile, work_dir, runs, offsets, electrode_rows, channel_index)
     _add_running_speed(nwbfile, work_dir, runs, offsets)
+    _add_eye_position(nwbfile, work_dir, runs, offsets)
     if lfp:
         _add_lfp(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression)
 

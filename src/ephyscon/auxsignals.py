@@ -159,6 +159,16 @@ def wheel_speed(
     return velocity * 2 * np.pi * radius_cm / pulses_per_rev
 
 
+def bin_means_on_reference(signal: np.ndarray, sample_edges: np.ndarray) -> np.ndarray:
+    """Means of ``signal`` (aux samples) between consecutive fractional sample indices
+    ``sample_edges``, e.g. the aux samples of 1 ms bins of the reference clock."""
+    edges = np.clip(np.round(sample_edges).astype(np.int64), 0, signal.shape[0])
+    cumulative = np.concatenate([np.zeros((1,) + signal.shape[1:]), np.cumsum(signal, axis=0, dtype=float)])
+    counts = np.diff(edges).reshape((-1,) + (1,) * (signal.ndim - 1))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return (cumulative[edges[1:]] - cumulative[edges[:-1]]) / counts
+
+
 class AuxSignals:
     """Access to the roles of a run's auxiliary channels (see :class:`AuxChannelMap`)."""
 

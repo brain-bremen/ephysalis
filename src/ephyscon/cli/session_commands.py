@@ -203,6 +203,7 @@ def _timing(args: argparse.Namespace) -> int:
     cache = SyncEdgeCache(work_dir / "sync")
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     (work_dir / "running_speed").mkdir(exist_ok=True)
+    (work_dir / "eye").mkdir(exist_ok=True)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
@@ -213,6 +214,8 @@ def _timing(args: argparse.Namespace) -> int:
             print(f"{run.name} {paradigm}: {len(trials)} trials")
         if timing.running_speed is not None:
             np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
+        if timing.eye_position is not None:
+            np.save(work_dir / "eye" / f"{run.name}.npy", timing.eye_position)
     print(f"Output: {work_dir}")
     return 0
 
@@ -322,7 +325,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser(
         "timing",
-        help="Write trial tables (reference clock) and running speed (1 kHz, cm/s) of every run",
+        help="Write trial tables (reference clock), running speed (1 kHz, cm/s) and eye position (1 kHz, V) of every run",
     )
     p.add_argument("session", type=Path)
     p.add_argument("--format", help="Input format (default: auto-detect)")

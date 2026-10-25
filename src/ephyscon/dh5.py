@@ -11,6 +11,7 @@ DH5                    content
                        as ``ephyscon convert``); one INDEX region per run, or more if the probe's
                        clock is off its nominal rate (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
 ``CONT6001``           running speed (calibration: cm/s per bit)
+``CONT6002``, ``6003``   eye position x, y (uncalibrated volts of the eye tracker outputs)
 ``SPIKE<n>``           one block per sorted unit, ``n = 10000 * probe index + unit id``;
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 LFP_FIRST_CONT_ID = 2001
 RUNNING_SPEED_CONT_ID = 6001
+EYE_CONT_IDS = (6002, 6003)
 SPIKE_IDS_PER_PROBE = 10000
 # A DH5 CONT block has one sample period; a probe whose clock runs off the nominal rate gets a
 # new INDEX region (with its exact start time) before the accumulated error reaches this
@@ -163,6 +165,31 @@ def _write_running_speed(file: h5py.File, work_dir: Path, runs: list[Run], offse
     return True
 
 
+def _write_eye_position(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> bool:
+    import dh5io.cont
+    from dhspec.cont import ContSignalType, create_empty_index_array
+
+    parts = [(run, np.load(work_dir / "eye" / f"{run.name}.npy")) for run in runs
+             if (work_dir / "eye" / f"{run.name}.npy").exists()]
+    if not parts:
+        return False
+    eye = np.concatenate([p[1] for p in parts])
+    index = create_empty_index_array(len(parts))
+    index["time"] = [int(_ns(offsets[run.name] + RUNNING_SPEED_BIN_S / 2)) for run, _ in parts]
+    index["offset"] = np.cumsum([0] + [len(p[1]) for p in parts[:-1]])
+    for axis, (cont_id, name) in enumerate(zip(EYE_CONT_IDS, ("x", "y"))):
+        values = np.nan_to_num(eye[:, axis])
+        scale = max(float(np.abs(values).max()), 1e-6) / 32000  # V per bit
+        dh5io.cont.create_cont_group_from_data_in_file(
+            file, cont_id, data=np.round(values / scale).astype(np.int16)[:, None], index=index,
+            sample_period_ns=np.int32(round(RUNNING_SPEED_BIN_S * 1e9)), calibration=np.array([scale]),
+            channels=_channel_info(-1, axis), name=f"eye position {name}",
+            comment="eye tracker analog output (uncalibrated volts), mean over 1 ms bins",
+            signal_type=ContSignalType.ANALOG,
+        )
+    return True
+
+
 def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[Run],
                   offsets: dict[str, float]) -> pd.DataFrame:
     import dh5io.spike
@@ -269,6 +296,7 @@ def write_session_dh5(
         file.attrs["SessionStartTime"] = session_start.isoformat()
         n_lfp = _write_lfp(file, session, work_dir, runs, offsets, syncs or {}) if lfp else 0
         _write_running_speed(file, work_dir, runs, offsets)
+        _write_eye_position(file, work_dir, runs, offsets)
         units = _write_spikes(file, session, work_dir, runs, offsets)
         if not trials.empty:
             _write_trialmap(file, trials)

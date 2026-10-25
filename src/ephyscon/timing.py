@@ -1,4 +1,4 @@
-"""Per-run timing: clock sync, trial times of all paradigms and running speed.
+"""Per-run timing: clock sync, trial times of all paradigms, running speed and eye position.
 
 Everything is expressed on the run's reference clock (the first probe unless configured
 otherwise) in seconds from the start of that probe's recording.
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ephyscon.auxsignals import AuxSignals, wheel_speed
+from ephyscon.auxsignals import AuxSignals, bin_means_on_reference, wheel_speed
 from ephyscon.session import Run, StreamKind
 from ephyscon.session_config import AuxChannelMap, SessionConfig
 from ephyscon.stimulus.base import Paradigm, detect_stimulus_system, get_stimulus_system
@@ -37,6 +37,7 @@ class RunTiming:
     paradigms: list[Paradigm] = field(default_factory=list)
     trials: dict[str, pd.DataFrame] = field(default_factory=dict)  # paradigm name -> trials
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
+    eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
 
     def trial_samples(self, paradigm: str, stream: str, column: str = "start_time") -> np.ndarray:
         """Trial times of a paradigm as fractional sample indices of another stream."""
@@ -46,6 +47,8 @@ class RunTiming:
 def aux_channel_map(run: Run, config: SessionConfig | None = None) -> AuxChannelMap:
     if config is not None:
         return config.aux_channels
+    if run.format.name == "openephys":
+        return AuxChannelMap.vstim_openephys_default()
     return AuxChannelMap.legacy_default(run.extra.get("aux", {}).get("n_analog", 8))
 
 
@@ -59,12 +62,17 @@ def extract_run_timing(
     timing = RunTiming(run_name=run.name, sync=sync)
 
     aux = AuxSignals(run, aux_channels) if run.aux_stream is not None else None
-    reference = run.get_recording(StreamKind.AP, sync.reference)
+    reference = (run.get_recording(StreamKind.AUX) if sync.reference == AUX
+                 else run.get_recording(StreamKind.AP, sync.reference))
     duration_s = reference.get_num_samples() / reference.sampling_frequency
 
     if aux is not None and aux.has("wheel"):
         edges = sync.to_reference_time(AUX, aux.wheel_rising_edges())
         timing.running_speed = wheel_speed(edges, duration_s)
+    if aux is not None and "eye_x" in aux.channels.analog and "eye_y" in aux.channels.analog:
+        eye = np.stack([aux.analog_volts("eye_x"), aux.analog_volts("eye_y")], axis=1)
+        bin_edges = np.arange(int(np.floor(duration_s * RUNNING_SPEED_RATE)) + 1) / RUNNING_SPEED_RATE
+        timing.eye_position = bin_means_on_reference(eye, sync.to_samples(AUX, bin_edges)).astype(np.float32)
 
     run_config = config.run_config(run.name) if config is not None else None
     system = (
