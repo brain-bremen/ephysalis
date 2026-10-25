@@ -39,6 +39,9 @@ class ProbeInfo:
     num_channels: int = 0
     has_lf: bool = False
     streams: dict[StreamKind, str] = field(default_factory=dict)  # kind -> format stream id
+    # probes defined in session.toml (ephyscon.io.probes): channels of the stream, geometry
+    channel_ids: tuple[str, ...] | None = None
+    geometry: dict | None = None
 
 
 @dataclass
@@ -54,7 +57,13 @@ class Run:
     extra: dict = field(default_factory=dict)  # format-specific details
 
     def get_recording(self, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
-        return self.format.get_recording(self, kind, probe_id)
+        recording = self.format.get_recording(self, kind, probe_id)
+        info = self.probes.get(probe_id) if probe_id is not None else None
+        if info is not None and kind in (StreamKind.AP, StreamKind.LF) and (info.channel_ids or info.geometry):
+            from ephyscon.io.probes import apply_probe
+
+            recording = apply_probe(recording, info)
+        return recording
 
 
 @dataclass

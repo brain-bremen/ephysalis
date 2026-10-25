@@ -15,6 +15,7 @@ from ephyscon.session_config import (
     save_session_config,
 )
 from ephyscon.io.base import open_session
+from ephyscon.io.probes import configure_probes
 from ephyscon.sync import RunSync, SyncEdgeCache
 from ephyscon.stimulus.base import detect_stimulus_system, get_stimulus_system
 
@@ -23,6 +24,7 @@ def _inspect(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     config_path = session.path / SESSION_CONFIG_FILENAME
     config = load_session_config(config_path) if config_path.exists() else None
+    configure_probes(session, config, config_path.parent)
 
     print(f"Session {session.name} ({session.format.name}), {len(session.runs)} runs")
     print(f"Config: {config_path if config else 'none (run `ephyscon init`)'}")
@@ -117,6 +119,7 @@ def _sync(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     config_path = session.path / SESSION_CONFIG_FILENAME
     config = load_session_config(config_path) if config_path.exists() else None
+    configure_probes(session, config, config_path.parent)
     cache = _sync_cache(session.path, args.cache_dir)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
@@ -165,6 +168,7 @@ def _sort(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
+    configure_probes(session, config, config_path.parent if config_path else None)
     print(f"Config: {config_path or 'none (sorting all channels)'}")
     syncs = _included_run_syncs(session, config, work_dir)
     params = dict(kv.split("=", 1) for kv in args.param or [])
@@ -194,7 +198,8 @@ def _timing(args: argparse.Namespace) -> int:
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
-    config, _ = _load_config_for(session.path, work_dir, args.config)
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    configure_probes(session, config, config_path.parent if config_path else None)
     cache = SyncEdgeCache(work_dir / "sync")
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     (work_dir / "running_speed").mkdir(exist_ok=True)
@@ -218,7 +223,8 @@ def _lfp(args: argparse.Namespace) -> int:
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
-    config, _ = _load_config_for(session.path, work_dir, args.config)
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    configure_probes(session, config, config_path.parent if config_path else None)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
@@ -237,6 +243,7 @@ def _export(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
+    configure_probes(session, config, config_path.parent if config_path else None)
     print(f"Config: {config_path or 'none'}")
     extension = f".{args.output_format}"
     if args.bids:

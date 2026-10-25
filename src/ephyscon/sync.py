@@ -351,7 +351,11 @@ def synchronize_run(
     cache: SyncEdgeCache | None = None,
 ) -> RunSync:
     """Build clock maps for all probes and the aux stream of a run from their sync edges
-    (read from ``cache`` if it holds valid edges for the run)."""
+    (read from ``cache`` if it holds valid edges for the run), or take them from the format
+    if it has synchronised timestamps (:meth:`InputFormat.clock_maps`)."""
+    from_format = run.format.clock_maps(run, reference)
+    if from_format is not None:
+        return from_format
     probe_ids = list(run.probes)
     if not probe_ids:
         raise ValueError(f"Run {run.name} has no probes")

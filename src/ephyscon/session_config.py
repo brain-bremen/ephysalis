@@ -42,7 +42,22 @@ class SortingConfig(BaseModel):
     )
 
 
+class ProbeGeometry(BaseModel):
+    """Probe geometry from the probeinterface library or a probeinterface JSON file."""
+
+    manufacturer: str | None = Field(default=None, description="probeinterface library, e.g. cambridgeneurotech")
+    model: str | None = Field(default=None, description="probeinterface library, e.g. ASSY-37-E-1")
+    file: str | None = Field(default=None, description="probeinterface JSON file (relative to session.toml)")
+    wiring: str | None = Field(default=None, description="probeinterface wiring to the headstage, e.g. ASSY-156>RHD2164")
+
+
 class ProbeConfig(BaseModel):
+    stream: str | None = Field(
+        default=None, description="Input stream of a probe the reader does not detect (non-Neuropixels), "
+        "e.g. 'Acquisition_Board-100.Rhythm Data'"
+    )
+    channels: list[str] | None = Field(default=None, description="Channel ids of the probe in `stream` (default: all)")
+    geometry: ProbeGeometry | None = None
     area: str | None = Field(default=None, description="Target brain area, e.g. V1")
     insertion_depth_um: float | None = Field(
         default=None, description="Depth of the probe tip below the brain surface"

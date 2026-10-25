@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
     from ephyscon.session_config import AuxChannelMap
-    from ephyscon.sync import SyncSource
+    from ephyscon.sync import RunSync, SyncSource
 
 
 class InputFormat(ABC):
@@ -43,6 +43,12 @@ class InputFormat(ABC):
         """Return a lazy recording of one stream of a run."""
 
     # Sync and auxiliary channels. Optional: formats without them can't be synchronised.
+
+    def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
+        """Clock maps of all streams from timestamps the format already synchronised (e.g. Open
+        Ephys ``timestamps.npy``), or ``None`` if streams must be synchronised from sync
+        pulses (:meth:`sync_source`)."""
+        return None
 
     def sync_source(self, run: Run, probe_id: str | None, aux_channels: AuxChannelMap | None) -> SyncSource:
         """Channel and bit carrying the sync pulses of a probe, or of the aux stream (``None``)."""
