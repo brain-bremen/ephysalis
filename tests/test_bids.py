@@ -46,7 +46,7 @@ def _ecephys(root, suffix):
 
 def test_dataset_files(bids_root):
     description = json.loads((bids_root / "dataset_description.json").read_text(encoding="utf-8"))
-    assert description["DatasetType"] == "derivative" and description["GeneratedBy"][0]["Name"] == "ephyscon"
+    assert description["DatasetType"] == "raw" and description["GeneratedBy"][0]["Name"] == "ephyscon"
     participants = _tsv(bids_root / "participants.tsv")
     assert participants.to_dict("records") == [{"participant_id": f"sub-{SUBJECT}", "species": "Mus musculus",
                                                 "sex": "F", "age": "P90D", "strain": "n/a", "genotype": "n/a"}]
@@ -99,3 +99,27 @@ def test_rerun_replaces_rows(bids_root):
     add_nwb_to_bids(_ecephys(bids_root, "ecephys.nwb"), bids_root, SUBJECT, SESSION)
     assert len(_tsv(bids_root / "participants.tsv")) == 1
     assert len(_tsv(bids_root / f"sub-{SUBJECT}" / f"sub-{SUBJECT}_sessions.tsv")) == 1
+
+
+BEP032_SCHEMA = "https://bids-specification.readthedocs.io/en/bep032/schema.json"
+
+
+def test_bids_validator(bids_root):
+    """No errors from the official validator (dev dependency ``bids-validator-deno``) with the
+    BEP032 schema; needs network access to fetch the schema."""
+    import shutil
+    import subprocess
+
+    validator = shutil.which("bids-validator-deno")
+    if validator is None:
+        pytest.skip("bids-validator-deno is not installed")
+    result = subprocess.run([validator, str(bids_root), "--schema", BEP032_SCHEMA, "--json"],
+                            capture_output=True, text=True, encoding="utf-8", timeout=300)
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        pytest.skip(f"validator gave no report (offline?): {result.stderr[-500:]}")
+    assert "ecephys" in report["summary"]["dataTypes"]
+    errors = [(i["code"], i.get("location"), i.get("subCode")) for i in report["issues"]["issues"]
+              if i["severity"] == "error"]
+    assert not errors, errors

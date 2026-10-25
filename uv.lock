@@ -217,6 +217,18 @@ wheels = [
 ]
 
 [[package]]
+name = "bids-validator-deno"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "deno" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/51/a9/99478a37eac0b8a55f5608b193301adb5754bcba7b097a2404b7d411fb3d/bids_validator_deno-3.0.2.tar.gz", hash = "sha256:a1580cfa6f3320eff3551cb5af10916f4962a9365e76d39b9155a75470c8a45b", size = 142592, upload-time = "2026-09-18T16:26:33.88Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/2c/f93f3600283d4440d4a413f46bd4a5a8dbda5b3a137f4adff7c0ead34cf8/bids_validator_deno-3.0.2-py3-none-any.whl", hash = "sha256:2607e11f18c7da5d788771e474a9cf0c95ed044cb6c3824e57faf45a02eeb5cd", size = 4385643, upload-time = "2026-09-18T16:26:32.123Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.6.15"
 source = { registry = "https://pypi.org/simple" }
@@ -491,6 +503,19 @@ wheels = [
 ]
 
 [[package]]
+name = "deno"
+version = "2.9.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/b9/695b7c6b1f8bf31a83a403b785f9f31a8354c08796acb3a5e387c2813954/deno-2.9.8.tar.gz", hash = "sha256:f050f14d259f1e6f39a86aa8dd85f787df2311fc8ceb0be57485a127567ae137", size = 8168, upload-time = "2026-10-21T15:32:03.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/b1/ed2631d14362b442854a14efc5e3ac1b3422e6544734b2d746114f874acf/deno-2.9.8-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:338245af268724ae55ebebdb81270a0553b665affde8bdd80b01b8f1c07c7163", size = 42807330, upload-time = "2026-10-21T15:31:44.653Z" },
+    { url = "https://files.pythonhosted.org/packages/67/d7/78ae96540972c31d5787ab454af58a30a52ec35984bc4143b19f4175707d/deno-2.9.8-py3-none-macosx_11_0_arm64.whl", hash = "sha256:b82eac91d3e3f6fe37d94a12f833550e05029274cb9020b1e3f0f61e1678dc24", size = 38783813, upload-time = "2026-10-21T15:31:48.542Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/01/4a71078d8007c04f36b7306a0e9838e43a6e0c56d48f947040b779d469d1/deno-2.9.8-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:3e286918a36f436134336c5c6ef37dfe3a27f16ea22cd6af452ab7daa4ef1da4", size = 40125945, upload-time = "2026-10-21T15:31:52.352Z" },
+    { url = "https://files.pythonhosted.org/packages/76/21/16d41da4c0c1c966d85fbfc5af6e2ea5e55eb9aadce00b82810875fe11d0/deno-2.9.8-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:b1d1318e7deda8efd593aefa8b565a827fe71cf83aeff09d3a5ceb047444ca18", size = 41964284, upload-time = "2026-10-21T15:31:56.477Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/42/07b0f91b0962869218653e32a85aebf22fc359a146d8c032623994b9457f/deno-2.9.8-py3-none-win_amd64.whl", hash = "sha256:60dd97e612b8bab67c8080712646a821071e3809909489f853763cea19617700", size = 41825460, upload-time = "2026-10-21T15:32:00.7Z" },
+]
+
+[[package]]
 name = "deprecated"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -584,6 +609,7 @@ sorting = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "bids-validator-deno" },
     { name = "mypy" },
     { name = "nwbinspector" },
     { name = "pytest" },
@@ -621,6 +647,7 @@ provides-extras = ["sorting"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "bids-validator-deno", specifier = ">=3.0.2" },
     { name = "mypy", specifier = ">=1.16.1" },
     { name = "nwbinspector", specifier = ">=0.7.2" },
     { name = "pytest", specifier = ">=8.3.5" },
