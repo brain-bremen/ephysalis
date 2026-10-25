@@ -26,6 +26,7 @@ from ephyscon.inspect import validate_session_path
 
 from ephyscon.gui.config_widget import ConfigStepWidget
 from ephyscon.gui.inspector_widget import SessionInspectorWidget
+from ephyscon.gui.session_page import SessionPipelinePage
 from ephyscon.gui.settings import (
     get_last_config_path, get_last_session_dir,
     set_last_config_path, set_last_session_dir, pick_session_dirs,
@@ -163,7 +164,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"ephyscon {get_version_from_pyproject()}")
-        self.setMinimumSize(720, 680)
+        self.setMinimumSize(1000, 760)
         self._worker: _ConversionWorker | None = None
         self._setup_ui()
         self._restore_settings()
@@ -173,8 +174,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_ui(self) -> None:
+        # page 1: session pipeline (SpikeGLX / Open Ephys sessions -> NWB/DH5/BIDS);
+        # page 2: the Open Ephys -> DH5 conversion (`ephyscon convert`)
+        self._pages = QTabWidget()
+        self.setCentralWidget(self._pages)
+        self._session_page = SessionPipelinePage()
+        self._pages.addTab(self._session_page, "Session &pipeline")
         central = QWidget()
-        self.setCentralWidget(central)
+        self._pages.addTab(central, "Open Ephys → &DH5 conversion")
         root = QVBoxLayout(central)
         root.setSpacing(8)
 

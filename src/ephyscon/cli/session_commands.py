@@ -114,13 +114,13 @@ def _init(args: argparse.Namespace) -> int:
 
 def _sync(args: argparse.Namespace) -> int:
     from ephyscon.sync import load_or_extract_edges
-    from ephyscon.timing import aux_channel_map
+    from ephyscon.timing import WORK_DIR_NAME, aux_channel_map
 
     session = open_session(args.session, args.format)
-    config_path = session.path / SESSION_CONFIG_FILENAME
-    config = load_session_config(config_path) if config_path.exists() else None
-    configure_probes(session, config, config_path.parent)
-    cache = _sync_cache(session.path, args.cache_dir)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    configure_probes(session, config, config_path.parent if config_path else None)
+    cache = SyncEdgeCache(args.cache_dir) if args.cache_dir else SyncEdgeCache(work_dir / "sync")
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if args.runs and run.name not in args.runs:
@@ -301,8 +301,10 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument("session", type=Path)
     p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder; the cache goes to <work-dir>/sync (default: <session>/ephyscon)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--cache-dir", help="Sync edge cache (default: <session>/ephyscon/sync)")
+    p.add_argument("--cache-dir", help="Sync edge cache (default: <work-dir>/sync)")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
     p.set_defaults(func=_sync)
 

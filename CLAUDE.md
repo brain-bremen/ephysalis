@@ -97,6 +97,8 @@ This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline
 - `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files. This is unrelated to `config.py`, the Open Ephys → DH5 conversion config.
 - CLI: `cli/main.py` (subcommand dispatcher and `convert`), `cli/session_commands.py` (`inspect`, `init`, `sync`, `timing`, `lfp`, `sort`, `export`)
 
+GUI (`gui/`, PySide6): `main_window.py` has two tabs, the session pipeline (`session_page.py`) and the Open Ephys → DH5 conversion. The pipeline page runs each step as `python -m ephyscon.cli.main <step>` in a `QProcess` (`pipeline.step_commands`), so sorting cannot take the GUI down; `config_widget.ConfigStepWidget` generates forms from pydantic models (used for `session.toml`). GUI tests run offscreen (`tests/test_gui_session.py`).
+
 Entry points only change when the package is reinstalled (`uv sync`).
 
 ### Local setup notes

@@ -1,3 +1,4 @@
+import json
 import types
 import typing
 from enum import StrEnum
@@ -7,7 +8,7 @@ from pydantic import BaseModel
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox,
-    QLineEdit, QLabel, QFrame,
+    QLineEdit, QLabel, QFrame, QGroupBox,
 )
 
 from ephyscon.gui.widgets import ChannelPickerWidget, DictEditor, ListEditor
@@ -37,6 +38,18 @@ def _is_list_str(t: Any) -> bool:
 
 def _is_dict_str_int(t: Any) -> bool:
     return typing.get_origin(t) is dict and typing.get_args(t) == (str, int)
+
+
+def _is_list_int(t: Any) -> bool:
+    return typing.get_origin(t) is list and typing.get_args(t) == (int,)
+
+
+def _is_dict_str_any(t: Any) -> bool:
+    return typing.get_origin(t) is dict and typing.get_args(t) == (str, Any)
+
+
+def _is_model(t: Any) -> bool:
+    return isinstance(t, type) and issubclass(t, BaseModel)
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +121,73 @@ class _OptionalDoubleSpinBox(QWidget):
             self._spin.setValue(float(v))
 
 
+class _IntListEdit(QLineEdit):
+    """list[int] as comma-separated text, e.g. ``1, 5, 7``."""
+
+    def __init__(self, default: list[int] | None, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText("comma-separated, e.g. 1, 5, 7")
+        self.set_value(default)
+
+    def get_value(self) -> list[int]:
+        return [int(part) for part in self.text().replace(";", ",").split(",") if part.strip()]
+
+    def set_value(self, v: list[int] | None) -> None:
+        self.setText(", ".join(str(x) for x in v) if v else "")
+
+
+class _JsonDictEdit(QLineEdit):
+    """dict[str, Any] as a JSON object, e.g. ``{"batch_size": 60000}``."""
+
+    def __init__(self, default: dict | None, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText('JSON, e.g. {"batch_size": 60000}')
+        self.set_value(default)
+
+    def get_value(self) -> dict:
+        text = self.text().strip()
+        if not text:
+            return {}
+        value = json.loads(text)
+        if not isinstance(value, dict):
+            raise ValueError(f"expected a JSON object, got {text!r}")
+        return value
+
+    def set_value(self, v: dict | None) -> None:
+        self.setText(json.dumps(v) if v else "")
+
+
+class _NestedModelWidget(QGroupBox):
+    """A nested model as a sub-form; an optional one is a checkable group (unchecked → None)."""
+
+    def __init__(self, model_class: type[BaseModel], default: BaseModel | None, optional: bool, parent=None):
+        super().__init__(parent)
+        self._optional = optional
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        self._form = ConfigStepWidget(model_class, checkable=False)
+        layout.addWidget(self._form)
+        if optional:
+            self.setTitle("set")
+            self.setCheckable(True)
+            self.setChecked(default is not None)
+            self._form.setVisible(default is not None)
+            self.toggled.connect(self._form.setVisible)
+        if default is not None:
+            self._form.set_model(default)
+
+    def get_value(self) -> BaseModel | None:
+        if self._optional and not self.isChecked():
+            return None
+        return self._form.get_model()
+
+    def set_value(self, v: BaseModel | None) -> None:
+        if self._optional:
+            self.setChecked(v is not None)
+        if v is not None:
+            self._form.set_model(v)
+
+
 # ---------------------------------------------------------------------------
 # Widget factory
 # ---------------------------------------------------------------------------
@@ -169,6 +249,15 @@ def _make_field_widget(annotation: Any, default: Any) -> QWidget:
             w.set_value(default)
         return w
 
+    if _is_list_int(inner):
+        return _IntListEdit(default)
+
+    if _is_dict_str_any(inner):
+        return _JsonDictEdit(default)
+
+    if _is_model(inner):
+        return _NestedModelWidget(inner, default if isinstance(default, inner) else None, is_optional)
+
     label = QLabel("(not configurable in GUI)")
     label.setEnabled(False)
     return label
@@ -183,10 +272,13 @@ def _get_widget_value(widget: QWidget) -> Any:
         return widget.value()
     if isinstance(widget, QComboBox):
         return widget.currentData()
+    if isinstance(widget, (_IntListEdit, _JsonDictEdit)):
+        return widget.get_value()
     if isinstance(widget, QLineEdit):
         text = widget.text()
         return text if text else None
-    if isinstance(widget, (_OptionalSpinBox, _OptionalDoubleSpinBox, ListEditor, DictEditor, ChannelPickerWidget)):
+    if isinstance(widget, (_OptionalSpinBox, _OptionalDoubleSpinBox, ListEditor, DictEditor, ChannelPickerWidget,
+                           _NestedModelWidget)):
         return widget.get_value()
     return None
 
@@ -205,9 +297,12 @@ def _set_widget_value(widget: QWidget, value: Any) -> None:
             if widget.itemData(i) == value:
                 widget.setCurrentIndex(i)
                 break
+    elif isinstance(widget, (_IntListEdit, _JsonDictEdit)):
+        widget.set_value(value)
     elif isinstance(widget, QLineEdit):
         widget.setText(str(value) if value is not None else "")
-    elif isinstance(widget, (_OptionalSpinBox, _OptionalDoubleSpinBox, ListEditor, DictEditor, ChannelPickerWidget)):
+    elif isinstance(widget, (_OptionalSpinBox, _OptionalDoubleSpinBox, ListEditor, DictEditor, ChannelPickerWidget,
+                             _NestedModelWidget)):
         widget.set_value(value)
 
 
@@ -215,7 +310,10 @@ def _get_field_default(model_class: type[BaseModel], field_name: str) -> Any:
     try:
         return getattr(model_class(), field_name)
     except Exception:
-        return None
+        field = model_class.model_fields[field_name]
+        if field.default_factory is not None:
+            return field.default_factory()  # type: ignore[call-arg]
+        return None if field.is_required() else field.default
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +330,7 @@ class ConfigStepWidget(QWidget):
         excluded_fields: set[str] | None = None,
         field_overrides: dict[str, QWidget] | None = None,
         parent=None,
+        checkable: bool = True,
     ):
         super().__init__(parent)
         self._model_class = model_class
@@ -243,13 +342,16 @@ class ConfigStepWidget(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
 
         self._enable_cb = QCheckBox("&Enable this step")
-        self._enable_cb.setChecked(enabled_by_default)
-        layout.addWidget(self._enable_cb)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(sep)
+        self._enable_cb.setChecked(enabled_by_default or not checkable)
+        if checkable:
+            layout.addWidget(self._enable_cb)
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.HLine)
+            sep.setFrameShadow(QFrame.Shadow.Sunken)
+            layout.addWidget(sep)
+        else:
+            layout.setContentsMargins(0, 0, 0, 0)
+            enabled_by_default = True
 
         self._form_widget = QWidget()
         form = QFormLayout(self._form_widget)
@@ -290,8 +392,17 @@ class ConfigStepWidget(QWidget):
             # Skip non-editable fields (disabled labels) - let Pydantic use defaults
             if isinstance(widget, QLabel):
                 continue
-            values[name] = _get_widget_value(widget)
+            value = _get_widget_value(widget)
+            # empty input for a field that cannot be None (e.g. a list or "" default): use its default
+            if value is None and not _unwrap_optional(self._model_class.model_fields[name].annotation)[1]:
+                continue
+            values[name] = value
         return self._model_class(**values)
+
+    def set_field_values(self, model: BaseModel) -> None:
+        """Show the values of ``model`` (also of fields excluded from the form's model class)."""
+        for field_name, widget in self._field_widgets.items():
+            _set_widget_value(widget, getattr(model, field_name, None))
 
     def set_model(self, model: BaseModel | None) -> None:
         if model is None:
