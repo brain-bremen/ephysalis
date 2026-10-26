@@ -68,13 +68,13 @@ ephyscon-inspect = "ephyscon.gui.inspector_app:main"
 [project.entry-points."ephyscon.input_formats"]
 spikeglx = "ephyscon.io.spikeglx:SpikeGLXFormat"
 openephys = "ephyscon.io.openephys:OpenEphysFormat"
-daq = "ephyscon.io.daq:DaqFormat"
-uff = "ephyscon.io.uff:UffFormat"
+daq = "ephyscon.legacy.daq:DaqFormat"
+uff = "ephyscon.legacy.uff:UffFormat"
 
 [project.entry-points."ephyscon.stimulus_systems"]
 stimstage = "ephyscon.stimulus.stimstage:StimStageSystem"
 vstim = "ephyscon.stimulus.vstim:VStimSystem"
-vstim_td01 = "ephyscon.stimulus.vstim_td01:VStimTD01System"
+vstim_td01 = "ephyscon.legacy.vstim_td01:VStimTD01System"
 
 [tool.pytest.ini_options]
 markers = [

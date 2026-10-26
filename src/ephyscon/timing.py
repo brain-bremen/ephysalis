@@ -17,6 +17,7 @@ import pandas as pd
 from ephyscon.auxsignals import AuxSignals, bin_means_on_reference, wheel_speed
 from ephyscon.session import Run, StreamKind
 from ephyscon.events import run_events
+from ephyscon.runstart import RunStart
 from ephyscon.session_config import AuxChannelMap, EventsConfig, SessionConfig
 from ephyscon.stimulus.base import Paradigm, detect_stimulus_system, get_stimulus_system
 from ephyscon.sync import AUX, RunSync, SyncEdgeCache, synchronize_run
@@ -41,6 +42,7 @@ class RunTiming:
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
     eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
     events: pd.DataFrame | None = None  # see ephyscon.events
+    run_start: RunStart | None = None  # better start time from the stimulus system (ephyscon.runstart)
 
     def trial_samples(self, paradigm: str, stream: str, column: str = "start_time") -> np.ndarray:
         """Trial times of a paradigm as fractional sample indices of another stream."""
@@ -88,4 +90,5 @@ def extract_run_timing(
     timing.paradigms = system.discover(run)
     for paradigm in timing.paradigms:
         timing.trials[paradigm.name] = system.load_trials(run, paradigm, sync, aux)
+    timing.run_start = system.run_start(run, timing.trials)
     return timing

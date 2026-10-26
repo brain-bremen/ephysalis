@@ -26,7 +26,7 @@ import struct
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 import numpy as np
 import pandas as pd
@@ -46,18 +46,18 @@ NOMINAL_P_RATE = 0.996005  # P samples per M sample (all blocks of Eddi)
 SAMPLING_FREQUENCY = 1000.0
 
 
-def _plausible(buffer: bytes | np.memmap, offset: int) -> bool:
+def _plausible(buffer: Any, offset: int) -> bool:
     if offset < 0 or offset + HEADER_BYTES > len(buffer):
         return False
     words = struct.unpack_from("<61h", buffer, offset)
     return words[1] == RECORD_MARKER and 0 < words[11] <= 64 and words[44] > 0 and words[44] % words[11] == 0
 
 
-def _record_size(buffer: bytes | np.memmap, offset: int) -> int:
+def _record_size(buffer: Any, offset: int) -> int:
     return HEADER_BYTES + 2 * struct.unpack_from("<h", buffer, offset + 88)[0]
 
 
-def _first_record(buffer: bytes | np.memmap) -> int:
+def _first_record(buffer: Any) -> int:
     """Offset of the first record (the one before the 0x61 marker of three plausible records in a row)."""
     data = bytes(buffer[:min(len(buffer), 1 << 20)])
     i = 0
@@ -77,7 +77,7 @@ class UffFile:
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self._map = np.memmap(self.path, dtype=np.uint8, mode="r")
+        self._map: Any = cast(Any, np.memmap(self.path, dtype=np.uint8, mode="r"))  # a buffer for struct
         offset = _first_record(self._map)
         words = struct.unpack_from("<61h", self._map, offset)
         self.n_channels = int(words[11])
@@ -247,8 +247,8 @@ class UffFormat(InputFormat):
         for start, stem, m_path, p_path, m_file, p_file in sorted(found, key=lambda item: item[:2]):
             runs.append(Run(
                 name=stem, path=session_path, index=len(runs), format=self, start_time=start,
-                duration_s=m_file.n_samples / SAMPLING_FREQUENCY, aux_stream="M",
-                extra={"files": {"M": str(m_path), "P": str(p_path)}, "streams": ["M", "P"], "aux_streams": ["M"],
+                duration_s=m_file.n_samples / SAMPLING_FREQUENCY, aux_stream="M", streams=["M", "P"],
+                extra={"files": {"M": str(m_path), "P": str(p_path)}, "aux_streams": ["M"],
                        "start_time_source": "modification time of the M file minus its duration",
                        "truncated_bytes": {"M": m_file.truncated_bytes, "P": p_file.truncated_bytes}},
             ))

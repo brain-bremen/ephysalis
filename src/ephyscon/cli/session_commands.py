@@ -97,7 +97,7 @@ def _inspect(args: argparse.Namespace) -> int:
             )
         if run.aux_stream:
             print(f"      aux: {run.aux_stream} {run.extra.get('aux', '')}")
-        others = [s for s in run.extra.get("streams", []) if s != run.aux_stream
+        others = [s for s in run.streams if s != run.aux_stream
                   and all(s not in info.streams.values() for info in run.probes.values())]
         if others:  # e.g. for probes defined in session.toml
             print(f"      other streams: {', '.join(others)}")
@@ -261,10 +261,10 @@ def _sort(args: argparse.Namespace) -> int:
 def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path,
                calibration: bool = True) -> None:
     """Probes from session.toml, the calibration (``[calibration]``, ``ephyscon calibrate``) and the
-    run start times on the stimulus PC's clock (``ephyscon timing``, :mod:`ephyscon.pcclock`)."""
+    better run start times from the stimulus system (``ephyscon timing``, :mod:`ephyscon.runstart`)."""
     from ephyscon.calibration import apply_calibration, load_calibration
 
-    from ephyscon.pcclock import apply_run_starts
+    from ephyscon.runstart import apply_run_starts
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
@@ -355,12 +355,9 @@ def _load_config_for(session_path: Path, work_dir: Path, config: str | None) -> 
 
 
 def _timing(args: argparse.Namespace) -> int:
-    from datetime import datetime
-
     import numpy as np
-    import pandas as pd
 
-    from ephyscon.pcclock import write_run_start
+    from ephyscon.runstart import write_run_start
 
     from ephyscon.timing import WORK_DIR_NAME, extract_run_timing
 
@@ -381,13 +378,9 @@ def _timing(args: argparse.Namespace) -> int:
         for paradigm, trials in timing.trials.items():
             trials.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
             print(f"{run.name} {paradigm}: {len(trials)} trials")
-        header_start = run.extra.get("header_start_time")
-        trials_of_run = [t for t in timing.trials.values() if not t.empty]
-        record = write_run_start(work_dir, run.name,
-                                 datetime.fromisoformat(header_start) if header_start else run.start_time,
-                                 pd.concat(trials_of_run, ignore_index=True) if trials_of_run else pd.DataFrame())
-        if record is not None:
-            print(f"{run.name}: start {record['start_time']} ({record['method']})")
+        write_run_start(work_dir, run.name, run.recorded_start_time or run.start_time, timing.run_start)
+        if timing.run_start is not None:
+            print(f"{run.name}: start {timing.run_start.start_time.isoformat()} ({timing.run_start.method})")
         if timing.running_speed is not None:
             np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
         if timing.eye_position is not None:

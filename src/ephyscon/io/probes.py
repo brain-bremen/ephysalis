@@ -53,7 +53,7 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
             geometry["file"] = str(config_dir / geometry["file"])
         found = False
         for run in session.runs:
-            stream = _match_stream(run.extra.get("streams", []), probe_config.stream)
+            stream = _match_stream(run.streams, probe_config.stream)
             if stream is None:
                 continue
             found = True

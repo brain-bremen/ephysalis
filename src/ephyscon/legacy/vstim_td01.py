@@ -31,13 +31,16 @@ Frozen ``TD01`` (all records of a run carry the same trial number: the DAQ progr
 receive the numbers, Fritz 2005-04-28 runs a-d): the trials are matched to the day's ``.tdr``
 by time (port of ``trial_recovery.match_by_time``). The trial starts are put on the PC clock
 with the DAQ header time minus the day's DAQ-computer clock offset (median over the session's
-other runs of that day with trial stamps, :mod:`ephyscon.pcclock`); the residual shift (within
+other runs of that day with trial stamps, :mod:`ephyscon.legacy.pcclock`); the residual shift (within
 30 s) is the one under which most starts fall into the 1 s window of a ``.tdr`` stamp
 (``tAbsTrialStart``, NotStarted trials excluded), and each start takes, in order, the trial
 whose window it is in. Accepted if one-to-one and increasing for >= 95 % of the trials, with the
 trigger-line outcomes agreeing with the ``.tdr`` in >= 95 % of them; trial and stimulus numbers
 then come from the ``.tdr`` (column ``trial_number_source``). Otherwise the trials keep the
 frozen numbers and get their outcome from the trigger lines.
+
+Run start (:meth:`VStimTD01System.run_start`): on the VStim PC's clock, fitted to the ``.tdr``
+trial stamps (``pc_clock_time``; :mod:`ephyscon.legacy.pcclock`).
 """
 
 from __future__ import annotations
@@ -52,6 +55,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 import pandas as pd
 
+from ephyscon.runstart import RunStart
 from ephyscon.stimulus.base import Paradigm, StimulusSystem
 from ephyscon.sync import AUX
 
@@ -191,8 +195,8 @@ def match_by_time(pc_s: np.ndarray, tdr: dict[int, Any], outcomes: list[int | No
 
 
 def _header_start(run: Run) -> Any:
-    header = run.extra.get("header_start_time")
-    return pd.Timestamp(header).to_pydatetime() if header else run.start_time
+    """The DAQ header start (``start_time`` may already be the PC-clock start)."""
+    return run.recorded_start_time or run.start_time
 
 
 def _seconds_of_day(time: Any) -> float:
@@ -212,7 +216,7 @@ def _records(run: Run, descriptors: pd.DataFrame, starts: np.ndarray) -> list[tu
 def day_clock_offset(run: Run, start_bit: int) -> float | None:
     """Median DAQ header time minus PC time of the first sample over the other runs of the
     session recorded on the run's day that have trial stamps (s), or None."""
-    from ephyscon.pcclock import pc_fit
+    from ephyscon.legacy.pcclock import pc_fit
 
     header = _header_start(run)
     if header is None:
@@ -326,6 +330,22 @@ class VStimTD01System(StimulusSystem):
                 f"{report['n_trials']} trials, shift {report['shift_s']:+.2f} s from the day's clock offset "
                 f"{offset:.1f} s, trigger-line outcome agrees in {report['outcome_agreement']})"), tdr
 
+    def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
+        """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephyscon.legacy.pcclock`)."""
+        from datetime import datetime, timedelta
+
+        from ephyscon.legacy.pcclock import fit_method, pc_fit, trial_stamps
+
+        header = _header_start(run)
+        tables = [t for t in trials.values() if not t.empty]
+        if header is None or not tables:
+            return None
+        fit = pc_fit(*trial_stamps(pd.concat(tables, ignore_index=True)))
+        if fit is None:
+            return None
+        midnight = datetime(header.year, header.month, header.day)
+        return RunStart(midnight + timedelta(seconds=fit["offset_s"]), fit_method(fit), fit)
+
     def load_trials(self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None) -> pd.DataFrame:
         descriptors = _descriptors(run)
         assert descriptors is not None
@@ -365,7 +385,7 @@ class VStimTD01System(StimulusSystem):
                 if int(trial.stimulusNumber) != stimulus:
                     logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
                                    stimulus, int(trial.stimulusNumber))
-                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephyscon.pcclock)
+                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephyscon.legacy.pcclock)
                 row.update(outcome=int(trial.outcome.value), outcome_name=trial.outcome.name, outcome_source="tdr",
                            pc_clock_time=stamp,
                            time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),

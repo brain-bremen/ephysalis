@@ -26,8 +26,8 @@ of the BIDS schema are written for images (they require ``SpatialReference`` for
 
 With ``task`` (``session.toml`` ``task``, per run or per session) the files get the
 ``task-<label>`` entity, with one file per run (``export --per-run``) the ``run-<n>`` entity.
-``acq_time`` is the start of the first run of the file (DAQ runs: on the stimulus PC's clock
-after ``ephyscon timing``, :mod:`ephyscon.pcclock`).
+``acq_time`` is the start of the first run of the file (after ``ephyscon timing`` the better
+start time a stimulus system gives, :mod:`ephyscon.runstart`).
 
 Labels are the subject and session
 ids with everything but letters and digits removed; the session label also drops the subject
@@ -383,7 +383,7 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
         acq_time = min([acq_time, *[t for t in times if t != NA]])
     _upsert_tsv(sessions, {"session_id": f"ses-{session}", "acq_time": acq_time}, "session_id")
     session_dir = root / f"sub-{subject}" / f"ses-{session}"
-    runs = [tags[0] for tags in nwbfile.epochs.tags[:]] if nwbfile.epochs is not None else []
+    runs = [tags[0] for tags in nwbfile.epochs.to_dataframe().tags] if nwbfile.epochs is not None else []
     method = ""
     if nwbfile.epochs is not None and "start_time_method" in nwbfile.epochs.colnames:
         first = int(np.argmin(nwbfile.epochs.start_time[:]))
@@ -392,8 +392,8 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
                 {"filename": data_path.relative_to(session_dir).as_posix(), "acq_time": file_start_time(nwbfile),
                  "runs": ", ".join(runs), "start_time_method": method}, "filename")
     _write_json({
-        "acq_time": {"Description": "start of the first run of the file (its first sample); DAQ runs with trial "
-                     "stamps: on the stimulus PC's clock (ephyscon.pcclock), else the recording's start time"},
+        "acq_time": {"Description": "start of the first run of the file (its first sample): the recording's start "
+                     "time, or a better one from the stimulus system (start_time_method; ephyscon.runstart)"},
         "runs": {"Description": "runs of the recording in the file (session.toml run names)"},
         "start_time_method": {"Description": "how acq_time was obtained (n/a: the recording's start time)"},
     }, session_dir / f"sub-{subject}_ses-{session}_scans.json")

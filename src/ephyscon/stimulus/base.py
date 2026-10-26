@@ -24,6 +24,7 @@ from ephyscon.session import Run
 
 if TYPE_CHECKING:
     from ephyscon.auxsignals import AuxSignals
+    from ephyscon.runstart import RunStart
     from ephyscon.sync import RunSync
 
 
@@ -62,6 +63,12 @@ class StimulusSystem(ABC):
         """:meth:`load_conditions` plus ``start_time`` and ``stop_time`` in s on the reference
         clock of ``sync``. Trials without a detected time are dropped (with a warning)."""
         raise NotImplementedError(f"Stimulus system {self.name} does not provide trial times yet")
+
+    def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
+        """A better start time of the run than the recording's, from the stimulus system's own
+        clock and the run's trials (:meth:`load_trials` of its paradigms), or None
+        (:mod:`ephyscon.runstart`)."""
+        return None
 
 
 def get_stimulus_system(name: str) -> StimulusSystem:

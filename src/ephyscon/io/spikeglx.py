@@ -81,6 +81,13 @@ def _num_neural_channels(meta: dict[str, str]) -> int:
 class SpikeGLXFormat(InputFormat):
     name: ClassVar[str] = "spikeglx"
 
+    def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
+        """The MATLAB pipeline's NIDQ layout for 8 or 4 analog inputs."""
+        from ephyscon.session_config import AuxChannelMap
+
+        n_analog = run.extra.get("aux", {}).get("n_analog", 8) if run is not None else 8
+        return AuxChannelMap.legacy_default(n_analog)
+
     def can_read(self, session_path: Path) -> bool:
         return self._is_run(session_path) or any(
             self._is_run(d) for d in session_path.iterdir() if d.is_dir()

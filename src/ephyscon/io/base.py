@@ -44,12 +44,11 @@ class InputFormat(ABC):
         """Return a lazy recording of one stream of a run."""
 
     def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
-        """Roles of the aux channels when ``session.toml`` defines none: the MATLAB pipeline's
-        NIDQ layout (8 or 4 analog inputs, ``run.extra["aux"]["n_analog"]``)."""
+        """Roles of the aux channels when ``session.toml`` defines none (default: the MATLAB
+        pipeline's 8-input NIDQ layout)."""
         from ephyscon.session_config import AuxChannelMap
 
-        n_analog = run.extra.get("aux", {}).get("n_analog", 8) if run is not None else 8
-        return AuxChannelMap.legacy_default(n_analog)
+        return AuxChannelMap.legacy_default(8)
 
     # Sync and auxiliary channels. Optional: formats without them can't be synchronised.
 

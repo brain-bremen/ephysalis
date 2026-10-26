@@ -125,7 +125,7 @@ offset_ms = 650                # derived, not measured
 Runs whose `TD01` records all carry the same trial number (the DAQ program did not receive them,
 Fritz 2005-04-28) are matched to the day's `.tdr` by time, with the PC clock of the day's other
 runs. `timing` also fits each run's start on the stimulus PC's clock from the `.tdr` trial stamps
-(`ephyscon.pcclock`): it places the runs of a session file and is the BIDS `acq_time`. With
+(`ephyscon.legacy.pcclock`, via the generic `ephyscon.runstart`): it places the runs of a session file and is the BIDS `acq_time`. With
 `task = "shapetracking"` in `session.toml` (or per run) the BIDS files get the `task` entity;
 `scans.tsv` lists every file with its `acq_time`.
 

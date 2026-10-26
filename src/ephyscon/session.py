@@ -59,8 +59,14 @@ class Run:
     duration_s: float | None = None
     probes: dict[str, ProbeInfo] = field(default_factory=dict)
     aux_stream: str | None = None
-    extra: dict = field(default_factory=dict)  # format-specific details
-
+    streams: list[str] = field(default_factory=list)  # names of all streams (probes in session.toml pick one)
+    # time of the first sample on the acquisition clock (s), the time axis of a file per run
+    # (``export --per-run``); 0 for formats whose clock starts with the recording
+    clock_start_s: float = 0.0
+    # start time as recorded, when ``start_time`` was replaced by a better one (ephyscon.runstart)
+    recorded_start_time: datetime | None = None
+    start_time_method: str = ""  # how ``start_time`` was obtained, if not from the recording
+    extra: dict = field(default_factory=dict)  # format-specific details, used only by the format
     def get_recording(self, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
         recording = self.format.get_recording(self, kind, probe_id)
         info = self.probes.get(probe_id) if probe_id is not None else None

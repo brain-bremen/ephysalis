@@ -827,15 +827,15 @@ class DaqFormat(InputFormat):
                     start_time=(start + timedelta(microseconds=(t0 - first_t0) / 1000)) if start != datetime.max else None,
                     duration_s=file.part(region, main.name).n_samples * main.period_ns / 1e9,
                     aux_stream=main.name,
+                    streams=[s.name for s in file.streams],
+                    clock_start_s=t0 / 1e9,  # the DAQ clock (time axis of a file per run)
                     extra={
                         "file": str(path),
                         "region": region,
                         "file_version": ".".join(map(str, index.header.file_version)),
                         "boards": list(index.header.boards),
-                        "streams": [s.name for s in file.streams],
                         "aux_streams": [main.name],
                         "start_ns": t0,
-                        "clock_start_s": t0 / 1e9,  # the DAQ clock (time axis of a file per run)
                         "board_fit": file.fit,
                         "damaged": list(index.damaged),
                         "truncated_bytes": index.truncated_bytes,

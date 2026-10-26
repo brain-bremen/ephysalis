@@ -354,11 +354,11 @@ class OpenEphysFormat(InputFormat):
                     probes={pid: ProbeInfo(probe_id=pid, has_lf=StreamKind.LF in kinds, streams=dict(kinds))
                             for pid, kinds in sorted(probes.items())},
                     aux_stream=aux_streams[0] if aux_streams else None,
+                    streams=[s.name for s in streams],
                     extra={
                         "position": position,
                         "oe_format": str(recording.format),
                         "aux_streams": aux_streams,
-                        "streams": [s.name for s in streams],
                         "record_node": record_node,
                     },
                 )

@@ -1,4 +1,4 @@
-"""Trials of DAQ runs from TD01 + .tdr (ephyscon.stimulus.vstim_td01) on a synthetic DAQ file
+"""Trials of DAQ runs from TD01 + .tdr (ephyscon.legacy.vstim_td01) on a synthetic DAQ file
 and a synthetic VStim 1.3 .tdr. On real data (Fritz 2005-03-30 runs a and e, 2006-09-01 run c)
 the trials equal the TRIALMAP of the BIDS conversions (numbers, stimuli, outcomes, times)."""
 
@@ -12,7 +12,7 @@ import pytest
 from ephyscon.cli.main import main
 from ephyscon.io.base import open_session
 from ephyscon.stimulus.base import detect_stimulus_system
-from ephyscon.stimulus.vstim_td01 import TRIAL_END_AFTER_OUTCOME_PULSE_MS, tdr_date
+from ephyscon.legacy.vstim_td01 import TRIAL_END_AFTER_OUTCOME_PULSE_MS, tdr_date
 from test_daq import write_v2
 
 T0 = 13_127_830_000_000  # DAQ clock (ns) at the first sample

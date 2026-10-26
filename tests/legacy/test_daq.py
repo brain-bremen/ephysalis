@@ -1,6 +1,6 @@
-"""The DAQ reader (ephyscon.io.daq) on synthetic files of file versions 1.0, 2.0 and 3.3.
+"""The DAQ reader (ephyscon.legacy.daq) on synthetic files of file versions 1.0, 2.0 and 3.3.
 
-The real recordings (Fritz 2004-2006, Walter 2000) may not be published; ``ephyscon.io.daq`` was
+The real recordings (Fritz 2004-2006, Walter 2000) may not be published; ``ephyscon.legacy.daq`` was
 checked against the readers of the BIDS conversions on them (samples, events and trial
 descriptors identical, board fit as in ``clocksync.card_fit``)."""
 
@@ -13,7 +13,7 @@ import pytest
 
 from ephyscon.cli.main import main
 from ephyscon.io.base import open_session
-from ephyscon.io.daq import DaqFormat, board_fit, daq_file, read_index
+from ephyscon.legacy.daq import DaqFormat, board_fit, daq_file, read_index
 from ephyscon.session import StreamKind
 from ephyscon.sync import AUX
 
@@ -142,7 +142,7 @@ def write_v3(path: Path, rate_hz: float = 1000.0, record: int = 100, n_records: 
 def test_v3_boards_and_clock_maps(tmp_path):
     write_v3(tmp_path / "f_task_a.daq")
     run = open_session(tmp_path).runs[0]
-    assert run.extra["streams"] == ["ADC64 F/H - Board 1", "MC-128 - Board 1"]
+    assert run.streams == ["ADC64 F/H - Board 1", "MC-128 - Board 1"]
     board1 = run.get_recording(StreamKind.AUX)
     assert list(board1.channel_ids) == ["AI0", "AI1", "AI5"] and board1.get_num_samples() == 3000
     np.testing.assert_array_equal(board1.get_traces(start_frame=95, end_frame=105, channel_ids=["AI1"])[:, 0],
@@ -189,7 +189,7 @@ def test_v3_damaged_bytes_cut_end_and_pause(tmp_path):
 
 def test_index_cache(tmp_path):
     """The record index is kept on disk and read back identically by a new process."""
-    from ephyscon.io import daq
+    from ephyscon.legacy import daq
 
     path = str(write_v3(tmp_path / "f.daq", garbage_after=4, cut_last=10))
     scanned = read_index(path)

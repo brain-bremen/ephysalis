@@ -33,7 +33,7 @@ def test_discovery(fmt):
     assert isinstance(session.format, OpenEphysFormat)
     run = session.runs[0]
     assert [r.name for r in session.runs] == ["experiment1_recording1"]
-    assert run.extra["streams"] == [STREAM] and run.aux_stream == STREAM and run.probes == {}
+    assert run.streams == [STREAM] and run.aux_stream == STREAM and run.probes == {}
     recording = run.get_recording(StreamKind.AUX)
     assert recording.get_num_channels() == 16 and recording.sampling_frequency == 40000
     assert list(recording.channel_ids[:2]) == ["CH1", "CH2"]

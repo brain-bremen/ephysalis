@@ -8,7 +8,9 @@ import pytest
 from ephyscon.annotations import event_code_names, line_pulses, markers
 from ephyscon.cli.main import main
 from ephyscon.session_config import EventsConfig, MarkerConfig, TriggerLineConfig
-from test_vstim_td01 import MS, T0, _session, write_tdr
+from synthetic import write_openephys
+
+MS = 1_000_000  # ns
 
 
 def _events(rows):
@@ -50,36 +52,46 @@ def test_markers():
 
 
 def test_dh5_nwb_bids_annotations(tmp_path):
-    starts = [1000, 6000]
-    events = []
+    starts = [1000, 6000]  # ms = samples at 1 kHz
+    ttl = []
     for s in starts:
-        events += [(T0 + s * MS, 1, 1), (T0 + (s + 300) * MS, -1, 0), (T0 + (s + 400) * MS, 3, 1),
-                   (T0 + (s + 2000) * MS, -3, 0), (T0 + (s + 500) * MS, -15, 0), (T0 + (s + 2500) * MS, 15, 0)]
-    td01 = [(T0 + (s + 2) * MS, n, 1) for s, n in zip(starts, (1, 2))]
-    session = _session(tmp_path / "ses", sorted(events), td01)
-    write_tdr(session / "2005_03_30.tdr", [(1, 1, 1, 3.0), (2, 1, 7, 3.0)])
-    (tmp_path / "session.toml").write_text(
-        'schema_version = 5\nsession_id = "s"\nsubject_id = "fritz"\n'
-        '[aux_channels.digital]\ntrial_start = 0\ninterval2 = 2\nlever_pressed = 14\n'
-        '[events.lines.lever_pressed]\nactive = "low"\ndescription = "lever pressed"\n'
-        '[[events.markers]]\nname = "lever_release"\nrole = "lever_pressed"\nedge = "offset"\n'
-        '[[events.markers]]\nname = "derived_sample_onset"\nrole = "interval2"\noffset_ms = 650\n')
+        ttl += [(s, 1, 1), (s + 300, 1, 0), (s + 400, 3, 1), (s + 2000, 3, 0), (s + 500, 15, 0), (s + 2500, 15, 1)]
+    session = write_openephys(tmp_path / "ses", [{"data": np.zeros((10_000, 2)), "ttl": ttl}])
+    (tmp_path / "session.toml").write_text("""schema_version = 5
+session_id = "s"
+subject_id = "m"
+[aux_channels]
+analog = {}
+[aux_channels.digital]
+interval0 = 0
+interval2 = 2
+lever_pressed = 14
+[events.lines.lever_pressed]
+active = "low"
+description = "lever pressed"
+[[events.markers]]
+name = "lever_release"
+role = "lever_pressed"
+edge = "offset"
+[[events.markers]]
+name = "derived_sample_onset"
+role = "interval2"
+offset_ms = 650
+""")
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
     assert main(["timing", str(session), *common]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "--per-run", "-o",
                  str(tmp_path / "out.dh5")]) == 0
-    t0 = T0 / 1e9  # DAQ clock
-    with h5py.File(next(tmp_path.glob("out_*.dh5"))) as f:
+    with h5py.File(next(tmp_path.glob("out_*.dh5"))) as f:  # on the run's clock: 0 = first sample
         lever = f["Intervals"]["lever_pressed"][()]
-        np.testing.assert_array_equal(lever["start_time"], [T0 + 1500 * MS, T0 + 6500 * MS])
-        np.testing.assert_array_equal(lever["end_time"], [T0 + 3500 * MS, T0 + 8500 * MS])
+        np.testing.assert_array_equal(lever["start_time"], [1500 * MS, 6500 * MS])
+        np.testing.assert_array_equal(lever["end_time"], [3500 * MS, 8500 * MS])
         assert "active low" in f["Intervals"]["lever_pressed"].attrs["Source"]
-        assert f["Intervals"]["run_fritz_2005_03_30_task_a"][0]["start_time"] == T0
-        np.testing.assert_array_equal(f["Markers"]["trial_start"][()], [T0 + 1000 * MS, T0 + 6000 * MS])
-        np.testing.assert_array_equal(f["Markers"]["lever_release"][()], [T0 + 3500 * MS, T0 + 8500 * MS])
-        np.testing.assert_array_equal(f["Markers"]["derived_sample_onset"][()], [T0 + 2050 * MS, T0 + 7050 * MS])
+        assert f["Intervals"]["run_experiment1_recording1"][0]["start_time"] == 0
+        np.testing.assert_array_equal(f["Markers"]["lever_release"][()], [3500 * MS, 8500 * MS])
+        np.testing.assert_array_equal(f["Markers"]["derived_sample_onset"][()], [2050 * MS, 7050 * MS])
         legend = dict(zip(f["EV02"].attrs["EventNames"].astype(str), f["EV02"].attrs["EventCodes"]))
-        assert legend["lever_pressed_on"] == -15 and legend["trial_start_on"] == 1
+        assert legend["lever_pressed_on"] == -15 and legend["interval0_on"] == 1
     bids = tmp_path / "bids"
     assert main(["export", str(session), *common, "--per-run", "--bids", str(bids)]) == 0
     from pynwb import NWBHDF5IO
@@ -88,9 +100,9 @@ def test_dh5_nwb_bids_annotations(tmp_path):
     with NWBHDF5IO(str(nwb_path), "r") as io:
         nwbfile = io.read()
         pulses = nwbfile.intervals["trigger_pulses"].to_dataframe()
-        assert pulses[pulses.role == "interval2"].start_time.tolist() == pytest.approx([t0 + 1.4, t0 + 6.4])
+        assert pulses[pulses.role == "interval2"].start_time.tolist() == pytest.approx([1.4, 6.4])
         names = nwbfile.processing["events"]["markers"].to_dataframe().label
-        assert set(names) == {"trial_start", "lever_release", "derived_sample_onset"}
+        assert set(names) == {"lever_release", "derived_sample_onset"}
     table = pd.read_csv(next(bids.rglob("*_events.tsv")), sep="\t")
     lever_rows = table[table.trial_type == "lever_pressed"]
     assert lever_rows.duration.tolist() == pytest.approx([2.0, 2.0]) and set(lever_rows.ttl_line) == {15}

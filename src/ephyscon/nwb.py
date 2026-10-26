@@ -123,7 +123,7 @@ def time_axis(session: Session, config: SessionConfig | None, run_clock: bool = 
     """Included runs, their start in s on the file's time axis, and the time of its 0: the
     session axis (``SESSION_START_MARGIN_S`` before the first run), or with ``run_clock`` the
     own clock of the session's only run (its acquisition clock where the format keeps one,
-    ``run.extra["clock_start_s"]``, e.g. the DAQ clock; else 0 at its first sample)."""
+    ``Run.clock_start_s``, e.g. the DAQ clock; else 0 at its first sample)."""
     runs = included_runs(session, config)
     if not run_clock:
         offsets = run_offsets(runs)
@@ -134,7 +134,7 @@ def time_axis(session: Session, config: SessionConfig | None, run_clock: bool = 
     run = runs[0]
     if run.start_time is None:
         raise ValueError(f"run {run.name} has no start time")
-    origin = float(run.extra.get("clock_start_s", 0.0))
+    origin = float(run.clock_start_s)
     return runs, {run.name: origin}, run.start_time - timedelta(seconds=origin)
 
 
@@ -257,9 +257,9 @@ def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config:
 
 
 def _add_epochs_and_trials(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
-    methods = {"start_time_method": [str(run.extra.get("start_time_method", "")) for run in runs]}
+    methods = {"start_time_method": [run.start_time_method for run in runs]}
     if any(methods["start_time_method"]):
-        nwbfile.add_epoch_column("start_time_method", "how the run's start time was obtained (ephyscon.pcclock); "
+        nwbfile.add_epoch_column("start_time_method", "how the run's start time was obtained (ephyscon.runstart); "
                                  "empty: the recording's start time")
     else:
         methods = {}
