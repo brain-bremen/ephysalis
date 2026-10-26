@@ -63,3 +63,38 @@ def test_run_start_task_and_scans(tmp_path):
 
     with h5py.File(data) as f:  # still on the DAQ clock
         assert f["Markers"]["trial_start"][0] == T0 + 1000 * MS
+
+
+def test_frozen_td01_matched_by_time(tmp_path):
+    """Run b's TD01 records all carry trial 99; run a of the same day gives the PC clock, and
+    b's trials are matched to the day's .tdr by time."""
+    from test_daq import write_v2
+
+    header_ahead = 396.75  # DAQ computer clock minus PC clock
+    session = tmp_path / "ses"
+    session.mkdir()
+    tdr_trials, stamps = [], []
+    for k, (name, header) in enumerate((("task_a", (2005, 3, 30, 11, 49, 37)), ("task_b", (2005, 3, 30, 12, 10, 0)))):
+        starts_ms = [1000 + 1530 * j for j in range(12)]
+        pc_start = header[3] * 3600 + header[4] * 60 + header[5] - header_ahead
+        events, td01 = [], []
+        for j, s in enumerate(starts_ms):
+            number = 1 + 12 * k + j
+            events += [(T0 + s * MS, 1, 1), (T0 + (s + 300) * MS, -1, 0)]
+            events += [(T0 + (s + 800) * MS, 14 if j % 3 else 11, 0), (T0 + (s + 900) * MS, -(14 if j % 3 else 11), 0)]
+            td01.append((T0 + (s + 2) * MS, *((99, 7) if name == "task_b" else (number, 1 + j % 4))))
+            tdr_trials.append((number, 1 + j % 4, 1 if j % 3 else 7, 1.0))
+            stamps.append(np.floor(pc_start + s / 1000 * (1 + 35e-6)))
+        write_v2(session / f"fritz_2005_03_30_{name}.daq", [(T0, np.zeros((20_000, 4), np.int16))],
+                 events=sorted(events), trials=td01, date=header)
+    write_tdr(session / "2005_03_30.tdr", tdr_trials,
+              stamps=[f"{int(c) // 3600:02d}:{int(c) % 3600 // 60:02d}:{int(c) % 60:02d}" for c in stamps])
+    (tmp_path / "session.toml").write_text(
+        'schema_version = 5\nsession_id = "20050330"\nsubject_id = "fritz"\n'
+        '[aux_channels.digital]\ntrial_start = 0\neye_error = 10\nreward = 13\n')
+    common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
+    assert main(["timing", str(session), *common]) == 0
+    trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("fritz_2005_03_30_task_b_*.csv")))
+    assert trials.vstim_trial.tolist() == list(range(13, 25))
+    assert trials.condition.tolist() == [1 + j % 4 for j in range(12)] and trials.outcome_source.eq("tdr").all()
+    assert trials.trial_number_source[0].startswith("TD01 frozen (all records trial 99): matched to the .tdr by time (12/12")

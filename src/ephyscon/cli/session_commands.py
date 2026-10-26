@@ -258,7 +258,8 @@ def _sort(args: argparse.Namespace) -> int:
     return 0
 
 
-def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path) -> None:
+def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path,
+               calibration: bool = True) -> None:
     """Probes from session.toml, the calibration (``[calibration]``, ``ephyscon calibrate``) and the
     run start times on the stimulus PC's clock (``ephyscon timing``, :mod:`ephyscon.pcclock`)."""
     from ephyscon.calibration import apply_calibration, load_calibration
@@ -267,7 +268,8 @@ def _configure(session: Session, config: SessionConfig | None, config_path: Path
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
-    apply_calibration(session, load_calibration(config, config_dir, work_dir))
+    if calibration:  # not needed by steps that use no gains (timing)
+        apply_calibration(session, load_calibration(config, config_dir, work_dir))
     apply_run_starts(session, work_dir)
 
 
@@ -365,7 +367,7 @@ def _timing(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    _configure(session, config, config_path, work_dir)
+    _configure(session, config, config_path, work_dir, calibration=False)
     cache = SyncEdgeCache(work_dir / "sync")
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     (work_dir / "running_speed").mkdir(exist_ok=True)

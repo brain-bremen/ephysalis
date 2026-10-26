@@ -16,9 +16,10 @@ Steps (each one optional, outputs in a work dir per session):
 | Step | Output |
 |---|---|
 | `sync` | sync edges of all streams (clock maps between probes and the aux stream) |
-| `timing` | trials of all paradigms (stimulus system plugins: stimstage, VStim), running speed, eye position, events (TTL lines, VStim network events) |
+| `timing` | trials of all paradigms (stimulus system plugins: stimstage, VStim), running speed, eye position, events (TTL lines, VStim network events); DAQ runs: start on the stimulus PC's clock from the `.tdr` trial stamps |
 | `calibrate` | channel gains from a calibration-sine recording (`[calibration]`) |
 | `lfp` | LFP per run and probe, 1 kHz; mains removal with the recorded mains (`[line_noise]`) |
+| `quality` | good/bad channels per run from the LFP (`[probes.<id>.quality]`); the CSD then uses the good ones |
 | `csd` | current source density of 2-D arrays (`[probes.<id>.csd]`, port of Borisov's `dh_csd`) |
 | `mua` | MUA envelope per run and probe, 1 kHz (300 Hz high-pass, rectified) |
 | `sort` | spike sorting per probe over all runs |
@@ -96,6 +97,7 @@ subtract_reference_mean = true     # as the BIDS conversions (default false: as 
 mains = 46
 [probes.epidural.csd]              # dh_csd V3.1 [RBF]: grid 3 mm, RBF parameter 2.2758, 1 Ohm m
 exclude_inputs = ["AI20"]
+[probes.epidural.quality]          # channel selection of the BIDS conversions (intracortical: neighbour_radius_um = 2100)
 ```
 
 Trials of DAQ runs come from the `TD01` records joined with the day's VStim `.tdr` (stimulus
@@ -108,11 +110,29 @@ eye_error = 10               # lines 11-14: outcome pulses
 early_error = 11
 late_error = 12
 reward = 13
+lever_pressed = 14
 # 2006 setup: trial_start = 0, trial_end = 11 (line 12), reward = 15
+
+[events.lines.lever_pressed]   # pulses (DH5 /Intervals, BIDS events.tsv): active edge to the opposite one
+active = "low"
+description = "lever pressed"
+[[events.markers]]             # DH5 /Markers (trial_start is always written)
+name = "derived_sample_onset"
+role = "interval2"
+offset_ms = 650                # derived, not measured
 ```
 
-`ephyscon calibrate`, then `lfp` (with mains removal) and `csd`. On Fritz 2005-03-30 the LFP after
-mains removal equals the BIDS dataset sample by sample (with `subtract_reference_mean`).
+Runs whose `TD01` records all carry the same trial number (the DAQ program did not receive them,
+Fritz 2005-04-28) are matched to the day's `.tdr` by time, with the PC clock of the day's other
+runs. `timing` also fits each run's start on the stimulus PC's clock from the `.tdr` trial stamps
+(`ephyscon.pcclock`): it places the runs of a session file and is the BIDS `acq_time`. With
+`task = "shapetracking"` in `session.toml` (or per run) the BIDS files get the `task` entity;
+`scans.tsv` lists every file with its `acq_time`.
+
+`ephyscon calibrate`, then `lfp` (with mains removal), `quality` and `csd`. On Fritz 2005-03-30 the
+LFP after mains removal equals the BIDS dataset sample by sample (with `subtract_reference_mean`),
+the channel selection its `channels.tsv`; trials and run starts of 2005-03-30 and 2005-04-28 (with
+the frozen runs) equal its trial maps and `scans.tsv`.
 
 ### `session.toml`
 
@@ -121,7 +141,7 @@ aux channels and the events. It replaces the Excel font-colour convention, `Dept
 `BrokenChannelsProbe<N>_0Index.txt` and `folders2Combine.txt` of the MATLAB pipeline:
 
 ```toml
-schema_version = 4
+schema_version = 5
 session_id = "SOMxCD1_172_20250109_Recording1"
 subject_id = "SOMxCD1_172"
 
@@ -152,13 +172,15 @@ exclude_roles = ["sync", "wheel"]
 |---|---|
 | CONT 1 – 1600 | raw AP/wideband data (`export --raw`), one block per channel over all probes |
 | CONT 1601 – 2000 | analog inputs of the aux stream (`export --raw`) |
-| CONT 2001 – 3600 | LFP |
+| CONT 2001 – 3600 | LFP (`ChannelStatus` / `ChannelStatusDescription`: channel selection) |
 | CONT 3601 | running speed; CONT 3602/3603 eye position x/y |
 | CONT 4001 – 5600 | MUA envelope |
 | CONT 8001 – 9600 | CSD (int16 scaled as `dh_csd`: max / 32766.99 A/m³ per count) |
 | SPIKE `10000 · probe index + unit id` | spike times and mean waveform per unit |
 | TRIALMAP | trials of all runs |
-| EV02 | TTL edges (`+line`/`-line`), VStim network events (`word + 1000`), names as attributes |
+| EV02 | TTL edges (`+line`/`-line`), VStim network events (`word + 1000`), names as attributes (`EventCodes`/`EventNames`: `<role>_on` = active edge) |
+| /Intervals | `<role>`: pulses of each trigger line with a role; `run_<name>`: the runs |
+| /Markers | `trial_start` and the `[[events.markers]]` |
 
 Trial parameters and unit metrics are in `<file>_trials.csv` and `<file>_units.csv` next to it.
 

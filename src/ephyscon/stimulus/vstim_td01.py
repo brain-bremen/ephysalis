@@ -23,11 +23,21 @@ Per ``TD01`` record:
 The ``.tdr``: VStim wrote one per day, and a session folder can hold runs of other days. The
 candidates are the ``.tdr`` files of the session folder and of its sibling folders whose date
 (4th line of the file) is the run's date (DAQ header), else all of the session folder; the one
-with most trial numbers of the run (with the same stimulus number) is used.
+with most trial numbers of the run minus stimulus mismatches is used, unless it has less than
+half of the run's trials or more than 5 % mismatches (then the run has no ``.tdr``; as
+``tdr_match`` of the BIDS conversions).
 
-Not handled: runs whose ``TD01`` records all carry the same trial number (DAQ program did not
-receive the numbers, Fritz 2005-04-28): logged, the trials then get their outcome from the
-trigger lines and no ``.tdr`` parameters.
+Frozen ``TD01`` (all records of a run carry the same trial number: the DAQ program did not
+receive the numbers, Fritz 2005-04-28 runs a-d): the trials are matched to the day's ``.tdr``
+by time (port of ``trial_recovery.match_by_time``). The trial starts are put on the PC clock
+with the DAQ header time minus the day's DAQ-computer clock offset (median over the session's
+other runs of that day with trial stamps, :mod:`ephyscon.pcclock`); the residual shift (within
+30 s) is the one under which most starts fall into the 1 s window of a ``.tdr`` stamp
+(``tAbsTrialStart``, NotStarted trials excluded), and each start takes, in order, the trial
+whose window it is in. Accepted if one-to-one and increasing for >= 95 % of the trials, with the
+trigger-line outcomes agreeing with the ``.tdr`` in >= 95 % of them; trial and stimulus numbers
+then come from the ``.tdr`` (column ``trial_number_source``). Otherwise the trials keep the
+frozen numbers and get their outcome from the trigger lines.
 """
 
 from __future__ import annotations
@@ -95,20 +105,140 @@ def _candidates(run: Run) -> list[Path]:
     return same_day or own
 
 
+def _readable_tdr(path: Path) -> dict[int, Any] | None:
+    try:
+        return _tdr_trials(str(path))
+    except Exception as error:  # noqa: BLE001 (a damaged .tdr must not stop the search)
+        logger.warning("%s: not read (%s)", path, error)
+        return None
+
+
 def find_tdr(run: Run, descriptors: pd.DataFrame) -> Path | None:
-    """The ``.tdr`` with most of the run's trial numbers (and the same stimulus numbers)."""
-    best, best_score = None, 0
+    """The ``.tdr`` of the run's trials (see the module docs), or None."""
+    best, best_hits, best_mismatches = None, -1, 0
     pairs = list(zip(descriptors.trial_number.tolist(), descriptors.stimulus_number.tolist()))
     for path in _candidates(run):
-        try:
-            trials = _tdr_trials(str(path))
-        except Exception as error:  # noqa: BLE001 (a damaged .tdr must not stop the search)
-            logger.warning("%s: not read (%s)", path, error)
+        trials = _readable_tdr(path)
+        if trials is None:
             continue
-        score = sum(1 for no, stim in pairs if no in trials and trials[no].stimulusNumber == stim)
-        if score > best_score:
-            best, best_score = path, score
-    return best
+        hits = [(no, stim) for no, stim in pairs if no in trials]
+        mismatches = sum(int(trials[no].stimulusNumber) != stim for no, stim in hits)
+        if len(hits) - mismatches > best_hits - best_mismatches:
+            best, best_hits, best_mismatches = path, len(hits), mismatches
+    if best is not None and (best_hits < 0.5 * len(pairs) or best_mismatches > 0.05 * max(best_hits, 1)):
+        logger.warning("Run %s: best .tdr %s rejected (%d of %d trials, %d stimulus mismatches)", run.name, best.name,
+                       best_hits, len(pairs), best_mismatches)
+        return None
+    return best if best_hits > 0 else None
+
+
+def frozen(descriptors: pd.DataFrame) -> bool:
+    """All TD01 records (>= 3) carry the same trial number."""
+    return len(descriptors) >= 3 and descriptors.trial_number.nunique() == 1
+
+
+SHIFT_RANGE_S, SHIFT_STEP_S, STAMP_TOLERANCE_S = 30.0, 0.01, 0.1
+MIN_MATCHED, MIN_OUTCOME_AGREEMENT = 0.95, 0.95
+
+
+def stamp_seconds(trial: Any) -> int | None:
+    """``tAbsTrialStart`` (hh:mm:ss) in s since midnight."""
+    stamp = str(trial.tAbsTrialStart or "")
+    if stamp.count(":") != 2:
+        return None
+    hh, mm, ss = map(int, stamp.split(":"))
+    return hh * 3600 + mm * 60 + ss
+
+
+def match_by_time(pc_s: np.ndarray, tdr: dict[int, Any], outcomes: list[int | None]) -> tuple[list[int | None], dict]:
+    """``.tdr`` trial number (or None) per trial start (``pc_s``: approximate PC time of day in
+    s); ``outcomes``: the trigger-line outcome per trial (for the check). Raises ValueError if
+    the checks fail (see the module docs)."""
+    from vstim.tdr import TrialOutcome
+
+    candidates = sorted((n for n, t in tdr.items() if t.outcome != TrialOutcome.NotStarted and stamp_seconds(t) is not None),
+                        key=lambda n: (stamp_seconds(tdr[n]), n))
+    numbers = np.array(candidates)
+    stamps = np.array([stamp_seconds(tdr[n]) for n in candidates], float)
+
+    def assign(shift: float) -> tuple[np.ndarray, np.ndarray]:
+        x = pc_s + shift
+        j = np.searchsorted(stamps, x + STAMP_TOLERANCE_S, side="right") - 1
+        ok = (j >= 0) & (x - stamps[np.clip(j, 0, None)] < 1 + STAMP_TOLERANCE_S)
+        return j, ok
+
+    if not len(stamps):
+        raise ValueError("no started .tdr trial with a time stamp")
+    shifts = np.arange(-SHIFT_RANGE_S, SHIFT_RANGE_S, SHIFT_STEP_S)
+    score = np.array([assign(float(s))[1].sum() for s in shifts])
+    shift = float(np.median(shifts[score == score.max()]))  # centre of the best plateau
+    j, ok = assign(shift)
+    used: set[int] = set()
+    last = -1
+    for k in range(len(j)):  # one-to-one and in order
+        if ok[k] and (j[k] in used or j[k] <= last):
+            ok[k] = False
+        if ok[k]:
+            used.add(int(j[k]))
+            last = int(j[k])
+    out = [int(numbers[j[k]]) if ok[k] else None for k in range(len(j))]
+    agree = sum(o == int(tdr[n].outcome.value) for o, n in zip(outcomes, out) if n is not None)
+    matched = int(ok.sum())
+    report = {"n_trials": len(out), "n_matched": matched, "shift_s": round(shift, 2), "outcome_agreement": int(agree)}
+    if matched < MIN_MATCHED * len(out) or agree < MIN_OUTCOME_AGREEMENT * max(matched, 1):
+        raise ValueError(f"time matching with the .tdr failed: {report}")
+    return out, report
+
+
+def _header_start(run: Run) -> Any:
+    header = run.extra.get("header_start_time")
+    return pd.Timestamp(header).to_pydatetime() if header else run.start_time
+
+
+def _seconds_of_day(time: Any) -> float:
+    return time.hour * 3600 + time.minute * 60 + time.second + time.microsecond / 1e6
+
+
+def _records(run: Run, descriptors: pd.DataFrame, starts: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """(trial start sample, TD01 sample, trial number, stimulus number) of the records with a start edge."""
+    records = []
+    for sample, number, stimulus in zip(descriptors.aux_sample, descriptors.trial_number, descriptors.stimulus_number):
+        before = starts[starts <= sample]
+        if before.size:
+            records.append((int(before[-1]), int(sample), int(number), int(stimulus)))
+    return records
+
+
+def day_clock_offset(run: Run, start_bit: int) -> float | None:
+    """Median DAQ header time minus PC time of the first sample over the other runs of the
+    session recorded on the run's day that have trial stamps (s), or None."""
+    from ephyscon.pcclock import pc_fit
+
+    header = _header_start(run)
+    if header is None:
+        return None
+    offsets = []
+    for other in run.format.open_session(run.path).runs:
+        if other.name == run.name or other.start_time is None or other.start_time.date() != header.date():
+            continue
+        descriptors = _descriptors(other)
+        if descriptors is None or not len(descriptors) or frozen(descriptors):
+            continue
+        path = find_tdr(other, descriptors)
+        if path is None:
+            continue
+        tdr = _tdr_trials(str(path))
+        fs = other.format.aux_sampling_frequency(other)
+        c, s = [], []
+        for start, _, number, _ in _records(other, descriptors, _rising(other.format.read_ttl_events(other), start_bit)):
+            stamp = stamp_seconds(tdr[number]) if number in tdr else None
+            if stamp is not None:
+                c.append(stamp)
+                s.append(start / fs)
+        fit = pc_fit(np.array(c, float), np.array(s, float))
+        if fit is not None:
+            offsets.append(_seconds_of_day(other.start_time) - fit["offset_s"])
+    return float(np.median(offsets)) if offsets else None
 
 
 def tdr_trial_end_ms(trial: Any) -> float | None:
@@ -143,14 +273,19 @@ class VStimTD01System(StimulusSystem):
         descriptors = _descriptors(run)
         if descriptors is None or not len(descriptors):
             return []
-        path = find_tdr(run, descriptors)
+        is_frozen = frozen(descriptors)
+        if is_frozen:  # matched by time in load_trials: the day's .tdr
+            day = run.start_time.date() if run.start_time is not None else None
+            path = next((p for p in _candidates(run) if day is None or tdr_date(p) == day), None)
+        else:
+            path = find_tdr(run, descriptors)
         name = "trials"
         metadata: dict[str, Any] = {"tdr": None}
         if path is not None:
             header = _read_tdr(str(path)).headers[0]
             ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
             name = ini or path.stem
-            metadata = {"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None)}
+            metadata = {"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None), "td01_frozen": is_frozen}
         else:
             logger.warning("Run %s: no .tdr with its trial numbers found; outcomes from the trigger lines", run.name)
         return [Paradigm(name=name, run_name=run.name, index_in_run=0, system=self.name, path=path, metadata=metadata)]
@@ -164,6 +299,33 @@ class VStimTD01System(StimulusSystem):
                              "outcome": int(trial.outcome.value), "outcome_name": trial.outcome.name})
         return pd.DataFrame(rows)
 
+    @staticmethod
+    def _match_frozen(run: Run, records: list, tdr: dict[int, Any], roles: dict[str, int], fs: float,
+                      first_pulse: Any) -> tuple[str, dict[int, Any]]:
+        """Trial numbers of a run with frozen TD01 records from the day's .tdr by time; returns
+        (description, .tdr trials; empty if not matched) and replaces the numbers in ``records``."""
+        frozen_number = records[0][2] if records else -1
+        offset = day_clock_offset(run, roles.get("trial_start", 0))
+        header = _header_start(run)
+        if not tdr or offset is None or header is None:
+            logger.warning("Run %s: all TD01 records carry trial number %d (not received from VStim), and %s; trials "
+                           "without .tdr parameters", run.name, frozen_number,
+                           "no .tdr of the day" if not tdr else "no other run of the day gives the PC clock")
+            return f"TD01 frozen (all records trial {frozen_number}), not matched", {}
+        pc_s = _seconds_of_day(header) - offset + np.array([r[0] for r in records], float) / fs
+        outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
+        try:
+            numbers, report = match_by_time(pc_s, tdr, outcomes)
+        except ValueError as error:
+            logger.warning("Run %s: TD01 frozen; %s", run.name, error)
+            return f"TD01 frozen (all records trial {frozen_number}), not matched: {error}", {}
+        records[:] = [(start, sample, number if number is not None else old, stimulus)
+                      for (start, sample, old, stimulus), number in zip(records, numbers)]
+        logger.info("Run %s: TD01 frozen, trials matched to the .tdr by time: %s", run.name, report)
+        return (f"TD01 frozen (all records trial {frozen_number}): matched to the .tdr by time ({report['n_matched']}/"
+                f"{report['n_trials']} trials, shift {report['shift_s']:+.2f} s from the day's clock offset "
+                f"{offset:.1f} s, trigger-line outcome agrees in {report['outcome_agreement']})"), tdr
+
     def load_trials(self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None) -> pd.DataFrame:
         descriptors = _descriptors(run)
         assert descriptors is not None
@@ -176,26 +338,29 @@ class VStimTD01System(StimulusSystem):
                                 for s in _rising(ttl, roles[role]))
         pulse_samples = np.array([s for s, _ in outcome_pulses], dtype=np.int64)
         tdr = _tdr_trials(str(paradigm.path)) if paradigm.path is not None else {}
-        numbers = descriptors.trial_number.to_numpy()
-        if len(numbers) >= 3 and len(set(numbers.tolist())) == 1:
-            logger.warning("Run %s: all TD01 records carry trial number %d (not received from VStim); trials "
-                           "without .tdr parameters", run.name, int(numbers[0]))
-            tdr = {}
-        records = []
-        for sample, number, stimulus in zip(descriptors.aux_sample, numbers, descriptors.stimulus_number):
-            before = starts[starts <= sample]
-            if before.size:
-                records.append((int(before[-1]), int(sample), int(number), int(stimulus)))
+        records = _records(run, descriptors, starts)
         if len(records) < len(descriptors):
             logger.warning("Run %s: %d TD01 records without a trial start edge before them dropped",
                            run.name, len(descriptors) - len(records))
+
+        def first_pulse(k: int) -> tuple[int, int] | None:
+            following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
+            pulse = int(np.searchsorted(pulse_samples, records[k][0]))
+            return outcome_pulses[pulse] if pulse < len(outcome_pulses) and pulse_samples[pulse] < following else None
+
+        number_source = "TD01"
+        if frozen(descriptors):
+            number_source, tdr = self._match_frozen(run, records, tdr, roles, fs, first_pulse)
+            if tdr:
+                records = [(start, sample, number, int(tdr[number].stimulusNumber) if number in tdr else stimulus)
+                           for start, sample, number, stimulus in records]
         rows = []
         for k, (start, sample, number, stimulus) in enumerate(records):
+            pulse_k = first_pulse(k)
             following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
-            pulse = int(np.searchsorted(pulse_samples, start))
-            first_pulse = outcome_pulses[pulse] if pulse < len(outcome_pulses) and pulse_samples[pulse] < following else None
             trial = tdr.get(number)
-            row: dict[str, Any] = {"trial": k, "condition": stimulus, "vstim_trial": number}
+            row: dict[str, Any] = {"trial": k, "condition": stimulus, "vstim_trial": number,
+                                   "trial_number_source": number_source}
             if trial is not None:
                 if int(trial.stimulusNumber) != stimulus:
                     logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
@@ -205,8 +370,8 @@ class VStimTD01System(StimulusSystem):
                            pc_clock_time=stamp,
                            time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),
                            reward_ms=float(trial.rewardDurationMS) if trial.rewardDurationMS is not None else np.nan)
-            elif first_pulse is not None:
-                row.update(outcome=first_pulse[1], outcome_source="trigger lines")
+            elif pulse_k is not None:
+                row.update(outcome=pulse_k[1], outcome_source="trigger lines")
             else:
                 row.update(outcome=OUTCOME_UNDETERMINED, outcome_source="none")
             end, end_source = start, "start"
@@ -216,8 +381,8 @@ class VStimTD01System(StimulusSystem):
                     end, end_source = int(after[0]), "trial_end line"
             elif trial is not None and (end_ms := tdr_trial_end_ms(trial)) is not None:
                 end, end_source = start + int(round(end_ms * fs / 1000)), "tdr"
-            elif first_pulse is not None:
-                end = int(first_pulse[0] + round(TRIAL_END_AFTER_OUTCOME_PULSE_MS * fs / 1000))
+            elif pulse_k is not None:
+                end = int(pulse_k[0] + round(TRIAL_END_AFTER_OUTCOME_PULSE_MS * fs / 1000))
                 end_source = "outcome pulse + 335 ms"
             row.update(start_sample=start, stop_sample=end, stop_source=end_source)
             rows.append(row)

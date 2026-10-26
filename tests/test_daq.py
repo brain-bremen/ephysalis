@@ -32,7 +32,7 @@ def _boards(*names: str) -> bytes:
 
 
 def write_v2(path: Path, frames: list[tuple[int, np.ndarray]], events=(), trials=(), version=(2, 0),
-             truncate_fcr1_size=False, zero_tail=0) -> Path:
+             truncate_fcr1_size=False, zero_tail=0, date=(2005, 3, 30, 11, 49, 37)) -> Path:
     """Version 1.x/2.0 file: ``frames`` = [(time ns, samples (n, channels))] blocks of CR01 records
     (1 ms apart); ``events`` (time, ±line, pattern) and ``trials`` (time, trial, stim) are
     written after the frame block whose start is the last before their time."""
@@ -41,7 +41,7 @@ def write_v2(path: Path, frames: list[tuple[int, np.ndarray]], events=(), trials
     fcr1_record = bytearray(_record(b"FCR1", fcr1))
     if truncate_fcr1_size:  # as in Walter's 2000 files
         struct.pack_into("<i", fcr1_record, 4, len(fcr1_record) & 0xFF)
-    out = bytearray(_header(version) + _boards("ADC64 Rev F") + fcr1_record)
+    out = bytearray(_header(version, date) + _boards("ADC64 Rev F") + fcr1_record)
     pending = sorted([(t, b"EV01", struct.pack("<qiI", t, line, pattern)) for t, line, pattern in events]
                      + [(t, b"TD01", struct.pack("<qiiII", t, trial, stim, 0, 0)) for t, trial, stim in trials])
     for t0, samples in frames:

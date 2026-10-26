@@ -94,7 +94,7 @@ def channel_quality(x: Any, xy_um: np.ndarray, config: ChannelQualityConfig, fs:
     z = (median - np.median(median[live])) / (mad if mad > 0 else 1.0)
     out = []
     for i in range(n_channels):
-        r = {"clip_frac": float(clip_a[:, i].mean()), "flat_frac": float(flat_a[:, i].mean()), "power_z": float(z[i]),
+        r: dict[str, Any] = {"clip_frac": float(clip_a[:, i].mean()), "flat_frac": float(flat_a[:, i].mean()), "power_z": float(z[i]),
              "nb_corr": float(np.nanmedian(corr_a[:, i])) if np.isfinite(corr_a[:, i]).any() else float("nan"),
              "line_db": float(np.median(line_a[:, i])), "n_windows": int(len(power_a))}
         why = []
