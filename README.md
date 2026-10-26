@@ -98,6 +98,19 @@ mains = 46
 exclude_inputs = ["AI20"]
 ```
 
+Trials of DAQ runs come from the `TD01` records joined with the day's VStim `.tdr` (stimulus
+plugin `vstim_td01`), with the trigger roles of the setup, e.g. for 2004-2005:
+
+```toml
+[aux_channels.digital]       # bit = trigger line - 1
+trial_start = 0              # line 1: interval 0
+eye_error = 10               # lines 11-14: outcome pulses
+early_error = 11
+late_error = 12
+reward = 13
+# 2006 setup: trial_start = 0, trial_end = 11 (line 12), reward = 15
+```
+
 `ephyscon calibrate`, then `lfp` (with mains removal) and `csd`. On Fritz 2005-03-30 the LFP after
 mains removal equals the BIDS dataset sample by sample (with `subtract_reference_mean`).
 

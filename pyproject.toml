@@ -73,6 +73,7 @@ daq = "ephyscon.io.daq:DaqFormat"
 [project.entry-points."ephyscon.stimulus_systems"]
 stimstage = "ephyscon.stimulus.stimstage:StimStageSystem"
 vstim = "ephyscon.stimulus.vstim:VStimSystem"
+vstim_td01 = "ephyscon.stimulus.vstim_td01:VStimTD01System"
 
 [tool.pytest.ini_options]
 markers = [

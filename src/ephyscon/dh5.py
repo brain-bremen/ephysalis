@@ -410,12 +410,20 @@ def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[
     return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
 
 
+def trial_numbers(trials: pd.DataFrame) -> np.ndarray:
+    """TRIALMAP ``TrialNo``: VStim's trial numbers if every trial has one (as the lab's
+    converters), else the position in the session."""
+    if "vstim_trial" in trials and trials["vstim_trial"].notna().all():
+        return trials["vstim_trial"].to_numpy().astype(np.int64)
+    return np.arange(len(trials))
+
+
 def _write_trialmap(file: h5py.File, trials: pd.DataFrame) -> None:
     import dh5io.trialmap
     from dhspec.trialmap import TRIALMAP_DATASET_DTYPE
 
     trialmap = np.recarray(len(trials), dtype=TRIALMAP_DATASET_DTYPE)
-    trialmap.TrialNo = np.arange(len(trials))
+    trialmap.TrialNo = trial_numbers(trials)
     trialmap.StimNo = trials["condition"].to_numpy() if "condition" in trials else 0
     trialmap.Outcome = trials["outcome"].to_numpy() if "outcome" in trials else TRIAL_OUTCOME_HIT
     trialmap.StartTime = _ns(trials.start_time.to_numpy())
@@ -481,7 +489,7 @@ def write_session_dh5(
     tmp.replace(path)
     sidecars = sidecar_paths(path)
     if not trials.empty:
-        trials.insert(0, "TrialNo", np.arange(len(trials)))
+        trials.insert(0, "TrialNo", trial_numbers(trials))
         trials.to_csv(sidecars["trials"], index=False)
     if not units.empty:
         units.to_csv(sidecars["units"], index=False)
