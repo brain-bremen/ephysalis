@@ -341,6 +341,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
     import h5py
 
     from ephyscon.dh5 import sidecar_paths
+    from ephyscon.lfp import LFP_FILTERING
     from ephyscon.nwb import session_metadata_nwbfile
 
     target = ecephys_path(root, subject, session_label, ".dh5")
@@ -360,7 +361,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
                 row = int(group.attrs["Channels"]["GlobalChanNumber"][0])
                 rate = 1e9 / float(group.attrs["SamplePeriod"])
                 streams[row] = ([name], rate)
-                lfp = (rate, "polyphase resampling to 1 kHz (spikeinterface resample)")
+                lfp = (rate, LFP_FILTERING)
     nwbfile = session_metadata_nwbfile(session, work_dir, config)
     write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
     ignore = root / ".bidsignore"

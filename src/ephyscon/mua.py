@@ -5,6 +5,10 @@ backward, i.e. zero phase), rectified and resampled to 1 kHz with spikeinterface
 resampler, which low-pass filters before downsampling. This is the algorithm of
 ``ephyscon convert`` (``filtfilt`` high-pass, ``abs``, anti-aliased decimation).
 
+Both filters are acausal (zero phase): the MUA at ``t`` depends on the input up to about
+:data:`MUA_FILTER_REACH_MS` after ``t`` (high-pass 3 ms, resampling 10 ms); see
+``docs/filters.md``.
+
 MUA sample ``k`` lies at ``k / rate`` seconds on the probe's own clock, like the LFP
 (:mod:`ephyscon.lfp`). The work dir holds float32 µV.
 """
@@ -15,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ephyscon.lfp import LFP_FILTER_REACH_MS
 from ephyscon.session import Run, StreamKind
 
 if TYPE_CHECKING:
@@ -26,6 +31,12 @@ MUA_RATE = 1000.0  # Hz
 MUA_HIGHPASS_HZ = 300.0
 MUA_FILTER_ORDER = 4
 MUA_FILTER_MARGIN_MS = 100.0  # filter margin of each chunk; the 300 Hz high-pass settles within a few ms
+# filtfilt high-pass: impulse response below 1e-3 of its peak after this (at 30 kHz)
+MUA_HIGHPASS_REACH_MS = 3.0
+MUA_FILTER_REACH_MS = MUA_HIGHPASS_REACH_MS + LFP_FILTER_REACH_MS
+MUA_FILTERING = (f"{MUA_FILTER_ORDER}th-order Butterworth high-pass {MUA_HIGHPASS_HZ:g} Hz forward-backward, rectified, "
+                 f"polyphase resampling to {MUA_RATE / 1000:g} kHz; zero phase (acausal, reaches about "
+                 f"{MUA_FILTER_REACH_MS:g} ms into the future)")
 
 
 def mua_recording(run: Run, probe_id: str, rate: float = MUA_RATE) -> BaseRecording:

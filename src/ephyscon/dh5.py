@@ -45,8 +45,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from ephyscon.lfp import lfp_folder
-from ephyscon.mua import mua_folder
+from ephyscon.lfp import LFP_FILTERING, lfp_folder
+from ephyscon.mua import MUA_FILTERING, mua_folder
 from ephyscon.nwb import (
     RUNNING_SPEED_BIN_S,
     SESSION_START_MARGIN_S,
@@ -199,9 +199,8 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
     from dhspec.cont import ContSignalType
 
     folder, first_id, signal_type, comment = {
-        "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, "LFP (spikeinterface resample)"),
-        "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA,
-                "MUA envelope (300 Hz high-pass, rectified, resampled)"),
+        "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, f"LFP: {LFP_FILTERING}"),
+        "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA, f"MUA envelope: {MUA_FILTERING}"),
     }[kind]
     counts = _probe_channel_counts(session, runs)
     if sum(counts.values()) > MAX_NEURAL_CHANNELS:

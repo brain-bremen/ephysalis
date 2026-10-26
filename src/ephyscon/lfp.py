@@ -5,6 +5,10 @@ only record a wideband AP stream, from which the LFP is derived. Both are resamp
 spikeinterface's polyphase resampler (which low-pass filters before downsampling; the legacy
 MATLAB pipeline picked every 2.5th LF sample without a filter).
 
+The resampling filter is acausal: a symmetric (zero-phase) Kaiser-windowed FIR that reaches
+:data:`LFP_FILTER_REACH_MS` into the future (and the past) for every input rate; see
+``docs/filters.md``.
+
 LFP sample ``k`` lies at ``k / rate`` seconds on the probe's own clock, i.e. at AP sample
 ``k * 30000 / rate``; map it onto the reference clock with the run's ``RunSync``.
 """
@@ -23,6 +27,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LFP_RATE = 1000.0  # Hz
+# half length of spikeinterface's resample_poly FIR (10 * max(up, down) upsampled input samples),
+# i.e. 10 output samples
+LFP_FILTER_REACH_MS = 10.0
+LFP_FILTERING = (f"polyphase resampling to {LFP_RATE / 1000:g} kHz (spikeinterface resample: Kaiser-windowed FIR, "
+                 f"cutoff 500 Hz), zero phase (acausal, reaches {LFP_FILTER_REACH_MS:g} ms into the future)")
 
 
 def lfp_recording(run: Run, probe_id: str, rate: float = LFP_RATE) -> BaseRecording:

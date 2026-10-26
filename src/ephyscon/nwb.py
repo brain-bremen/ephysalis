@@ -46,8 +46,8 @@ import numpy as np
 import pandas as pd
 from hdmf.data_utils import GenericDataChunkIterator
 
-from ephyscon.lfp import lfp_folder
-from ephyscon.mua import mua_folder
+from ephyscon.lfp import LFP_FILTERING, lfp_folder
+from ephyscon.mua import MUA_FILTERING, mua_folder
 from ephyscon.session import Run, Session, StreamKind
 from ephyscon.sorting import load_run_spikes, sorting_channels
 
@@ -329,9 +329,8 @@ def _add_derived(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dic
     from ephyscon.dh5 import stream_timing
 
     folder, container, filtering = {
-        "lfp": (lfp_folder, LFP(name="LFP"), "polyphase resampling to 1 kHz (spikeinterface resample)"),
-        "mua": (mua_folder, FilteredEphys(name="MUA"),
-                "4th-order Butterworth high-pass 300 Hz (zero phase), rectified, polyphase resampling to 1 kHz"),
+        "lfp": (lfp_folder, LFP(name="LFP"), LFP_FILTERING),
+        "mua": (mua_folder, FilteredEphys(name="MUA"), MUA_FILTERING),
     }[kind]
     n = 0
     for run in runs:

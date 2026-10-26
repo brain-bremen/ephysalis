@@ -21,6 +21,10 @@ Steps (each one optional, outputs in a work dir per session):
 | `sort` | spike sorting per probe over all runs |
 | `export` | one NWB or DH5 file (optionally with the raw data), optionally into a BIDS dataset |
 
+All filters are zero phase (acausal): the LFP at time *t* depends on the raw data up to 10 ms after *t*,
+the MUA up to about 13 ms. See [docs/filters.md](docs/filters.md) for every filter and its reach into the
+future.
+
 ## Installation
 
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
