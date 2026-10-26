@@ -12,7 +12,9 @@ with ``sigma = grid spacing x RBF parameter``, exactly through the LFP of the in
 literal port of the per-sample C++ code. Input in V and positions in m give A/m^3.
 
 Inputs: the probe's channels without ``exclude_inputs`` and without calibration (NaN gain,
-:mod:`ephyscon.calibration`); outputs: all channels of the probe. The CSD is computed from the
+:mod:`ephyscon.calibration`); outputs: all channels of the probe. After channel selection
+(``ephyscon quality``, :mod:`ephyscon.quality`) only the good channels of the run, as inputs
+and outputs (as the Fritz/Mini BIDS conversions). The CSD is computed from the
 LFP in the work dir (after mains removal, as in the lab: ``dh_remove_50hz`` before ``dh_csd``),
 written to ``<work>/csd/<run>_<probe>/`` (float32, A/m^3), and stored in DH5 at CONT 8001...
 as int16 with ``dh_csd``'s scaling: calibration = max |CSD| of the channel / (32767 - 0.01),
@@ -68,22 +70,28 @@ class CsdRecordingSegment(BasePreprocessorSegment):
 
 
 class CsdRecording(BasePreprocessor):
-    """Lazy CSD (float32, A/m^3, gains 1) of an LFP recording: outputs = all its channels."""
+    """Lazy CSD (float32, A/m^3, gains 1) of an LFP recording at its channels ``outputs``
+    (indices; default all)."""
 
-    def __init__(self, recording: BaseRecording, operator: list | np.ndarray, inputs: list | np.ndarray):
+    def __init__(self, recording: BaseRecording, operator: list | np.ndarray, inputs: list | np.ndarray,
+                 outputs: list | np.ndarray | None = None):
         operator, inputs = np.asarray(operator, float), np.asarray(inputs, dtype=np.int64)
-        BasePreprocessor.__init__(self, recording, dtype="float32")
+        outputs = np.arange(recording.get_num_channels()) if outputs is None else np.asarray(outputs, dtype=np.int64)
+        BasePreprocessor.__init__(self, recording, channel_ids=recording.channel_ids[outputs], dtype="float32")
         gains_v = recording.get_channel_gains()[inputs] * 1e-6
         for segment in recording._recording_segments:
             self.add_recording_segment(CsdRecordingSegment(segment, operator, inputs, gains_v))
         self.set_channel_gains(1.0)
         self.set_channel_offsets(0.0)
         self.set_property("physical_unit", [CSD_UNIT] * self.get_num_channels())
-        self._kwargs = {"recording": recording, "operator": operator.tolist(), "inputs": inputs.tolist()}
+        self._kwargs = {"recording": recording, "operator": operator.tolist(), "inputs": inputs.tolist(),
+                        "outputs": outputs.tolist()}
 
 
-def probe_operator(recording: BaseRecording, config: CsdConfig) -> tuple[np.ndarray, np.ndarray]:
-    """``(M, input channel indices)`` for the channels of an LFP recording with a probe."""
+def probe_operator(recording: BaseRecording, config: CsdConfig, good: set[str] | None = None
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(M, input channel indices, output channel indices)`` for the channels of an LFP
+    recording with a probe; ``good``: the channels to use (default all)."""
     if not recording.has_probe():
         raise ValueError("the CSD needs the probe geometry (geometry in [probes.<id>] of session.toml)")
     xy = recording.get_channel_locations()[:, :2] * 1e-6  # µm -> m
@@ -92,12 +100,15 @@ def probe_operator(recording: BaseRecording, config: CsdConfig) -> tuple[np.ndar
     if unknown:
         raise ValueError(f"[probes.<id>.csd] exclude_inputs: no channels {unknown}")
     gains = recording.get_channel_gains()
-    inputs = np.array([i for i, c in enumerate(ids) if c not in config.exclude_inputs and np.isfinite(gains[i])])
+    good = set(ids) if good is None else good
+    inputs = np.array([i for i, c in enumerate(ids)
+                       if c in good and c not in config.exclude_inputs and np.isfinite(gains[i])])
+    outputs = np.array([i for i, c in enumerate(ids) if c in good])
     if inputs.size < 2:  # dh_csd: "Not enough channels available for CSD"
         raise ValueError(f"only {inputs.size} input channels for the CSD")
-    operator = csd_operator(xy[inputs], xy, config.grid_spacing_m * config.rbf_parameter,
+    operator = csd_operator(xy[inputs], xy[outputs], config.grid_spacing_m * config.rbf_parameter,
                             config.specific_resistance_ohm_m)
-    return operator, inputs
+    return operator, inputs, outputs
 
 
 def csd_folder(work_dir: Path, run_name: str, probe_id: str) -> Path:
@@ -117,15 +128,20 @@ def extract_csd(run: Run, probe_id: str, work_dir: Path, config: CsdConfig, n_jo
     source = lfp_folder(work_dir, run.name, probe_id)
     if not (source / "binary.json").exists():
         raise FileNotFoundError(f"no LFP in {source} (run `ephyscon lfp` first)")
+    from ephyscon.quality import GOOD, load_quality
+
     lfp = si.load(source)
-    operator, inputs = probe_operator(lfp, config)
-    csd = CsdRecording(lfp, operator, inputs)
+    quality = load_quality(work_dir, run.name, probe_id)
+    good = None if quality is None else {c for c, r in quality.items() if r["status"] == GOOD}
+    operator, inputs, outputs = probe_operator(lfp, config, good)
+    csd = CsdRecording(lfp, operator, inputs, outputs)
     logger.info("%s %s: CSD of %d channels from %d inputs to %s", run.name, probe_id, csd.get_num_channels(),
                 inputs.size, folder)
     saved = csd.save(folder=folder, format="binary", overwrite=True, n_jobs=n_jobs, chunk_duration="10s",
                      progress_bar=False)
     (folder / "csd.json").write_text(json.dumps({
         "method": "dh_csd V3.1 [RBF] (M. Borisov), ephyscon.csd", "unit": CSD_UNIT,
-        "inputs": [str(lfp.channel_ids[i]) for i in inputs], "outputs": [str(c) for c in lfp.channel_ids],
+        "inputs": [str(lfp.channel_ids[i]) for i in inputs], "outputs": [str(lfp.channel_ids[i]) for i in outputs],
+        "channel_selection": "good channels (ephyscon quality)" if good is not None else "none",
         **config.model_dump()}, indent=1), encoding="utf-8")
     return saved

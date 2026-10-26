@@ -200,7 +200,9 @@ class VStimTD01System(StimulusSystem):
                 if int(trial.stimulusNumber) != stimulus:
                     logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
                                    stimulus, int(trial.stimulusNumber))
+                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephyscon.pcclock)
                 row.update(outcome=int(trial.outcome.value), outcome_name=trial.outcome.name, outcome_source="tdr",
+                           pc_clock_time=stamp,
                            time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),
                            reward_ms=float(trial.rewardDurationMS) if trial.rewardDurationMS is not None else np.nan)
             elif first_pulse is not None:

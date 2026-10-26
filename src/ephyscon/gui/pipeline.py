@@ -16,6 +16,7 @@ STEPS = [
     ("timing", "Timing", "trial times of all paradigms, running speed and eye position"),
     ("calibrate", "Calibration", "channel gains from the calibration-sine run ([calibration] in session.toml)"),
     ("lfp", "LFP", "LFP of every run and probe at 1 kHz (mains removal with [line_noise])"),
+    ("quality", "Channel selection", "good channels of the probes with [probes.<id>.quality] (CSD uses them)"),
     ("csd", "CSD", "current source density of the probes with [probes.<id>.csd]"),
     ("mua", "MUA", "MUA envelope of every run and probe at 1 kHz (300 Hz high-pass, rectified)"),
     ("sort", "Spike sorting", "spike sorting per probe over all runs, cut back into runs"),
@@ -84,6 +85,9 @@ def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]
             rows.append((kind, f"{unit} of {len(files)} runs"))
     if (work_dir / "calibration.json").exists():
         rows.append(("calibration.json", "channel gains from the calibration run"))
+    quality = sorted((work_dir / "quality").glob("*.json"))
+    if quality:
+        rows.append(("quality", f"channel selection of {len(quality)} run × probe recordings"))
     for kind in ("lfp", "csd", "mua"):
         folders = sorted(p for p in (work_dir / kind).glob("*") if (p / "binary.json").exists())
         if folders:

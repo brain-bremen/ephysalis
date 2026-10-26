@@ -4,6 +4,7 @@ One session NWB file becomes::
 
     <root>/dataset_description.json, README, participants.tsv/.json
     <root>/sub-<subject>/sub-<subject>_sessions.tsv
+    <root>/sub-<subject>/ses-<session>/sub-<subject>_ses-<session>_scans.tsv/.json  acq_time per file
     <root>/sub-<subject>/ses-<session>/ecephys/sub-<subject>_ses-<session>_ecephys.nwb
                                               ..._ecephys.json   recording metadata
                                               ..._probes.tsv     one row per probe
@@ -22,6 +23,11 @@ of the BIDS schema are written for images (they require ``SpatialReference`` for
 
 ``ecephys`` is not in a released BIDS version yet: the files follow BEP032 and validate with
 ``bids-validator-deno --schema https://bids-specification.readthedocs.io/en/bep032/schema.json``.
+
+With ``task`` (``session.toml`` ``task``, per run or per session) the files get the
+``task-<label>`` entity, with one file per run (``export --per-run``) the ``run-<n>`` entity.
+``acq_time`` is the start of the first run of the file (DAQ runs: on the stimulus PC's clock
+after ``ephyscon timing``, :mod:`ephyscon.pcclock`).
 
 Labels are the subject and session
 ids with everything but letters and digits removed; the session label also drops the subject
@@ -62,9 +68,11 @@ def bids_labels(subject_id: str, session_id: str) -> tuple[str, str]:
     return bids_label(subject_id), bids_label(session)
 
 
-def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb", run: int | None = None) -> Path:
+def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb", run: int | None = None,
+                 task: str | None = None) -> Path:
     """Path of the session's data file (or of run ``run``'s) in the BIDS dataset at ``root``."""
-    entities = f"sub-{subject}_ses-{session}" + (f"_run-{run:02d}" if run is not None else "")
+    entities = (f"sub-{subject}_ses-{session}" + (f"_task-{bids_label(task)}" if task else "")
+                + (f"_run-{run:02d}" if run is not None else ""))
     return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"{entities}_ecephys{extension}"
 
 
@@ -154,6 +162,21 @@ def lfp_streams(nwbfile: NWBFile) -> dict[int, tuple[list[str], float]]:
     return streams
 
 
+def _status(electrode: pd.Series) -> dict[str, str]:
+    """``status`` / ``status_description`` of a channel: bad if excluded from sorting or bad in
+    the channel selection (``quality_status``)."""
+    reasons = []
+    if bool(electrode.bad_channel):
+        reasons.append("excluded from sorting (session.toml bad_channels)")
+    quality = electrode.get("quality_status", "n/a")
+    if quality == "bad":
+        reasons.append(f"channel selection: {electrode.quality_description}")
+    if reasons:
+        return {"status": "bad", "status_description": "; ".join(reasons)}
+    description = electrode.quality_description if quality == "good" else NA
+    return {"status": "good", "status_description": description}
+
+
 def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]] | None = None) -> pd.DataFrame:
     """One row per electrode that has LFP; ``stream_id`` lists where its data are (default: the
     NWB file's LFP series, see :func:`lfp_streams`)."""
@@ -169,9 +192,10 @@ def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]]
             "units": "V",
             "sampling_frequency": round(streams[row][1]),
             "stream_id": ",".join(streams[row][0]),
-            "status": "bad" if bool(electrodes.bad_channel.iloc[row]) else "good",
+            **_status(electrodes.iloc[row]),
         })
-    columns = ["name", "electrode_name", "type", "units", "sampling_frequency", "stream_id", "status"]
+    columns = ["name", "electrode_name", "type", "units", "sampling_frequency", "stream_id", "status",
+               "status_description"]
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -308,6 +332,16 @@ def _write_dataset_files(root: Path, name: str | None) -> None:
         _write_json(PARTICIPANTS_JSON, root / "participants.json")
 
 
+def file_start_time(nwbfile: NWBFile) -> str:
+    """Date and time of the first run's start in the file (its first epoch), ISO 8601 to ms."""
+    from datetime import timedelta
+
+    start = nwbfile.session_start_time.replace(tzinfo=None)
+    if nwbfile.epochs is not None and len(nwbfile.epochs):
+        start += timedelta(seconds=float(min(nwbfile.epochs.start_time[:])))
+    return start.isoformat(timespec="milliseconds")
+
+
 def write_bids_sidecars(nwb_path: Path, root: Path, subject: str, session: str,
                         power_line_frequency: float | str = 50.0, dataset_name: str | None = None) -> None:
     """Write the sidecar files of the NWB file at ``nwb_path`` and update the dataset-level files."""
@@ -341,16 +375,35 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
     _write_tsv(events, Path(f"{prefix}_events.tsv"))
     _write_json(events_json(nwbfile, events), Path(f"{prefix}_events.json"))
     _upsert_tsv(root / "participants.tsv", _participant(nwbfile, subject), "participant_id")
-    _upsert_tsv(root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv",
-                {"session_id": f"ses-{session}", "acq_time": nwbfile.session_start_time.isoformat()},
-                "session_id")
+    acq_time = file_start_time(nwbfile)
+    sessions = root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv"
+    if sessions.exists():  # the earliest file of the session (one file per run)
+        earlier = pd.read_csv(sessions, sep="\t", dtype=str, keep_default_na=False)
+        times = earlier[earlier.session_id == f"ses-{session}"].acq_time.tolist()
+        acq_time = min([acq_time, *[t for t in times if t != NA]])
+    _upsert_tsv(sessions, {"session_id": f"ses-{session}", "acq_time": acq_time}, "session_id")
+    session_dir = root / f"sub-{subject}" / f"ses-{session}"
+    runs = [tags[0] for tags in nwbfile.epochs.tags[:]] if nwbfile.epochs is not None else []
+    method = ""
+    if nwbfile.epochs is not None and "start_time_method" in nwbfile.epochs.colnames:
+        first = int(np.argmin(nwbfile.epochs.start_time[:]))
+        method = nwbfile.epochs["start_time_method"][first]
+    _upsert_tsv(session_dir / f"sub-{subject}_ses-{session}_scans.tsv",
+                {"filename": data_path.relative_to(session_dir).as_posix(), "acq_time": file_start_time(nwbfile),
+                 "runs": ", ".join(runs), "start_time_method": method}, "filename")
+    _write_json({
+        "acq_time": {"Description": "start of the first run of the file (its first sample); DAQ runs with trial "
+                     "stamps: on the stimulus PC's clock (ephyscon.pcclock), else the recording's start time"},
+        "runs": {"Description": "runs of the recording in the file (session.toml run names)"},
+        "start_time_method": {"Description": "how acq_time was obtained (n/a: the recording's start time)"},
+    }, session_dir / f"sub-{subject}_ses-{session}_scans.json")
     logger.info("wrote the BIDS sidecars of %s", data_path)
 
 
 def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, run: int | None = None,
-                    **kwargs: Any) -> Path:
+                    task: str | None = None, **kwargs: Any) -> Path:
     """Copy an existing session (or run) NWB file into the dataset at ``root`` and write its sidecars."""
-    target = ecephys_path(root, subject, session, run=run)
+    target = ecephys_path(root, subject, session, run=run, task=task)
     if nwb_path.resolve() != target.resolve():
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.stem + ".partial.nwb")
@@ -361,7 +414,7 @@ def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, run:
 
 
 def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, subject: str, session_label: str,
-                    config: Any = None, run: int | None = None, **kwargs: Any) -> Path:
+                    config: Any = None, run: int | None = None, task: str | None = None, **kwargs: Any) -> Path:
     """Copy a session DH5 file (:mod:`ephyscon.dh5`) into a BIDS-like dataset at ``root``
     (``_ecephys.dh5``, with its ``_trials.csv``/``_units.csv``) and write its sidecars."""
     import h5py
@@ -370,7 +423,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
     from ephyscon.lfp import LFP_FILTERING
     from ephyscon.nwb import session_metadata_nwbfile
 
-    target = ecephys_path(root, subject, session_label, ".dh5", run=run)
+    target = ecephys_path(root, subject, session_label, ".dh5", run=run, task=task)
     target.parent.mkdir(parents=True, exist_ok=True)
     if dh5_path.resolve() != target.resolve():
         tmp = target.with_name(target.stem + ".partial.dh5")

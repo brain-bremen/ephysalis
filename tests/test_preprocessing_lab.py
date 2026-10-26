@@ -194,3 +194,75 @@ def test_pipeline_calibration_mains_csd(tmp_path):
         np.testing.assert_array_equal(stored, c_round(values / calibration_value).astype(np.int16))
         assert block.attrs["SignalType"] in (b"CSD", "CSD")
     assert main(["export", str(session), *common, "-o", str(tmp_path / "out.nwb")]) == 0
+
+
+def _common_lfp(n: int, n_chan: int, rng) -> np.ndarray:
+    """Spatially common 2-30 Hz signal (300 counts) + independent noise (30 counts)."""
+    common = signal.sosfiltfilt(signal.butter(2, (2, 30), btype="band", fs=FS, output="sos"), rng.standard_normal(n))
+    return (common / common.std() * 300)[:, None] + rng.standard_normal((n, n_chan)) * 30
+
+
+def test_channel_quality():
+    from ephyscon.quality import channel_quality
+    from ephyscon.session_config import ChannelQualityConfig
+
+    channels, xy_um = fritz_grid()
+    rng = np.random.default_rng(7)
+    x = _common_lfp(60_000, len(channels), rng)
+    x[:, 3] = 0  # flat
+    x[:, 10] = rng.standard_normal(x.shape[0]) * 3000  # noisy, uncorrelated
+    x[:, 12] += 2000 * np.sin(2 * np.pi * 50 * np.arange(x.shape[0]) / FS)  # mains
+    x[:20_000:7, 20] = 32500  # clipping
+    results = channel_quality(np.round(x).astype(np.int16), xy_um, ChannelQualityConfig(n_windows=50))
+    bad = {i: r["status_description"] for i, r in enumerate(results) if r["status"] == "bad"}
+    assert sorted(bad) == [3, 10, 12, 20]
+    assert "flat" in bad[3] and "power outlier" in bad[10] and "neighbours" in bad[10]
+    assert "mains" in bad[12] and "clipping" in bad[20]
+
+
+def test_quality_restricts_csd(tmp_path):
+    """Two runs, a different bad channel in each: the CSD of a run has its good channels only,
+    the DH5 CSD block of a channel bad in one run has the other run's region only."""
+    channels, xy_um = fritz_grid()
+    rng = np.random.default_rng(8)
+    session = tmp_path / "ses"
+    session.mkdir()
+    for k, (name, bad_channel) in enumerate((("task_a", 5), ("task_b", 17))):
+        data = np.zeros((40_000, 48))
+        data[:, channels] = _common_lfp(40_000, len(channels), rng)
+        data[:, bad_channel] = 0
+        write_v2(session / f"{name}.daq", [(k * 100_000_000_000, data.astype(np.int16))])
+    geometry = probeinterface.Probe(ndim=2)
+    geometry.set_contacts(positions=xy_um, shapes="circle", shape_params={"radius": 100})
+    geometry.set_device_channel_indices(np.arange(len(channels)))
+    probeinterface.write_probeinterface(tmp_path / "grid.json", geometry)
+    ids = ", ".join(f'"AI{c}"' for c in channels)
+    (tmp_path / "session.toml").write_text(
+        'schema_version = 5\nsession_id = "s"\nsubject_id = "fritz"\n'
+        f'[probes.epidural]\nstream = "ADC64 Rev F"\nchannels = [{ids}]\ngeometry = {{ file = "grid.json" }}\n'
+        '[probes.epidural.csd]\n[probes.epidural.quality]\nn_windows = 40\n')
+    common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
+    for step in ("lfp", "quality", "csd"):
+        assert main([step, str(session), *common, *(["--n-jobs", "1"] if step != "quality" else [])]) == 0
+    info = {name: json.loads((tmp_path / "work" / "csd" / f"{name}_epidural" / "csd.json").read_text())
+            for name in ("task_a", "task_b")}
+    assert "AI5" not in info["task_a"]["outputs"] and "AI5" in info["task_b"]["outputs"]
+    assert "AI17" in info["task_a"]["inputs"] and "AI17" not in info["task_b"]["inputs"]
+    assert len(info["task_a"]["outputs"]) == len(channels) - 1
+    assert main(["timing", str(session), *common]) == 0
+    assert main(["export", str(session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
+    index5, index17 = channels.index(5), channels.index(17)
+    with h5py.File(tmp_path / "out.dh5") as f:
+        assert len(f[f"CONT{8001 + index5}"]["INDEX"]) == 1 and len(f[f"CONT{8001 + index17}"]["INDEX"]) == 1
+        assert len(f[f"CONT{8001 + 0}"]["INDEX"]) == 2
+        assert f[f"CONT{8001 + index5}"]["DATA"].shape[0] == 40_000 and f["CONT8001"]["DATA"].shape[0] == 80_000
+        lfp5 = f[f"CONT{2001 + index5}"].attrs
+        assert lfp5["ChannelStatus"] == "bad" and lfp5["ChannelStatusDescription"].startswith("task_a: flat")
+        assert f[f"CONT{2001}"].attrs["ChannelStatus"] == "good"
+    bids = tmp_path / "bids"
+    assert main(["export", str(session), *common, "--bids", str(bids)]) == 0
+    import pandas as pd
+
+    table = pd.read_csv(next(bids.rglob("*_channels.tsv")), sep="\t")
+    assert (table.status == "bad").sum() == 2
+    assert table.status_description[table.status == "bad"].str.contains("channel selection").all()

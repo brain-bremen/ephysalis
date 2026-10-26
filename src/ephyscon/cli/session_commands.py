@@ -259,12 +259,16 @@ def _sort(args: argparse.Namespace) -> int:
 
 
 def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path) -> None:
-    """Probes from session.toml and the calibration (``[calibration]``, ``ephyscon calibrate``)."""
+    """Probes from session.toml, the calibration (``[calibration]``, ``ephyscon calibrate``) and the
+    run start times on the stimulus PC's clock (``ephyscon timing``, :mod:`ephyscon.pcclock`)."""
     from ephyscon.calibration import apply_calibration, load_calibration
+
+    from ephyscon.pcclock import apply_run_starts
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
     apply_calibration(session, load_calibration(config, config_dir, work_dir))
+    apply_run_starts(session, work_dir)
 
 
 def _calibrate(args: argparse.Namespace) -> int:
@@ -287,6 +291,33 @@ def _calibrate(args: argparse.Namespace) -> int:
               f"without signal: {', '.join(entry['without_signal']) or 'none'}")
     _record_step("calibrate", args, session, work_dir, config, config_path)
     print(f"Output: {path}")
+    return 0
+
+
+def _quality(args: argparse.Namespace) -> int:
+    from ephyscon.quality import GOOD, assess_run
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    _configure(session, config, config_path, work_dir)
+    probes = {pid: p.quality for pid, p in (config.probes.items() if config else []) if p.quality is not None}
+    if not probes:
+        print("Nothing to do: no probe has [probes.<id>.quality] in session.toml")
+        return 0
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
+            continue
+        for probe_id, quality_config in probes.items():
+            if probe_id in run.probes and (not args.probes or probe_id in args.probes):
+                results = assess_run(run, probe_id, work_dir, quality_config)
+                bad = [r["channel"] for r in results if r["status"] != GOOD]
+                print(f"{run.name} {probe_id}: {len(results) - len(bad)} of {len(results)} channels good"
+                      + (f", bad: {', '.join(bad)}" if bad else ""))
+    _record_step("quality", args, session, work_dir, config, config_path)
+    print(f"Output: {work_dir / 'quality'}")
     return 0
 
 
@@ -322,7 +353,12 @@ def _load_config_for(session_path: Path, work_dir: Path, config: str | None) -> 
 
 
 def _timing(args: argparse.Namespace) -> int:
+    from datetime import datetime
+
     import numpy as np
+    import pandas as pd
+
+    from ephyscon.pcclock import write_run_start
 
     from ephyscon.timing import WORK_DIR_NAME, extract_run_timing
 
@@ -343,6 +379,13 @@ def _timing(args: argparse.Namespace) -> int:
         for paradigm, trials in timing.trials.items():
             trials.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
             print(f"{run.name} {paradigm}: {len(trials)} trials")
+        header_start = run.extra.get("header_start_time")
+        trials_of_run = [t for t in timing.trials.values() if not t.empty]
+        record = write_run_start(work_dir, run.name,
+                                 datetime.fromisoformat(header_start) if header_start else run.start_time,
+                                 pd.concat(trials_of_run, ignore_index=True) if trials_of_run else pd.DataFrame())
+        if record is not None:
+            print(f"{run.name}: start {record['start_time']} ({record['method']})")
         if timing.running_speed is not None:
             np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
         if timing.eye_position is not None:
@@ -426,33 +469,35 @@ def _export(args: argparse.Namespace) -> int:
     if args.per_run and args.existing:
         print("--existing takes one session file, not --per-run", file=sys.stderr)
         return 1
-    # (session to write, BIDS run index or None, output path)
-    files: list[tuple[Session, int | None, Path]] = []
+    # (session to write, BIDS run index or None, BIDS task, output path)
+    files: list[tuple[Session, int | None, str | None, Path]] = []
     if args.per_run:
         for run in included_runs(session, config):
+            task = config.task_of([run.name]) if config else None
             if args.bids:
                 from ephyscon.bids import ecephys_path
 
-                output = ecephys_path(Path(args.bids), subject, session_label, extension, run=run.index + 1)
+                output = ecephys_path(Path(args.bids), subject, session_label, extension, run=run.index + 1, task=task)
             else:
                 base = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
                 output = base.with_name(f"{base.stem}_{run.name}{extension}")
-            files.append((single_run_session(session, run), run.index + 1, output))
+            files.append((single_run_session(session, run), run.index + 1, task, output))
     else:
+        task = config.task_of([r.name for r in included_runs(session, config)]) if config else None
         if args.bids:
             from ephyscon.bids import ecephys_path
 
-            output = ecephys_path(Path(args.bids), subject, session_label, extension)
+            output = ecephys_path(Path(args.bids), subject, session_label, extension, task=task)
         else:
             output = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
-        files.append((session, None, output))
+        files.append((session, None, task, output))
     processing = None
     if args.existing is None:
         from ephyscon.provenance import processing_record
 
         processing = processing_record(work_dir, _record_step("export", args, session, work_dir, config, config_path))
     syncs = _included_run_syncs(session, config, work_dir) if args.existing is None else {}
-    for file_session, run_index, output in files:
+    for file_session, run_index, task, output in files:
         existing = Path(args.existing) if args.existing else None
         if existing is None:
             if args.output_format == "nwb":
@@ -472,10 +517,10 @@ def _export(args: argparse.Namespace) -> int:
 
             options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
             if args.output_format == "nwb":
-                add_nwb_to_bids(existing, Path(args.bids), subject, session_label, run=run_index, **options)
+                add_nwb_to_bids(existing, Path(args.bids), subject, session_label, run=run_index, task=task, **options)
             else:
                 add_dh5_to_bids(file_session, work_dir, existing, Path(args.bids), subject, session_label, config,
-                                run=run_index, **options)
+                                run=run_index, task=task, **options)
         print(f"Output: {output}")
     return 0
 
@@ -590,6 +635,16 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder, calibration.json goes there (default: <session>/ephyscon)")
     p.set_defaults(func=per_session(_calibrate))
+
+    p = sub.add_parser("quality", help="Select the good channels of every run and probe with [probes.<id>.quality] "
+                       "(from the LFP; the CSD then uses them)")
+    p.add_argument("sessions", nargs="+", type=Path, metavar="session")
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder with lfp/, results go to <work-dir>/quality (default: <session>/ephyscon)")
+    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+    p.add_argument("--probes", nargs="+", help="Only these probes (default: all with [probes.<id>.quality])")
+    p.set_defaults(func=per_session(_quality))
 
     p = sub.add_parser("csd", help="Write the CSD of every run and probe with [probes.<id>.csd] (from the LFP)")
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")

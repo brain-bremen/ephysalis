@@ -143,9 +143,12 @@ def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[st
 def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, float]], first_id: int,
                        first_global: int, label: str, signal_type: ContSignalType | None, comment: str,
                        to_int16: bool = False, full_scale: float = 32000.0, unit_factor: float = 1e-6,
-                       c_rounding: bool = False) -> int:
+                       c_rounding: bool = False, positions: list[int] | None = None,
+                       attributes: dict[str, dict[str, Any]] | None = None) -> int:
     """One CONT block per channel of the recordings ``parts`` = ``[(recording, start s, true
-    rate)]`` (the runs, in order), ids ``first_id + channel``. int16 recordings are copied with
+    rate)]`` (the runs, in order), ids ``first_id + position``, ``positions`` = index of each
+    channel in the probe (default: its index in the recordings); ``attributes``: extra block
+    attributes by channel id. int16 recordings are copied with
     their gains as calibration; with ``to_int16`` (float, e.g. MUA in µV) each channel is scaled
     so that its peak is ``full_scale`` counts (calibration in the unit of the traces times
     ``unit_factor``; rounding half away from zero with ``c_rounding``, as ``dh_csd``). Returns
@@ -173,15 +176,19 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
         calibration = np.where(peak > 0, peak, 1.0) * unit_factor / full_scale  # per bit
     else:
         calibration = first.get_channel_gains() * 1e-6
+    positions = list(range(len(channel_ids))) if positions is None else positions
     groups = []
     for channel, channel_id in enumerate(channel_ids):
+        position = positions[channel]
         group = dh5io.cont.create_empty_cont_group_in_file(
-            file, first_id + channel, nSamples=total, nChannels=1, sample_period_ns=np.int32(period_ns),
+            file, first_id + position, nSamples=total, nChannels=1, sample_period_ns=np.int32(period_ns),
             n_index_items=len(regions), calibration=np.array([calibration[channel]]),
-            channels=_channel_info(first_global + channel, channel), name=f"{label} {channel_id}",
+            channels=_channel_info(first_global + position, position), name=f"{label} {channel_id}",
             signal_type=signal_type, comment=comment,
         )
         group["INDEX"][:] = index
+        for name, value in (attributes or {}).get(channel_id, {}).items():
+            group.attrs[name] = value
         groups.append(group["DATA"])
     written = 0
     for recording, _, _ in parts:
@@ -198,17 +205,24 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
 
 
 def _probe_channel_counts(session: Session, runs: list[Run]) -> dict[str, int]:
-    return {p: len(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)
+    return {p: len(ids) for p, ids in _probe_channels(session, runs).items()}
+
+
+def _probe_channels(session: Session, runs: list[Run]) -> dict[str, list[str]]:
+    return {p: [str(c) for c in next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids]
             for p in session.probe_ids}
 
 
 def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list[Run], offsets: dict[str, float],
                    syncs: dict[str, RunSync], kind: str) -> int:
-    """LFP (``kind="lfp"``), MUA (``"mua"``) or CSD (``"csd"``) of all probes from the work dir."""
+    """LFP (``kind="lfp"``), MUA (``"mua"``) or CSD (``"csd"``) of all probes from the work dir.
+    A channel missing in some runs (CSD after channel selection) has INDEX regions of the other
+    runs only; LFP blocks carry the channel selection (``ChannelStatus``, ``ChannelStatusDescription``)."""
     import spikeinterface.core as si
     from dhspec.cont import ContSignalType
 
     from ephyscon.csd import CSD_UNIT, DH5_FULL_SCALE, csd_folder
+    from ephyscon.quality import session_status
 
     folder, first_id, signal_type, comment = {
         "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, f"LFP: {LFP_FILTERING}"),
@@ -219,11 +233,11 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
     scaling: dict[str, Any] = ({"to_int16": True} if kind == "mua" else
                {"to_int16": True, "full_scale": DH5_FULL_SCALE, "unit_factor": 1.0, "c_rounding": True} if kind == "csd"
                else {})
-    counts = _probe_channel_counts(session, runs)
-    if sum(counts.values()) > MAX_NEURAL_CHANNELS:
-        raise ValueError(f"{sum(counts.values())} probe channels do not fit the {kind.upper()} CONT ids")
+    probe_channels = _probe_channels(session, runs)
+    if sum(map(len, probe_channels.values())) > MAX_NEURAL_CHANNELS:
+        raise ValueError(f"{sum(map(len, probe_channels.values()))} probe channels do not fit the {kind.upper()} CONT ids")
     global_index, n_blocks = 0, 0
-    for probe_id, n_channels in counts.items():
+    for probe_id, channels in probe_channels.items():
         parts = []
         for run in runs:
             path = folder(work_dir, run.name, probe_id)
@@ -231,11 +245,27 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
                 recording = si.load(path)
                 parts.append((recording, *stream_timing(run, probe_id, recording.sampling_frequency,
                                                         offsets[run.name], syncs)))
-        if parts:
+        attributes = {}
+        if kind == "lfp":
+            attributes = {c: {"ChannelStatus": status, "ChannelStatusDescription": why}
+                          for c, (status, why) in session_status(work_dir, runs, probe_id).items()}
+        # channels by the runs that have them (all runs, except for the CSD after channel selection)
+        present = [{str(c) for c in recording.channel_ids} for recording, _, _ in parts]
+        if not set().union(*present) <= set(channels):  # ids of the stream, not of the AP stream (Neuropixels LF)
+            channels = list(dict.fromkeys(str(c) for recording, _, _ in parts for c in recording.channel_ids))
+        by_runs: dict[tuple[int, ...], list[str]] = {}
+        for channel in channels:
+            having = tuple(k for k, ids in enumerate(present) if channel in ids)
+            if having:
+                by_runs.setdefault(having, []).append(channel)
+        for having, ids in by_runs.items():
+            selected = [(p[0] if [str(c) for c in p[0].channel_ids] == ids else p[0].select_channels(
+                [c for c in p[0].channel_ids if str(c) in ids]), p[1], p[2]) for p in (parts[k] for k in having)]
             n_blocks += _write_cont_blocks(
-                file, parts, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
-                f"{comment}; INDEX regions placed on the session time axis", **scaling)
-        global_index += n_channels
+                file, selected, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
+                f"{comment}; INDEX regions placed on the session time axis", positions=[channels.index(c) for c in ids],
+                attributes=attributes, **scaling)
+        global_index += len(channels)
     return n_blocks
 
 

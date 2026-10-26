@@ -13,7 +13,8 @@ Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
 3. ``[events]`` (TTL lines left out of the events, offset of the network event codes)
 4. ``[calibration]`` (gains from a calibration-sine recording), ``[line_noise]`` (mains removal
    with the recorded mains reference), probes: ``csd`` (current source density)
-5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``
+5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``;
+   probes: ``quality`` (channel selection); ``task`` of the session and of the runs (BIDS ``task`` entity)
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ MIGRATIONS: dict[int, Migration] = {
     1: lambda data: data,  # 2 only added fields, all with defaults
     2: lambda data: data,  # 3 added [events], with defaults
     3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
-    4: lambda data: data,  # 5 added [events.lines] and [[events.markers]], empty by default
+    4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
 }
 
 
@@ -46,6 +47,7 @@ class RunConfig(BaseModel):
     stimulus_system: str | None = Field(
         default=None, description="Stimulus system plugin; auto-detected if not set"
     )
+    task: str | None = Field(default=None, description="Task of the run (BIDS task entity), instead of the session's")
     notes: str = ""
 
 
@@ -83,6 +85,22 @@ class CsdConfig(BaseModel):
         "without calibration are left out as well. Outputs: all channels of the probe")
 
 
+class ChannelQualityConfig(BaseModel):
+    """Channel selection on the LFP of each run (``ephyscon quality``, :mod:`ephyscon.quality`; port of the
+    Fritz/Mini BIDS conversions). The CSD then uses the good channels only. Defaults: their criteria."""
+
+    neighbour_radius_um: float = Field(default=3100.0, description="Neighbours of a channel: contacts within "
+                                       "this distance (Fritz epidural array 3100, intracortical arrays 2100)")
+    clip_counts: int = Field(default=32000, description="|LFP| >= this (counts) is clipping")
+    max_clip_fraction: float = Field(default=0.10, description="Bad if clipping in this fraction of the windows")
+    max_abs_power_z: float = Field(default=3.0, description="Bad if the robust z of the 2-200 Hz power is beyond")
+    min_neighbour_correlation: float = Field(default=0.30, description="Bad if the 2-100 Hz correlation with the "
+                                             "mean of the neighbours is below")
+    max_line_db: float = Field(default=10.0, description="Bad if the 50 Hz peak is this far above 40-60 Hz (dB)")
+    n_windows: int = Field(default=300, description="Windows spread over the run")
+    window_s: float = Field(default=2.0, description="Window length (s)")
+
+
 class ProbeConfig(BaseModel):
     stream: str | None = Field(
         default=None, description="Input stream of a probe the reader does not detect (non-Neuropixels), "
@@ -106,6 +124,8 @@ class ProbeConfig(BaseModel):
     )
     csd: CsdConfig | None = Field(default=None, description="Compute the CSD of this probe (ephyscon csd); "
                                   "needs the probe geometry")
+    quality: ChannelQualityConfig | None = Field(default=None, description="Select the good channels of this "
+                                                 "probe (ephyscon quality); needs the probe geometry")
     notes: str = ""
 
 
@@ -229,6 +249,8 @@ class SessionConfig(BaseModel):
     lab: str | None = None
     institution: str | None = None
     description: str = ""
+    task: str | None = Field(default=None, description="Task (BIDS task entity, e.g. shapetracking); runs can "
+                             "have their own")
     subject: SubjectConfig = Field(default_factory=SubjectConfig)
     runs: list[RunConfig] = Field(default_factory=list)
     probes: dict[str, ProbeConfig] = Field(default_factory=dict)
@@ -241,6 +263,11 @@ class SessionConfig(BaseModel):
 
     def run_config(self, name: str) -> RunConfig | None:
         return next((r for r in self.runs if r.name == name), None)
+
+    def task_of(self, run_names: list[str]) -> str | None:
+        """Task of a file with these runs: their common task, else None."""
+        tasks = {(c.task if (c := self.run_config(name)) is not None and c.task else self.task) for name in run_names}
+        return tasks.pop() if len(tasks) == 1 else None
 
     @property
     def included_runs(self) -> list[str]:

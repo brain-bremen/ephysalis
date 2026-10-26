@@ -7,7 +7,9 @@ NWB                         source
 ==========================  ===============================================================
 devices, electrode groups   probe metadata of the recording files, ``session.toml``
 electrodes                  channel positions of the AP streams; ``in_brain`` (closer to the
-                            tip than ``insertion_depth_um``), ``bad_channel``
+                            tip than ``insertion_depth_um``), ``bad_channel``; after ``ephyscon
+                            quality`` ``quality_status`` / ``quality_description`` (bad if bad in
+                            any run, :func:`ephyscon.quality.session_status`)
 epochs                      one per run (tag = run name)
 trials                      ``trials/<run>_<paradigm>.csv`` of all runs, with ``run`` and
                             ``paradigm`` columns; parameters missing in a paradigm are NaN
@@ -202,13 +204,22 @@ def _new_nwbfile(session: Session, config: SessionConfig | None, start_time: dat
     )
 
 
-def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config: SessionConfig | None) -> dict:
+def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config: SessionConfig | None,
+                    work_dir: Path | None = None) -> dict:
     """Devices, electrode groups and electrodes; returns ``{(probe, channel index): row}``."""
+    from ephyscon.quality import session_status
+
     if not session.probe_ids:  # behaviour-only sessions
         return {}
     nwbfile.add_electrode_column("channel_name", "channel id in the AP stream")
     nwbfile.add_electrode_column("in_brain", "contact closer to the tip than the insertion depth")
     nwbfile.add_electrode_column("bad_channel", "excluded from sorting (session.toml bad_channels)")
+    status = {p: session_status(work_dir, runs, p) for p in session.probe_ids} if work_dir is not None else {}
+    with_quality = any(status.values())
+    if with_quality:
+        nwbfile.add_electrode_column("quality_status", "channel selection on the LFP (ephyscon quality): good, bad, "
+                                     "or n/a (not assessed)")
+        nwbfile.add_electrode_column("quality_description", "reasons of the channel selection")
     rows: dict[tuple[str, int], int] = {}
     for probe_id in session.probe_ids:
         run = next(r for r in runs if probe_id in r.probes)
@@ -235,17 +246,26 @@ def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config:
                      else np.full((recording.get_num_channels(), 2), np.nan))
         for index, (channel_id, (x, y)) in enumerate(zip(recording.channel_ids, locations)):
             rows[(probe_id, index)] = len(nwbfile.electrodes) if nwbfile.electrodes is not None else 0
+            quality = ({"quality_status": status[probe_id].get(str(channel_id), ("n/a", ""))[0],
+                        "quality_description": status[probe_id].get(str(channel_id), ("n/a", ""))[1]}
+                       if with_quality else {})
             nwbfile.add_electrode(
                 group=group, location=location, rel_x=float(x), rel_y=float(y), channel_name=str(channel_id),
-                in_brain=channel_id in in_brain, bad_channel=index in bad,
+                in_brain=channel_id in in_brain, bad_channel=index in bad, **quality,
             )
     return rows
 
 
 def _add_epochs_and_trials(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
-    for run in runs:
+    methods = {"start_time_method": [str(run.extra.get("start_time_method", "")) for run in runs]}
+    if any(methods["start_time_method"]):
+        nwbfile.add_epoch_column("start_time_method", "how the run's start time was obtained (ephyscon.pcclock); "
+                                 "empty: the recording's start time")
+    else:
+        methods = {}
+    for k, run in enumerate(runs):
         nwbfile.add_epoch(start_time=offsets[run.name], stop_time=offsets[run.name] + (run.duration_s or 0.0),
-                          tags=[run.name])
+                          tags=[run.name], **{c: v[k] for c, v in methods.items()})
     trials = session_trials(work_dir, runs, offsets)
     if trials.empty:
         return
@@ -583,7 +603,7 @@ def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionCo
     and trials (no LFP or units); the source of the BIDS sidecars of other formats."""
     runs, offsets, start = time_axis(session, config, run_clock)
     nwbfile = _new_nwbfile(session, config, start)
-    _add_electrodes(nwbfile, session, runs, config)
+    _add_electrodes(nwbfile, session, runs, config, work_dir)
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
     _add_annotations(nwbfile, work_dir, runs, offsets, config)
     return nwbfile
@@ -613,7 +633,7 @@ def write_session_nwb(
 
     runs, offsets, start = time_axis(session, config, run_clock)
     nwbfile = _new_nwbfile(session, config, start)
-    electrode_rows = _add_electrodes(nwbfile, session, runs, config)
+    electrode_rows = _add_electrodes(nwbfile, session, runs, config, work_dir)
     channel_index = {
         p: {str(c): i for i, c in enumerate(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)}
         for p in session.probe_ids

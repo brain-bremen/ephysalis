@@ -19,19 +19,21 @@ T0 = 13_127_830_000_000  # DAQ clock (ns) at the first sample
 MS = 1_000_000
 
 
-def write_tdr(path: Path, trials: list[tuple[int, int, int, float]], day: str = "30.03.2005") -> Path:
+def write_tdr(path: Path, trials: list[tuple[int, int, int, float]], day: str = "30.03.2005",
+              stamps: list[str] | None = None) -> Path:
     """VStim 1.3 .tdr ($FH1 v2, $TH1/$TS1 v1): ``trials`` = (number, stimulus, outcome code,
-    end in s = positive transition of virtual trigger 11)."""
+    end in s = positive transition of virtual trigger 11); ``stamps``: PC time of the trial
+    starts (hh:mm:ss, default 11:49:40)."""
     lines = ["$FH1   4   2", "1.3\t\t// VStim program version", "1.01\t\t// .tdr file format version",
              f"{day}\t11:49:37\t100\t// date, start time, refresh rate"]
-    for number, stimulus, outcome, end in trials:
+    for k, (number, stimulus, outcome, end) in enumerate(trials):
         pairs = []
-        for k in range(32):
-            positive = {0: 0.0, 11: end}.get(k, -0.01)
-            negative = {0: 0.5, 10: end}.get(k, -0.01)
+        for line in range(32):
+            positive = {0: 0.0, 11: end}.get(line, -0.01)
+            negative = {0: 0.5, 10: end}.get(line, -0.01)
             pairs += [f"{positive:.4f}", f"{negative:.4f}"]
         lines += [f"$TH1   2   1    {number}    {stimulus}    1    {outcome}    0     -1.00",
-                  f"$TS1   1   1    {number}  11:49:40    " + "  ".join(pairs)]
+                  f"$TS1   1   1    {number}  {stamps[k] if stamps else '11:49:40'}    " + "  ".join(pairs)]
     path.write_text("\n".join(lines) + "\n", encoding="latin-1")
     return path
 
