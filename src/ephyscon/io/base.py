@@ -10,6 +10,7 @@ Channel Systems) means adding one reader and registering it under the
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -87,15 +88,23 @@ class InputFormat(ABC):
         for the raw data in DH5 / NWB."""
         return self.get_recording(run, StreamKind.AUX)
 
-    def read_ttl_events(self, run: Run) -> pd.DataFrame:
-        """Edges of all digital lines of the aux stream: ``aux_sample``, ``line`` (1-based,
-        bit + 1) and ``state`` (1 rising, 0 falling), in time order."""
+    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+        """Edges of the digital lines of the aux stream (``lines``: only these, 1-based; default
+        all): ``aux_sample``, ``line`` (1-based, bit + 1) and ``state`` (1 rising, 0 falling),
+        in time order."""
         raise NotImplementedError(f"{self.name} does not support TTL events yet")
 
     def read_network_events(self, run: Run) -> pd.DataFrame:
         """Network event words of a run (e.g. Open Ephys Network Events, sent by VStim):
         ``aux_sample`` and ``word``. Empty for formats without network events."""
         return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "word": np.zeros(0, np.int64)})
+
+
+def keep_lines(events: pd.DataFrame, lines: Collection[int] | None) -> pd.DataFrame:
+    """The TTL events of ``lines`` (all if None)."""
+    if lines is None:
+        return events
+    return events[events["line"].isin(list(lines))].reset_index(drop=True)
 
 
 def open_session(session_path: str | Path, format_name: str | None = None) -> Session:

@@ -15,6 +15,7 @@ Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
    with the recorded mains reference), probes: ``csd`` (current source density)
 5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``;
    probes: ``quality`` (channel selection); ``task`` of the session and of the runs (BIDS ``task`` entity)
+6. ``[events] lines_without_role``
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from pydantic import BaseModel, Field
 from ephyscon.schema import Migration, migrate
 from ephyscon.session import Session
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
@@ -38,6 +39,7 @@ MIGRATIONS: dict[int, Migration] = {
     2: lambda data: data,  # 3 added [events], with defaults
     3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
     4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
+    5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
 }
 
 
@@ -200,6 +202,10 @@ class EventsConfig(BaseModel):
     network_events_offset: int = Field(
         default=1000, description="Added to the VStim network event words for the DH5 event codes "
         "(TTL lines are +line / -line)"
+    )
+    lines_without_role: bool = Field(
+        default=True, description="Also TTL lines without a role in [aux_channels.digital]; switch off for "
+        "unconnected digital inputs that toggle (e.g. the USB-ME of MC_Rack recordings)"
     )
     lines: dict[str, TriggerLineConfig] = Field(
         default_factory=dict, description="Active level and description of the lines, by role "

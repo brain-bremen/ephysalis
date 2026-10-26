@@ -83,6 +83,33 @@ the trigger lines its TTL lines. Two boards (2006: ADC64 + MC-128) are synchroni
 of trigger lines 1-16 on lines 17-32. Gains are the voltage at the ADC input. The record index of
 each file is cached in `%LOCALAPPDATA%/ephyscon` (`EPHYSCON_CACHE_DIR`).
 
+### Other historic formats (`ephyscon.legacy`)
+
+The readers of the lab's historic recordings live in `ephyscon.legacy` and will be removed once
+those datasets are converted; nothing else in ephyscon depends on them.
+
+- **DAQ files** (`.daq`, above).
+- **DataWave UFF** (`.UFF`, Tallon-Baudry et al. 2004, monkey Eddi): one run per M/P file pair,
+  streams `M` and `P`, P mapped onto M from the event pulses on channel 15.
+- **Multi Channel Systems MC_Rack** (`.mcd`, 2010-2011, monkey Iris; continuous recordings):
+  - A recording that MC_Rack split into several files (`name.mcd`, `name0001.mcd`, ...) is one
+    run.
+  - Streams are named by their tag (`elec0001`, `anlg0001`, `filt0001`, `digi0001`), channel ids
+    are the MC_Rack labels (`01A`, `61D`).
+  - The 16 digital inputs are TTL lines 1-16. Unconnected inputs toggle all the time, so set
+    `[events] lines_without_role = false` and give the used lines a role.
+  - Trigger events with trial synchronisation are the trial descriptors, so `vstim_td01` gives
+    the trials with the day's `.tdr`.
+  - Checked against the MCS Neuroshare library on 8 files: samples, digital and trigger events.
+
+```toml
+[probes.v1]
+stream = "elec0001"
+channels = ["01A", "02A", "03A"]   # default: all channels of the stream
+[events]
+lines_without_role = false
+```
+
 ### Calibration, mains removal, CSD (epidural arrays)
 
 The lab's preprocessing of the Fritz/Mini epidural recordings, as `session.toml` settings:
@@ -141,7 +168,7 @@ aux channels and the events. It replaces the Excel font-colour convention, `Dept
 `BrokenChannelsProbe<N>_0Index.txt` and `folders2Combine.txt` of the MATLAB pipeline:
 
 ```toml
-schema_version = 5
+schema_version = 6
 session_id = "SOMxCD1_172_20250109_Recording1"
 subject_id = "SOMxCD1_172"
 

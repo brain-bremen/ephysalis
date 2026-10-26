@@ -58,6 +58,8 @@ the file's path, size and modification time.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import hashlib
 import logging
 import os
@@ -73,7 +75,7 @@ import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephyscon.io.base import InputFormat
+from ephyscon.io.base import InputFormat, keep_lines
 from ephyscon.session import Run, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -918,11 +920,11 @@ class DaqFormat(InputFormat):
     def aux_analog_gain_v(self, run: Run, index: int) -> float:
         return self._file(run).index.header.channels[index].volts_per_count
 
-    def read_ttl_events(self, run: Run) -> pd.DataFrame:
-        times, lines = self._events_in_run(run)
+    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+        times, signed = self._events_in_run(run)
         result = pd.DataFrame({"aux_sample": np.floor(self._aux_sample(run, times) + 1e-6).astype(np.int64),
-                               "line": np.abs(lines).astype(np.int64), "state": (lines > 0).astype(np.int64)})
-        return result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True)
+                               "line": np.abs(signed).astype(np.int64), "state": (signed > 0).astype(np.int64)})
+        return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
 
     def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
         n = self.get_recording(run, StreamKind.AUX).get_num_samples()

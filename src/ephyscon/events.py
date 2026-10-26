@@ -16,7 +16,8 @@ column      content
 ==========  ===============================================================================
 
 Lines whose role is in ``[events] exclude_roles`` (default the sync and wheel lines, which
-switch thousands of times per minute) are left out.
+switch thousands of times per minute) are left out, with ``lines_without_role = false`` also
+all lines without a role (e.g. unconnected inputs that toggle).
 """
 
 from __future__ import annotations
@@ -61,9 +62,10 @@ def run_events(run: Run, sync: RunSync, aux_channels: AuxChannelMap, config: Eve
         return empty_events()
     roles = {bit + 1: role for role, bit in aux_channels.digital.items()}
     excluded = {line for line, role in roles.items() if role in config.exclude_roles}
+    wanted = None if config.lines_without_role else set(roles) - excluded
     parts = []
     try:
-        ttl = run.format.read_ttl_events(run)
+        ttl = run.format.read_ttl_events(run, wanted)
     except NotImplementedError:
         ttl = pd.DataFrame({"aux_sample": [], "line": [], "state": []})
     ttl = ttl[~ttl.line.isin(excluded)]

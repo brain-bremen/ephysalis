@@ -34,6 +34,8 @@ experiment, 1 s resolution). They are naive local times, like those of SpikeGLX.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import re
 import xml.etree.ElementTree as ElementTree
 from collections import defaultdict
@@ -47,7 +49,7 @@ import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephyscon.io.base import InputFormat
+from ephyscon.io.base import InputFormat, keep_lines
 from ephyscon.session import ProbeInfo, Run, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -466,14 +468,14 @@ class OpenEphysFormat(InputFormat):
         line[previous:] = level
         return line
 
-    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
         aux = self._aux(run)
         events = self._events(run)
         mine = events[(events["processor_id"] == aux.processor_id)
                       & events["stream_name"].map(lambda s: _same_stream(str(s), aux.oe_stream)).astype(bool)]
         result = pd.DataFrame({"aux_sample": self._to_aux_samples(run, mine), "line": mine["line"].to_numpy(np.int64),
                                "state": mine["state"].to_numpy(np.int64)})
-        return result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True)
+        return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
 
     def read_network_events(self, run: Run) -> pd.DataFrame:
         """Words of the Network Events plugin: the plugin sets the lines of a word one by one in

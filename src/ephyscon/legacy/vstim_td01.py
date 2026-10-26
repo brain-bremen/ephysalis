@@ -234,7 +234,7 @@ def day_clock_offset(run: Run, start_bit: int) -> float | None:
         tdr = _tdr_trials(str(path))
         fs = other.format.aux_sampling_frequency(other)
         c, s = [], []
-        for start, _, number, _ in _records(other, descriptors, _rising(other.format.read_ttl_events(other), start_bit)):
+        for start, _, number, _ in _records(other, descriptors, _rising(other.format.read_ttl_events(other, {start_bit + 1}), start_bit)):
             stamp = stamp_seconds(tdr[number]) if number in tdr else None
             if stamp is not None:
                 c.append(stamp)
@@ -350,7 +350,9 @@ class VStimTD01System(StimulusSystem):
         descriptors = _descriptors(run)
         assert descriptors is not None
         roles = aux.channels.digital if aux is not None else {}
-        ttl = run.format.read_ttl_events(run)
+        needed = {roles.get("trial_start", 0) + 1} | {bit + 1 for role, bit in roles.items()
+                                                     if role == "trial_end" or role in OUTCOME_ROLES}
+        ttl = run.format.read_ttl_events(run, needed)
         fs = run.format.aux_sampling_frequency(run)
         starts = _rising(ttl, roles.get("trial_start", 0))
         ends = _rising(ttl, roles["trial_end"]) if "trial_end" in roles else None

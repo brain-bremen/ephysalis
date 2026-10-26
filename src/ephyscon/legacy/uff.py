@@ -23,6 +23,8 @@ M15 (line 1). Electrodes are defined in ``session.toml`` (probes with ``stream =
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import logging
 import struct
 from datetime import datetime
@@ -34,7 +36,7 @@ import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephyscon.io.base import InputFormat
+from ephyscon.io.base import InputFormat, keep_lines
 from ephyscon.session import Run, Session, StreamKind
 
 logger = logging.getLogger(__name__)
@@ -334,13 +336,13 @@ class UffFormat(InputFormat):
     def aux_analog_gain_v(self, run: Run, index: int) -> float:
         return _open(run.extra["files"]["M"]).adc_scale_mv * 1e-3
 
-    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
         """The event pulses on M15 as line 1."""
         y = self.read_aux_analog(run, PULSE_CHANNEL)
         on, off = pulse_onsets(y), pulse_offsets(y)
         events = pd.DataFrame({"aux_sample": np.r_[on, off].astype(np.int64), "line": 1,
                                "state": np.r_[np.ones(len(on)), np.zeros(len(off))].astype(np.int64)})
-        return events.sort_values(["aux_sample", "state"], kind="stable", ignore_index=True)
+        return keep_lines(events.sort_values(["aux_sample", "state"], kind="stable", ignore_index=True), lines)
 
     def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
         if bit != 0:

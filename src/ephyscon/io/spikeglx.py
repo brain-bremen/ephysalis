@@ -18,6 +18,8 @@ meta files are searched one level deep.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import logging
 import re
 from datetime import datetime
@@ -252,25 +254,29 @@ class SpikeGLXFormat(InputFormat):
         recording = self.get_recording(run, StreamKind.AUX)
         return recording.select_channels(recording.channel_ids[: run.extra["aux"]["n_analog"]])
 
-    def read_ttl_events(self, run: Run) -> pd.DataFrame:
+    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
         recording = self.get_recording(run, StreamKind.AUX)
         channel = recording.channel_ids[self._digital_channel(run)]
         n = recording.get_num_samples()
-        samples, lines, states = [], [], []
+        bits = range(16) if lines is None else sorted(line - 1 for line in lines if 1 <= line <= 16)
+        samples, line_numbers, states = [], [], []
         previous = None
         for start in range(0, n, _DIGITAL_CHUNK):
             word = recording.get_traces(start_frame=start, end_frame=min(n, start + _DIGITAL_CHUNK),
                                         channel_ids=[channel])[:, 0].astype(np.int64) & 0xFFFF
             full = np.r_[word[0] if previous is None else previous, word]
-            for bit in range(16):
+            for bit in bits:
                 level = (full >> bit) & 1
                 change = np.flatnonzero(level[1:] != level[:-1])
                 samples.append(start + change)
-                lines.append(np.full(change.size, bit + 1))
+                line_numbers.append(np.full(change.size, bit + 1))
                 states.append(level[change + 1])
             previous = word[-1]
+        if not samples:
+            return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "line": np.zeros(0, np.int64),
+                                 "state": np.zeros(0, np.int64)})
         events = pd.DataFrame({"aux_sample": np.concatenate(samples).astype(np.int64),
-                               "line": np.concatenate(lines).astype(np.int64),
+                               "line": np.concatenate(line_numbers).astype(np.int64),
                                "state": np.concatenate(states).astype(np.int64)})
         return events.sort_values(["aux_sample", "line"], ignore_index=True)
 

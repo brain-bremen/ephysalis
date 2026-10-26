@@ -70,6 +70,7 @@ spikeglx = "ephyscon.io.spikeglx:SpikeGLXFormat"
 openephys = "ephyscon.io.openephys:OpenEphysFormat"
 daq = "ephyscon.legacy.daq:DaqFormat"
 uff = "ephyscon.legacy.uff:UffFormat"
+mcd = "ephyscon.legacy.mcd:McdFormat"
 
 [project.entry-points."ephyscon.stimulus_systems"]
 stimstage = "ephyscon.stimulus.stimstage:StimStageSystem"
