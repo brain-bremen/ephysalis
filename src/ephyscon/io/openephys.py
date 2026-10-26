@@ -53,6 +53,7 @@ from ephyscon.session import ProbeInfo, Run, Session, StreamKind
 if TYPE_CHECKING:
     from open_ephys.analysis.recording import Recording as OERecording
 
+    from ephyscon.session_config import AuxChannelMap
     from ephyscon.sync import RunSync
 
 _PROBE_STREAM_RE = re.compile(r"(?P<probe>Probe[A-Z]+)(?:-(?P<band>AP|LFP))?$")
@@ -408,6 +409,11 @@ class OpenEphysFormat(InputFormat):
         return events.astype({"processor_id": np.int64, "line": np.int64, "state": np.int64})
 
     # --- InputFormat ---
+
+    def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
+        from ephyscon.session_config import AuxChannelMap
+
+        return AuxChannelMap.vstim_openephys_default()
 
     def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
         from ephyscon.sync import AUX, ClockMap, RunSync

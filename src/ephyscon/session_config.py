@@ -195,9 +195,8 @@ def default_session_config(session: Session) -> SessionConfig:
         for pid, info in run.probes.items():
             probes.setdefault(pid, ProbeConfig(serial_number=info.serial_number))
 
-    n_analog = next((r.extra["aux"]["n_analog"] for r in session.runs if r.extra.get("aux")), 8)
-    aux_channels = (AuxChannelMap.vstim_openephys_default() if session.format.name == "openephys"
-                    else AuxChannelMap.legacy_default(n_analog))
+    with_aux = [r for r in session.runs if r.extra.get("aux")] or session.runs
+    aux_channels = session.format.default_aux_channels(with_aux[0] if with_aux else None)
     return SessionConfig(
         session_id=session.name,
         subject_id=subject,

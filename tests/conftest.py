@@ -32,6 +32,19 @@ skip_if_no_oe_tools_data = pytest.mark.skipif(
 )
 
 
+
+@pytest.fixture(autouse=True, scope="session")
+def _cache_dir(tmp_path_factory: pytest.TempPathFactory):
+    """Caches of input files (e.g. DAQ record indexes) in a temporary folder, not the user's."""
+    previous = os.environ.get("EPHYSCON_CACHE_DIR")
+    os.environ["EPHYSCON_CACHE_DIR"] = str(tmp_path_factory.mktemp("ephyscon-cache"))
+    yield
+    if previous is None:
+        os.environ.pop("EPHYSCON_CACHE_DIR", None)
+    else:
+        os.environ["EPHYSCON_CACHE_DIR"] = previous
+
+
 def _write_stream(run_dir: Path, run: str, stream: str, start: str, duration_s: float) -> None:
     template = (SPIKEGLX_TEMPLATES / f"template.{stream}.meta").read_text()
     meta = dict(line.split("=", 1) for line in template.splitlines() if "=" in line)

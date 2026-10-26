@@ -50,9 +50,7 @@ class RunTiming:
 def aux_channel_map(run: Run, config: SessionConfig | None = None) -> AuxChannelMap:
     if config is not None:
         return config.aux_channels
-    if run.format.name == "openephys":
-        return AuxChannelMap.vstim_openephys_default()
-    return AuxChannelMap.legacy_default(run.extra.get("aux", {}).get("n_analog", 8))
+    return run.format.default_aux_channels(run)
 
 
 def extract_run_timing(

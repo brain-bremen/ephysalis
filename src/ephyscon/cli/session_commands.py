@@ -97,6 +97,10 @@ def _inspect(args: argparse.Namespace) -> int:
             )
         if run.aux_stream:
             print(f"      aux: {run.aux_stream} {run.extra.get('aux', '')}")
+        others = [s for s in run.extra.get("streams", []) if s != run.aux_stream
+                  and all(s not in info.streams.values() for info in run.probes.values())]
+        if others:  # e.g. for probes defined in session.toml
+            print(f"      other streams: {', '.join(others)}")
 
         system = (
             get_stimulus_system(run_config.stimulus_system)

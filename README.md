@@ -1,7 +1,8 @@
 # ephyscon — Electrophysiology Converter
 
 Converts extracellular electrophysiology recordings (SpikeGLX/Neuropixels, Open Ephys in the
-Binary, NWB or legacy Open Ephys format, with Neuropixels or other probes) into one [NWB](https://nwb.org) or
+Binary, NWB or legacy Open Ephys format, the lab's DAQ files (`.daq`, 1999-2006), with Neuropixels
+or other probes) into one [NWB](https://nwb.org) or
 [DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) file per session, optionally in a
 [BIDS](https://bids.neuroimaging.io) dataset, with spike sorting via
 [spikeinterface](https://spikeinterface.readthedocs.io) (Kilosort4 by default).
@@ -61,6 +62,23 @@ ephyscon export  <session> [<session> ...] --work-dir D:/work/{session} --output
 # redo the processing of an output file from its embedded processing record
 ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--run]
 ```
+
+### DAQ files (`.daq`)
+
+A folder of `.daq` files is a session, each file (or each contiguous part of a paused file) a
+run. The files store no probes, so the electrodes are defined in `session.toml`, as channels
+`AI<DAQ channel>` of a board's stream:
+
+```toml
+[probes.epidural]
+stream = "ADC64 Rev F"                     # board name (ephyscon inspect lists the streams)
+channels = ["AI0", "AI1", "AI2"]           # ...
+```
+
+Other channels of the first board are the analog inputs (e.g. `[aux_channels.analog] eye_x = 43`),
+the trigger lines its TTL lines. Two boards (2006: ADC64 + MC-128) are synchronised from the copies
+of trigger lines 1-16 on lines 17-32. Gains are the voltage at the ADC input. The record index of
+each file is cached in `%LOCALAPPDATA%/ephyscon` (`EPHYSCON_CACHE_DIR`).
 
 ### `session.toml`
 

@@ -10,8 +10,9 @@ pipeline (`ephyscon convert`) was replaced by the session pipeline; its raw data
 ## Decisions
 
 - **Inputs**: pluggable readers (`ephyscon.input_formats` entry points) returning
-  spikeinterface recordings. SpikeGLX (spikeinterface/neo) and Open Ephys (all three formats:
-  Binary, NWB, legacy; open-ephys-python-tools) now, Multi Channel Systems later.
+  spikeinterface recordings. SpikeGLX (spikeinterface/neo), Open Ephys (all three formats:
+  Binary, NWB, legacy; open-ephys-python-tools) and the lab's DAQ files (`.daq`, file versions
+  1.0-3.3, 1999-2006; probes defined in `session.toml`) now, Multi Channel Systems (`.mcd`) next.
 - **Stimulus systems**: pluggable (`ephyscon.stimulus_systems`). The current MATLAB
   "stimulusStage" system is one plugin. A VStim plugin (Open Ephys network messages,
   wrapping the existing `trialmap.py`) and future systems are added the same way.

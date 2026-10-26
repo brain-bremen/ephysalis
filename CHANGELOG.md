@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Session model and readers** for SpikeGLX and Open Ephys (`ephyscon.io`), pluggable via the `ephyscon.input_formats` entry point group
+- **Reader for the lab's DAQ files** (`ephyscon.io.daq`, `.daq` file versions 1.0, 1.1, 2.0 and 3.1-3.3 of the ADC64/MC-128 acquisition program, 1999-2006), consolidated from the readers of the BIDS conversions: one run per file or contiguous part, one stream per board, probes from `session.toml`, TTL events and trial descriptors (`TD01`), board 2 synchronised to board 1 from the copied trigger lines, damaged and cut-off files; record indexes cached on disk (`EPHYSCON_CACHE_DIR`)
+- **`InputFormat.default_aux_channels`**: aux roles without `session.toml` come from the format (none for DAQ files)
+- **NWB export of probes without geometry** (contact positions NaN)
 - **Stimulus system plugins** (`ephyscon.stimulus`, entry point group `ephyscon.stimulus_systems`), with a first plugin for the lab's MATLAB "stimulusStage" system
 - **`session.toml`** per-session configuration, `ephyscon init` (with `--excel` migration of the legacy lab Excel sheets) and `ephyscon inspect`
 - **Reproducible processing:** every step records its command line, options, `session.toml`, the complete Python environment (and ephyscon git commit) and a fingerprint of the input files in `<work>/provenance/`; `ephyscon export` embeds this processing record in the NWB (`scratch/ephyscon_processing`) and DH5 (`/Operations/nnn_ephyscon_export`, attribute `Processing`) file; `ephyscon reproduce <file> --work-dir <dir> [--run]` replays it and warns about changed software or inputs (`ephyscon.provenance`)

@@ -68,6 +68,7 @@ ephyscon-inspect = "ephyscon.gui.inspector_app:main"
 [project.entry-points."ephyscon.input_formats"]
 spikeglx = "ephyscon.io.spikeglx:SpikeGLXFormat"
 openephys = "ephyscon.io.openephys:OpenEphysFormat"
+daq = "ephyscon.io.daq:DaqFormat"
 
 [project.entry-points."ephyscon.stimulus_systems"]
 stimstage = "ephyscon.stimulus.stimstage:StimStageSystem"

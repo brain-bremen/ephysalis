@@ -202,7 +202,10 @@ def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config:
         recording = run.get_recording(StreamKind.AP, probe_id)
         in_brain = set(sorting_channels(recording, probe_config and probe_config.model_copy(update={"bad_channels": []})))
         bad = set(probe_config.bad_channels) if probe_config else set()
-        for index, (channel_id, (x, y)) in enumerate(zip(recording.channel_ids, recording.get_channel_locations())):
+        # probes without a geometry (session.toml) have no contact positions
+        locations = (recording.get_channel_locations() if recording.has_probe()
+                     else np.full((recording.get_num_channels(), 2), np.nan))
+        for index, (channel_id, (x, y)) in enumerate(zip(recording.channel_ids, locations)):
             rows[(probe_id, index)] = len(nwbfile.electrodes) if nwbfile.electrodes is not None else 0
             nwbfile.add_electrode(
                 group=group, location=location, rel_x=float(x), rel_y=float(y), channel_name=str(channel_id),
