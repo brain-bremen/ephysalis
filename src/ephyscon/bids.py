@@ -98,6 +98,14 @@ def _lfp_series(nwbfile: NWBFile) -> list:
     return list(nwbfile.processing["ecephys"]["LFP"].electrical_series.values())
 
 
+def _electrodes(nwbfile: NWBFile) -> pd.DataFrame:
+    """The NWB electrodes table (empty for a file without probes, e.g. a DAQ run without
+    ``[probes]``)."""
+    if nwbfile.electrodes is None:
+        return pd.DataFrame(columns=["group_name", "rel_x", "rel_y", "location", "bad_channel"])
+    return nwbfile.electrodes.to_dataframe()
+
+
 def _electrode_names(electrodes: pd.DataFrame) -> pd.Series:
     """``<probe>_e<index within the probe>``, e.g. ``imec0_e084``."""
     index = electrodes.groupby("group_name").cumcount()
@@ -105,7 +113,7 @@ def _electrode_names(electrodes: pd.DataFrame) -> pd.Series:
 
 
 def probes_table(nwbfile: NWBFile) -> pd.DataFrame:
-    electrodes = nwbfile.electrodes.to_dataframe()
+    electrodes = _electrodes(nwbfile)
     rows = []
     for name, group in nwbfile.electrode_groups.items():
         device, model = group.device, group.device.model
@@ -122,7 +130,7 @@ def probes_table(nwbfile: NWBFile) -> pd.DataFrame:
 
 
 def electrodes_table(nwbfile: NWBFile) -> pd.DataFrame:
-    electrodes = nwbfile.electrodes.to_dataframe()
+    electrodes = _electrodes(nwbfile)
     table = pd.DataFrame({
         "name": _electrode_names(electrodes),
         "probe_name": electrodes.group_name,
@@ -149,7 +157,7 @@ def lfp_streams(nwbfile: NWBFile) -> dict[int, tuple[list[str], float]]:
 def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]] | None = None) -> pd.DataFrame:
     """One row per electrode that has LFP; ``stream_id`` lists where its data are (default: the
     NWB file's LFP series, see :func:`lfp_streams`)."""
-    electrodes = nwbfile.electrodes.to_dataframe()
+    electrodes = _electrodes(nwbfile)
     names = _electrode_names(electrodes).to_numpy()
     streams = lfp_streams(nwbfile) if streams is None else streams
     rows = []
@@ -168,8 +176,15 @@ def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]]
 
 
 def events_table(nwbfile: NWBFile) -> pd.DataFrame:
-    """Runs (``trial_type = run``) and trials (``trial_type`` = paradigm) on the session time axis."""
+    """Runs (``trial_type = run``), trials (``trial_type`` = paradigm) and the pulses of the
+    trigger lines (``trial_type`` = role, ``ttl_line``) on the session time axis."""
     tables = []
+    if "trigger_pulses" in nwbfile.intervals:
+        pulses = nwbfile.intervals["trigger_pulses"].to_dataframe()
+        tables.append(pd.DataFrame({
+            "onset": pulses.start_time, "duration": pulses.stop_time - pulses.start_time,
+            "trial_type": pulses.role, "run": pulses.run, "ttl_line": pulses.line,
+        }))
     if nwbfile.epochs is not None:
         epochs = nwbfile.epochs.to_dataframe()
         tables.append(pd.DataFrame({
@@ -199,7 +214,16 @@ def events_json(nwbfile: NWBFile, table: pd.DataFrame) -> dict:
         "duration": {"Units": "s"},
         "trial_type": {"Description": "'run' for a whole run, otherwise the paradigm of the trial"},
         "run": {"Description": "run name (NWB epoch tag)"},
+        "ttl_line": {"Description": "TTL line of a trigger pulse (1-based)"},
     }
+    if "events" in nwbfile.processing and "trigger_lines" in nwbfile.processing["events"].data_interfaces:
+        lines = nwbfile.processing["events"]["trigger_lines"].to_dataframe()
+        levels = {"run": "a whole run"}
+        if nwbfile.trials is not None:
+            levels.update({str(p): f"trial of paradigm {p}" for p in sorted(set(nwbfile.trials["paradigm"][:]))})
+        levels.update(dict(zip(lines.role, lines.meaning)))
+        columns["trial_type"]["Levels"] = levels
+        columns["duration"]["Description"] = "n/a for a pulse without end in the recording"
     if nwbfile.trials is not None:
         for column in nwbfile.trials.colnames:
             if column in table and column not in columns:

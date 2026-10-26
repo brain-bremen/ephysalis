@@ -23,7 +23,11 @@ DH5                    content
                        channel as ``MEAN_WAVEFORM``
 ``TRIALMAP``           trials of all runs (``StimNo`` = condition)
 ``EV02``               events (``events/<run>.csv``): TTL edges ``+line`` / ``-line``, network
-                       events ``word + 1000``; the code names are attributes (:mod:`ephyscon.events`)
+                       events ``word + 1000``; the code names are attributes (:mod:`ephyscon.events`;
+                       ``EventCodes`` / ``EventNames``: ``<role>_on`` = active edge of the line)
+``/Intervals``         ``<role>``: the pulses of each trigger line with a role, ``run_<name>``: the
+                       runs (:mod:`ephyscon.annotations`); ``Source`` attribute = description
+``/Markers``           ``trial_start`` and the ``[[events.markers]]`` of ``session.toml``
 ``Operations``         ``nnn_ephyscon_export`` with the processing record (JSON) in its
                        ``Processing`` attribute (:mod:`ephyscon.provenance`)
 =====================  =========================================================================
@@ -273,11 +277,12 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
     import dh5io.event_triggers
     from dhspec.event_triggers import EV_DATASET_NAME
 
+    from ephyscon.annotations import active_state, event_code_names as line_code_names
     from ephyscon.events import event_code_names, load_run_events
     from ephyscon.session_config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    times, codes, names = [], [], {}
+    times, codes, names, lines = [], [], {}, {}
     network = False
     for run in runs:
         path = work_dir / "events" / f"{run.name}.csv"
@@ -288,7 +293,9 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
         codes.append(events.code.to_numpy(np.int32))
         ttl = events[(events.source == "ttl") & (events.name != "")]
         for line, name in ttl.groupby("line").name.first().items():
-            names[f"{name}On"], names[f"{name}Off"] = int(line), -int(line)
+            on = int(line) if active_state(name, events_config) else -int(line)
+            names[f"{name}On"], names[f"{name}Off"] = on, -on
+            lines[int(line)] = str(name)
         network |= bool((events.source == "network").any())
     if not times:
         return 0
@@ -300,7 +307,46 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
                                                     event_codes=all_codes[order])
     for name, code in names.items():
         file[EV_DATASET_NAME].attrs[name] = np.int32(code)
+    if lines:
+        legend = line_code_names(lines, events_config)
+        file[EV_DATASET_NAME].attrs["EventCodes"] = np.array([c for c, _ in legend], dtype=np.int32)
+        file[EV_DATASET_NAME].attrs["EventNames"] = np.array([n for _, n in legend], dtype="S")
     return len(all_times)
+
+
+def _write_annotations(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+                       config: SessionConfig | None, trials: pd.DataFrame) -> tuple[int, int]:
+    """``/Intervals`` (pulses per role, runs) and ``/Markers`` (:mod:`ephyscon.annotations`)."""
+    import h5py.h5t as h5t
+    from dhspec.intervals import INTERVAL_DATASET_DTYPE, INTERVAL_GROUP_NAME
+    from dhspec.markers import MARKERS_DATASET_DTYPE, MARKERS_GROUP_NAME
+
+    from ephyscon.annotations import line_descriptions, markers, session_pulses
+    from ephyscon.session_config import EventsConfig
+
+    events_config = config.events if config is not None else EventsConfig()
+    pulses, lines = session_pulses(work_dir, runs, offsets, events_config)
+    intervals: dict[str, tuple[np.ndarray, str]] = {}
+    descriptions = line_descriptions(lines, events_config)
+    for role, group in pulses[pulses.stop_time.notna()].groupby("role", sort=True):
+        intervals[str(role)] = (np.c_[_ns(group.start_time.to_numpy(float)), _ns(group.stop_time.to_numpy(float))],
+                                f"TTL line pulses: {descriptions.get(str(role), role)}")
+    for run in runs:
+        start = offsets[run.name]
+        intervals[f"run_{run.name}"] = (np.array([[_ns(start), _ns(start + (run.duration_s or 0.0))]]),
+                                        f"run {run.name} (first to last sample)")
+    group = file.create_group(INTERVAL_GROUP_NAME)
+    datatype = h5t.py_create(INTERVAL_DATASET_DTYPE)
+    datatype.commit(group.id, b"INTERVAL")
+    for name, (times, source) in intervals.items():
+        data = np.array([tuple(row) for row in times.astype(np.int64)], dtype=INTERVAL_DATASET_DTYPE)
+        group.create_dataset(name, data=data, dtype=group["INTERVAL"]).attrs["Source"] = source
+    marker_times = {name: value for name, value in markers(pulses, trials, events_config).items() if len(value[0])}
+    if marker_times:
+        group = file.create_group(MARKERS_GROUP_NAME)
+        for name, (times, source) in marker_times.items():
+            group.create_dataset(name, data=_ns(times).astype(MARKERS_DATASET_DTYPE)).attrs["Source"] = source
+    return len(intervals), len(marker_times)
 
 
 def _write_running_speed(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> bool:
@@ -480,6 +526,7 @@ def write_session_dh5(
         units = _write_spikes(file, session, work_dir, runs, offsets)
         if not trials.empty:
             _write_trialmap(file, trials)
+        _write_annotations(file, work_dir, runs, offsets, config, trials)
         dh5io.operations.add_operation_to_file(file, DH5_OPERATION_NAME, tool=f"ephyscon {get_version_from_pyproject()}",
                                                date=datetime.now())
         if processing is not None:

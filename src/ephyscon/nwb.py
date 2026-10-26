@@ -18,7 +18,10 @@ acquisition                 with ``raw``: raw AP (wideband) data per run and pro
                             (``aux_analog_<run>``, volts)
 processing/ecephys/LFP      ``lfp/<run>_<probe>/``, one ElectricalSeries per run and probe
 processing/ecephys/MUA      ``mua/<run>_<probe>/`` (``FilteredEphys``), MUA envelope per run and probe
-processing/events           ``events`` table from ``events/<run>.csv`` (TTL edges, network events)
+processing/events           ``events`` table from ``events/<run>.csv`` (TTL edges, network events);
+                            ``markers`` (``trial_start``, ``[[events.markers]]``) and
+                            ``trigger_lines`` (role, line, meaning; :mod:`ephyscon.annotations`)
+intervals/trigger_pulses    pulses of the trigger lines with a role (start, stop, role, line, run)
 processing/behavior         running speed per run (``running_speed/<run>.npy``); eye position per
                             run (``eye/<run>.npy``, uncalibrated volts) in ``EyeTracking``
 scratch/ephyscon_processing processing record (JSON): configs, options and software versions of
@@ -481,8 +484,57 @@ def _add_events(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict
         name="events", description="TTL edges of the aux stream and network events (see ephyscon.events)",
         columns=[VectorData(name=c, description=d, data=values[c]) for c, d in descriptions.items()],
     )
-    nwbfile.create_processing_module("events", "events of the runs").add(table)
+    _events_module(nwbfile).add(table)
     return len(events)
+
+
+def _events_module(nwbfile: NWBFile) -> Any:
+    if "events" not in nwbfile.processing:
+        nwbfile.create_processing_module("events", "events of the runs")
+    return nwbfile.processing["events"]
+
+
+def _add_annotations(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+                     config: SessionConfig | None) -> None:
+    """Pulses of the trigger lines and markers (:mod:`ephyscon.annotations`)."""
+    from hdmf.common import DynamicTable, VectorData
+    from pynwb.epoch import TimeIntervals
+
+    from ephyscon.annotations import line_descriptions, markers, session_pulses
+    from ephyscon.session_config import EventsConfig
+
+    events_config = config.events if config is not None else EventsConfig()
+    pulses, lines = session_pulses(work_dir, runs, offsets, events_config)
+    if lines:
+        descriptions = line_descriptions(lines, events_config)
+        roles = sorted(lines, key=lambda line: lines[line])
+        _events_module(nwbfile).add(DynamicTable(
+            name="trigger_lines", description="digital lines with a role (session.toml [aux_channels.digital])",
+            columns=[VectorData(name="role", description="role of the line", data=[lines[n] for n in roles]),
+                     VectorData(name="line", description="TTL line (1-based)", data=np.array(roles, dtype=np.int64)),
+                     VectorData(name="meaning", description="meaning of the pulses",
+                                data=[descriptions[lines[n]] for n in roles])]))
+    if len(pulses):
+        table = TimeIntervals(name="trigger_pulses", description="pulses of the trigger lines: from the active "
+                              "edge to the next opposite edge; stop_time NaN for a pulse without end")
+        table.add_column("role", "role of the line (trigger_lines)")
+        table.add_column("line", "TTL line (1-based)")
+        table.add_column("run", "run of the pulse")
+        for row in pulses.itertuples(index=False):
+            table.add_interval(start_time=float(row.start_time), stop_time=float(row.stop_time), role=str(row.role),
+                               line=int(row.line), run=str(row.run))
+        nwbfile.add_time_intervals(table)
+    trials = session_trials(work_dir, runs, offsets)
+    found = {name: value for name, value in markers(pulses, trials, events_config).items() if len(value[0])}
+    if found:
+        names = sorted(found)
+        times = np.concatenate([found[n][0] for n in names])
+        labels = np.concatenate([[n] * len(found[n][0]) for n in names])
+        order = np.argsort(times, kind="stable")
+        _events_module(nwbfile).add(DynamicTable(
+            name="markers", description="time markers; " + "; ".join(f"{n}: {found[n][1]}" for n in names),
+            columns=[VectorData(name="timestamp", description="time in s on the file's time axis", data=times[order]),
+                     VectorData(name="label", description="marker name", data=labels[order].tolist())]))
 
 
 def _add_running_speed(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
@@ -533,6 +585,7 @@ def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionCo
     nwbfile = _new_nwbfile(session, config, start)
     _add_electrodes(nwbfile, session, runs, config)
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
+    _add_annotations(nwbfile, work_dir, runs, offsets, config)
     return nwbfile
 
 
@@ -576,6 +629,7 @@ def write_session_nwb(
     _add_derived(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression, "mua")
     _add_csd(nwbfile, work_dir, runs, offsets, syncs or {}, compression)
     _add_events(nwbfile, work_dir, runs, offsets)
+    _add_annotations(nwbfile, work_dir, runs, offsets, config)
     if processing is not None:
         from ephyscon.provenance import NWB_SCRATCH_NAME
 

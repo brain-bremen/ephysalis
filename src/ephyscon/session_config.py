@@ -13,6 +13,7 @@ Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
 3. ``[events]`` (TTL lines left out of the events, offset of the network event codes)
 4. ``[calibration]`` (gains from a calibration-sine recording), ``[line_noise]`` (mains removal
    with the recorded mains reference), probes: ``csd`` (current source density)
+5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 from pydantic import BaseModel, Field
@@ -28,13 +29,14 @@ from pydantic import BaseModel, Field
 from ephyscon.schema import Migration, migrate
 from ephyscon.session import Session
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
     1: lambda data: data,  # 2 only added fields, all with defaults
     2: lambda data: data,  # 3 added [events], with defaults
     3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
+    4: lambda data: data,  # 5 added [events.lines] and [[events.markers]], empty by default
 }
 
 
@@ -148,8 +150,28 @@ class AuxChannelMap(BaseModel):
         return cls()
 
 
+class TriggerLineConfig(BaseModel):
+    """A digital line with a role in ``[aux_channels.digital]`` (:mod:`ephyscon.annotations`)."""
+
+    active: Literal["high", "low"] = Field(default="high", description="Level of the line during a pulse, "
+                                           "e.g. 'low' for a lever line that is low while pressed")
+    description: str = Field(default="", description="Meaning of the pulses (DH5 /Intervals, BIDS events.json)")
+
+
+class MarkerConfig(BaseModel):
+    """A time marker from the pulses of a trigger line or from the trials (:mod:`ephyscon.annotations`)."""
+
+    name: str = Field(description="Marker name, e.g. lever_press, derived_sample_onset")
+    role: str = Field(description="Role of the line ([aux_channels.digital]), or 'trial' for the trials")
+    edge: Literal["onset", "offset"] = Field(default="onset", description="Start or end of the pulses (trials)")
+    offset_ms: float = Field(default=0.0, description="Added to the time; a marker with an offset is derived, "
+                             "not measured")
+    description: str = ""
+
+
 class EventsConfig(BaseModel):
-    """Events of the runs (``events/<run>.csv``, DH5 ``EV02``, NWB ``events`` table)."""
+    """Events of the runs (``events/<run>.csv``, DH5 ``EV02``, NWB ``events`` table) and the pulses
+    and markers made from them (DH5 ``/Intervals``, ``/Markers``; :mod:`ephyscon.annotations`)."""
 
     exclude_roles: list[str] = Field(
         default_factory=lambda: ["sync", "wheel"],
@@ -159,6 +181,11 @@ class EventsConfig(BaseModel):
         default=1000, description="Added to the VStim network event words for the DH5 event codes "
         "(TTL lines are +line / -line)"
     )
+    lines: dict[str, TriggerLineConfig] = Field(
+        default_factory=dict, description="Active level and description of the lines, by role "
+        "(default: active high, described by the role)"
+    )
+    markers: list[MarkerConfig] = Field(default_factory=list, description="Markers besides trial_start")
 
 
 class CalibrationConfig(BaseModel):
