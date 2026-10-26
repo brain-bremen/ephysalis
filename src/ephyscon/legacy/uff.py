@@ -13,8 +13,10 @@ each; the P file may lack its prefix or the M file its extension): one run per b
 the streams ``M`` (channels ``M0``...``M15``, the reference clock, a true 1 kHz) and ``P``
 (``P0``...; its clock runs about 0.4 % slow and has occasional steps). Channel 15 of both
 carries the same event pulses (~660 counts, one per stimulus event); the P samples are mapped
-onto the M clock through the pulses paired on both (``pair_pulses``; :class:`ClockMap`
-interpolates between pairs, so steps are followed). The TTL events of a run are the pulses on
+onto the M clock with one rate and an offset per stretch between steps of the P clock, fitted to
+the pulses paired on both (:func:`pair_pulses`, :func:`p_clock_fit`; port of
+``eddi.p_clock_regions``), so the DH5 blocks of P get their true period and one INDEX region per
+stretch. The TTL events of a run are the pulses on
 M15 (line 1). Electrodes are defined in ``session.toml`` (probes with ``stream = "M"`` or
 ``"P"``). Start time: the modification time of the M file (the header has no date).
 """
@@ -207,6 +209,32 @@ def pair_pulses(pm: np.ndarray, pp: np.ndarray, tol: float = 3.0) -> tuple[np.nd
     return q[:, 0], q[:, 1]
 
 
+STEP_P_SAMPLES = 2.5  # a jump of the pair residual beyond this is a step of the P clock
+
+
+def p_clock_fit(pm: np.ndarray, pp: np.ndarray, step: float = STEP_P_SAMPLES) -> tuple[np.ndarray, np.ndarray, float]:
+    """Clock map points (P samples, M samples) of the fit ``P = rate x M + offset_k`` and the
+    rate (P samples per M sample): one common rate, one offset per stretch between steps (jumps
+    of the residual of the pairs > ``step`` P samples); two points (first and last pair) per stretch."""
+    rate, offset = np.polyfit(pm, pp, 1)
+    residual = pp - (offset + rate * pm)
+    bounds = [0, *(np.flatnonzero(np.abs(np.diff(residual)) > step) + 1).tolist(), len(pm)]
+    design = np.zeros((len(pm), len(bounds)))
+    design[:, 0] = pm
+    for k in range(len(bounds) - 1):
+        design[bounds[k]:bounds[k + 1], 1 + k] = 1
+    coefficients = np.linalg.lstsq(design, pp.astype(float), rcond=None)[0]
+    rate, offsets = coefficients[0], coefficients[1:]
+    p_points, m_points = [], []
+    for k in range(len(bounds) - 1):
+        for m in (pm[bounds[k]], pm[bounds[k + 1] - 1]):
+            m_points.append(float(m))
+            p_points.append(float(rate * m + offsets[k]))
+    if len(bounds) > 2:
+        logger.info("P clock: %d step(s)", len(bounds) - 2)
+    return np.array(p_points), np.array(m_points), float(rate)
+
+
 def block_files(folder: Path) -> dict[str, tuple[Path, Path]]:
     """Block stem -> (M file, P file) of the UFF files in ``folder``."""
     files = {p.name.upper(): p for p in folder.iterdir() if p.is_file() and is_uff(p)}
@@ -294,7 +322,9 @@ class UffFormat(InputFormat):
             elif stream == "P":
                 if len(pm) < 2:
                     raise ValueError(f"run {run.name}: fewer than 2 event pulses on both M15 and P15")
-                maps[probe_id] = ClockMap(pp.astype(float), pm / SAMPLING_FREQUENCY, SAMPLING_FREQUENCY)
+                p_points, m_points, rate = p_clock_fit(pm, pp)
+                maps[probe_id] = ClockMap(p_points, m_points / SAMPLING_FREQUENCY, SAMPLING_FREQUENCY,
+                                          rate=rate * SAMPLING_FREQUENCY)
         return RunSync(reference=reference or AUX, maps=maps)
 
     def read_aux_analog(self, run: Run, index: int) -> np.ndarray:

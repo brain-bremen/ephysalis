@@ -467,16 +467,16 @@ def _export(args: argparse.Namespace) -> int:
     # (session to write, BIDS run index or None, BIDS task, output path)
     files: list[tuple[Session, int | None, str | None, Path]] = []
     if args.per_run:
-        for run in included_runs(session, config):
+        for number, run in enumerate(included_runs(session, config), start=1):  # BIDS run: position among the included
             task = config.task_of([run.name]) if config else None
             if args.bids:
                 from ephyscon.bids import ecephys_path
 
-                output = ecephys_path(Path(args.bids), subject, session_label, extension, run=run.index + 1, task=task)
+                output = ecephys_path(Path(args.bids), subject, session_label, extension, run=number, task=task)
             else:
                 base = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
                 output = base.with_name(f"{base.stem}_{run.name}{extension}")
-            files.append((single_run_session(session, run), run.index + 1, task, output))
+            files.append((single_run_session(session, run), number, task, output))
     else:
         task = config.task_of([r.name for r in included_runs(session, config)]) if config else None
         if args.bids:
@@ -684,7 +684,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--dataset-name", help="Name in dataset_description.json (default: folder name)")
     p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
     p.add_argument("--per-run", action="store_true", help="One file per run, on the run's own clock (DAQ: the DAQ "
-                   "clock; BIDS: run-<n>, n = position of the run in the session)")
+                   "clock; BIDS: run-<n>, n = position of the run among the included runs)")
     p.add_argument("--raw", action="store_true", help="Include the raw data (AP/wideband streams and analog aux "
                    "inputs; about the size of the recording)")
     p.add_argument("--no-compression", action="store_true", help="NWB: write the LFP without gzip compression")

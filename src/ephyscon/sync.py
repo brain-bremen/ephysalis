@@ -275,12 +275,15 @@ class ClockMap:
     """Piecewise-linear map from samples of a stream to seconds on the reference clock.
 
     Between matched sync edges the map is interpolated linearly. Outside them it is
-    extrapolated with a straight line fitted to all edges.
+    extrapolated with a straight line fitted to all edges. ``rate`` (samples per reference
+    second) overrides the slope of that line where the format knows the true rate better, e.g. a
+    clock with steps (UFF "P": one rate, an offset per stretch).
     """
 
     source_samples: np.ndarray
     reference_times: np.ndarray
     sampling_frequency: float  # nominal rate of the source stream
+    rate: float | None = None
     _fit: tuple[float, float] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -291,6 +294,9 @@ class ClockMap:
             intercept = self.reference_times[0] - slope * self.source_samples[0]
         else:
             slope, intercept = 1 / self.sampling_frequency, 0.0
+        if self.rate is not None and self.source_samples.size:
+            slope = 1 / self.rate
+            intercept = float(np.mean(self.reference_times - slope * self.source_samples))
         self._fit = (float(slope), float(intercept))
 
     @classmethod

@@ -16,8 +16,10 @@ DH5                    content
 ``CONT4001``...        MUA envelope (``ephyscon mua``), ids ``4001 +`` channel index
 ``CONT8001``...        CSD (``ephyscon csd``), ids ``8001 +`` channel index; int16 scaled as
                        ``dh_csd`` (calibration = max |CSD| / (32767 - 0.01) A/m^3 per count)
-                       All CONT blocks have one INDEX region per run, or more if the stream's
-                       clock is off the block's sample period (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
+                       All CONT blocks have one INDEX region per run, or more where the stream's
+                       clock (its clock map: drift or steps) leaves the block's sample period by
+                       :data:`MAX_CLOCK_ERROR_SAMPLES`; a clock far off its nominal rate
+                       (:data:`FAR_OFF_RATE`) gets its true period
 ``SPIKE<n>``           one block per sorted unit, ``n = 10000 * probe index + unit id``;
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
@@ -46,6 +48,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -104,6 +107,10 @@ SPIKE_IDS_PER_PROBE = 10000
 # A DH5 CONT block has one sample period; a probe whose clock runs off the nominal rate gets a
 # new INDEX region (with its exact start time) before the accumulated error reaches this
 MAX_CLOCK_ERROR_SAMPLES = 0.1
+# a stream whose clock is further than this off its nominal rate (e.g. a second acquisition PC,
+# UFF "P" 0.4 % slow; DAQ MC-128 0.38 % fast) is stored with its true sample period
+FAR_OFF_RATE = 1e-4
+CLOCK_GRID_POINTS = 1_000_000  # clock map evaluated at most at this many samples per run (region boundaries)
 TRIAL_OUTCOME_HIT = 1  # dhspec / VStim TrialOutcome.Hit, for trials without an outcome
 CHUNK_SAMPLES = 60_000
 
@@ -129,6 +136,36 @@ def lfp_regions(start_s: float, rate: float, nominal_rate: float, num_samples: i
     return [(int(_ns(start_s + k / rate)), k) for k in range(0, num_samples, length)]
 
 
+def clock_regions(times: Callable[[np.ndarray], np.ndarray], num_samples: int, period_s: float) -> list[tuple[int, int]]:
+    """INDEX regions ``(time in ns, first sample)`` of one run whose sample ``k`` is at
+    ``times(k)`` s: a new region wherever the times leave ``period_s`` steps by more than
+    :data:`MAX_CLOCK_ERROR_SAMPLES` (drift, or steps of the clock)."""
+    step = max(1, num_samples // CLOCK_GRID_POINTS)
+    grid = np.unique(np.r_[np.arange(0, num_samples, step), num_samples - 1])
+    t = times(grid.astype(float))
+    regions = [(int(_ns(t[0])), 0)]
+    first, t_first = 0, float(t[0])
+    tolerance = MAX_CLOCK_ERROR_SAMPLES * period_s
+    for k, tk in zip(grid[1:].tolist(), t[1:].tolist()):
+        if abs(tk - (t_first + (k - first) * period_s)) > tolerance:
+            regions.append((int(_ns(tk)), k))
+            first, t_first = k, tk
+    return regions
+
+
+def stream_times(run: Run, key: str, rate: float, offset: float,
+                 syncs: dict[str, RunSync]) -> Callable[[np.ndarray], np.ndarray] | None:
+    """Session-axis time (s) of sample ``k`` of a signal at nominal ``rate`` that is
+    sample-locked to stream ``key`` of a run, from the run's clock map (piecewise, so steps of
+    the clock are followed); None without a clock map."""
+    clock = syncs[run.name].maps.get(key) if run.name in syncs else None
+    if clock is None or clock.source_samples.size < 2:
+        return None
+    stream_rate = (run.format.aux_sampling_frequency(run) if key == AUX
+                   else run.get_recording(StreamKind.AP, key).sampling_frequency)
+    return lambda k: offset + clock.to_reference_time(np.asarray(k, float) * stream_rate / rate)
+
+
 def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[str, RunSync]) -> tuple[float, float]:
     """Start (s, session axis) and true rate of a signal at nominal ``rate`` that is
     sample-locked to stream ``key`` (a probe's AP stream, or ``AUX``) of a run."""
@@ -140,13 +177,13 @@ def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[st
     return offset + float(clock.to_reference_time(0.0)), rate * clock.effective_sampling_frequency / stream_rate
 
 
-def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, float]], first_id: int,
+def _write_cont_blocks(file: h5py.File, parts: list[tuple], first_id: int,
                        first_global: int, label: str, signal_type: ContSignalType | None, comment: str,
                        to_int16: bool = False, full_scale: float = 32000.0, unit_factor: float = 1e-6,
                        c_rounding: bool = False, positions: list[int] | None = None,
                        attributes: dict[str, dict[str, Any]] | None = None) -> int:
     """One CONT block per channel of the recordings ``parts`` = ``[(recording, start s, true
-    rate)]`` (the runs, in order), ids ``first_id + position``, ``positions`` = index of each
+    rate[, times])]`` (the runs, in order; ``times``: :func:`stream_times`), ids ``first_id + position``, ``positions`` = index of each
     channel in the probe (default: its index in the recordings); ``attributes``: extra block
     attributes by channel id. int16 recordings are copied with
     their gains as calibration; with ``to_int16`` (float, e.g. MUA in µV) each channel is scaled
@@ -156,19 +193,24 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
     import dh5io.cont
     from dhspec.cont import create_empty_index_array
 
-    first = parts[0][0]
-    period_ns = int(round(1e9 / first.sampling_frequency))
+    first, true_rate = parts[0][0], parts[0][2]
+    far_off = abs(true_rate / first.sampling_frequency - 1) > FAR_OFF_RATE
+    period_ns = int(round(1e9 / (true_rate if far_off else first.sampling_frequency)))
     stored_rate = 1e9 / period_ns  # the rate a DH5 reader assumes; regions correct the rest
     regions, total = [], 0
-    for recording, start, rate in parts:
-        regions += [(t, total + k) for t, k in lfp_regions(start, rate, stored_rate, recording.get_num_samples())]
-        total += recording.get_num_samples()
+    for recording, start, rate, *rest in parts:
+        times = rest[0] if rest else None
+        n = recording.get_num_samples()
+        run_regions = (clock_regions(times, n, 1 / stored_rate) if times is not None
+                       else lfp_regions(start, rate, stored_rate, n))
+        regions += [(t, total + k) for t, k in run_regions]
+        total += n
     index = create_empty_index_array(len(regions))
     index["time"], index["offset"] = [r[0] for r in regions], [r[1] for r in regions]
     channel_ids = [str(c) for c in first.channel_ids]
     if to_int16:
         peak = np.zeros(len(channel_ids))
-        for recording, _, _ in parts:
+        for recording, *_ in parts:
             n = recording.get_num_samples()
             for begin in range(0, n, CHUNK_SAMPLES):
                 traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES))
@@ -191,7 +233,7 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
             group.attrs[name] = value
         groups.append(group["DATA"])
     written = 0
-    for recording, _, _ in parts:
+    for recording, *_ in parts:
         n = recording.get_num_samples()
         for begin in range(0, n, CHUNK_SAMPLES):
             traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES), return_in_uV=False)
@@ -244,15 +286,16 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
             if (path / "binary.json").exists():
                 recording = si.load(path)
                 parts.append((recording, *stream_timing(run, probe_id, recording.sampling_frequency,
-                                                        offsets[run.name], syncs)))
+                                                        offsets[run.name], syncs),
+                              stream_times(run, probe_id, recording.sampling_frequency, offsets[run.name], syncs)))
         attributes = {}
         if kind == "lfp":
             attributes = {c: {"ChannelStatus": status, "ChannelStatusDescription": why}
                           for c, (status, why) in session_status(work_dir, runs, probe_id).items()}
         # channels by the runs that have them (all runs, except for the CSD after channel selection)
-        present = [{str(c) for c in recording.channel_ids} for recording, _, _ in parts]
+        present = [{str(c) for c in recording.channel_ids} for recording, *_ in parts]
         if not set().union(*present) <= set(channels):  # ids of the stream, not of the AP stream (Neuropixels LF)
-            channels = list(dict.fromkeys(str(c) for recording, _, _ in parts for c in recording.channel_ids))
+            channels = list(dict.fromkeys(str(c) for recording, *_ in parts for c in recording.channel_ids))
         by_runs: dict[tuple[int, ...], list[str]] = {}
         for channel in channels:
             having = tuple(k for k, ids in enumerate(present) if channel in ids)
@@ -260,7 +303,7 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
                 by_runs.setdefault(having, []).append(channel)
         for having, ids in by_runs.items():
             selected = [(p[0] if [str(c) for c in p[0].channel_ids] == ids else p[0].select_channels(
-                [c for c in p[0].channel_ids if str(c) in ids]), p[1], p[2]) for p in (parts[k] for k in having)]
+                [c for c in p[0].channel_ids if str(c) in ids]), *p[1:]) for p in (parts[k] for k in having)]
             n_blocks += _write_cont_blocks(
                 file, selected, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
                 f"{comment}; INDEX regions placed on the session time axis", positions=[channels.index(c) for c in ids],
@@ -284,7 +327,8 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
             if probe_id in run.probes:
                 recording = run.get_recording(StreamKind.AP, probe_id)
                 parts.append((recording, *stream_timing(run, probe_id, recording.sampling_frequency,
-                                                        offsets[run.name], syncs)))
+                                                        offsets[run.name], syncs),
+                              stream_times(run, probe_id, recording.sampling_frequency, offsets[run.name], syncs)))
         n_blocks += _write_cont_blocks(file, parts, RAW_FIRST_CONT_ID + global_index, global_index,
                                        f"{probe_id} raw", None, "raw data of the AP (wideband) stream")
         global_index += n_channels
@@ -292,7 +336,8 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
     for run in runs:
         if run.aux_stream is not None:
             recording = run.format.aux_analog_recording(run)
-            parts.append((recording, *stream_timing(run, AUX, recording.sampling_frequency, offsets[run.name], syncs)))
+            parts.append((recording, *stream_timing(run, AUX, recording.sampling_frequency, offsets[run.name], syncs),
+                          stream_times(run, AUX, recording.sampling_frequency, offsets[run.name], syncs)))
     if parts and parts[0][0].get_num_channels() > MAX_ANALOG_CHANNELS:
         raise ValueError(f"{parts[0][0].get_num_channels()} analog inputs do not fit the analog CONT ids")
     if parts:
