@@ -11,11 +11,11 @@ DH5                    content
                        channel index over all probes)
 ``CONT1601``...        with ``raw``: analog inputs of the aux stream
 ``CONT2001``...        LFP, one block per channel (ids ``2001 +`` channel index over all probes)
+``CONT3601``           running speed (calibration: cm/s per bit)
+``CONT3602``, ``3603``   eye position x, y (uncalibrated volts of the eye tracker outputs)
 ``CONT4001``...        MUA envelope (``ephyscon mua``), ids ``4001 +`` channel index
                        All CONT blocks have one INDEX region per run, or more if the stream's
                        clock is off the block's sample period (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
-``CONT6001``           running speed (calibration: cm/s per bit)
-``CONT6002``, ``6003``   eye position x, y (uncalibrated volts of the eye tracker outputs)
 ``SPIKE<n>``           one block per sorted unit, ``n = 10000 * probe index + unit id``;
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
@@ -25,6 +25,9 @@ DH5                    content
 ``Operations``         ``nnn_ephyscon_export`` with the processing record (JSON) in its
                        ``Processing`` attribute (:mod:`ephyscon.provenance`)
 =====================  =========================================================================
+
+The block ids follow the ranges of ``dhspec.cont.CONT_BLOCK_RANGES``, shared by the lab's
+converters (at most 1600 probe channels and 400 analog inputs).
 
 DH5 has no place for stimulus parameters and unit metrics; they are written next to the file
 as ``<name>_trials.csv`` (with the ``TrialNo`` of the TRIALMAP) and ``<name>_units.csv`` (with
@@ -66,12 +69,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-RAW_FIRST_CONT_ID = 1
-ANALOG_FIRST_CONT_ID = 1601
-LFP_FIRST_CONT_ID = 2001
-MUA_FIRST_CONT_ID = 4001
-RUNNING_SPEED_CONT_ID = 6001
-EYE_CONT_IDS = (6002, 6003)
+try:
+    from dhspec.cont import CONT_BLOCK_RANGES, ContBlockGroup
+except ImportError:  # dh5io <= 0.4.2; remove with the next dh5io release
+    from enum import Enum
+
+    class ContBlockGroup(Enum):  # type: ignore[no-redef]
+        RAW = "RAW"
+        ANALOG = "ANALOG"
+        LFP = "LFP"
+        ANALOG_DOWNSAMPLED = "ANALOG_DOWNSAMPLED"
+        MUA = "MUA/ESA"
+
+    CONT_BLOCK_RANGES = {ContBlockGroup.RAW: (1, 1600), ContBlockGroup.ANALOG: (1601, 2000),  # type: ignore[dict-item]
+                         ContBlockGroup.LFP: (2001, 3600), ContBlockGroup.ANALOG_DOWNSAMPLED: (3601, 4000),
+                         ContBlockGroup.MUA: (4001, 5600)}
+
+# CONT block ids of the lab's converters (dhspec.cont.CONT_BLOCK_RANGES)
+RAW_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.RAW][0]
+ANALOG_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG][0]
+LFP_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.LFP][0]
+MUA_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.MUA][0]
+RUNNING_SPEED_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG_DOWNSAMPLED][0]
+EYE_CONT_IDS = (RUNNING_SPEED_CONT_ID + 1, RUNNING_SPEED_CONT_ID + 2)
+MAX_NEURAL_CHANNELS = CONT_BLOCK_RANGES[ContBlockGroup.RAW][1] - RAW_FIRST_CONT_ID + 1
+MAX_ANALOG_CHANNELS = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG][1] - ANALOG_FIRST_CONT_ID + 1
 SPIKE_IDS_PER_PROBE = 10000
 # A DH5 CONT block has one sample period; a probe whose clock runs off the nominal rate gets a
 # new INDEX region (with its exact start time) before the accumulated error reaches this
@@ -181,8 +203,11 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
         "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA,
                 "MUA envelope (300 Hz high-pass, rectified, resampled)"),
     }[kind]
+    counts = _probe_channel_counts(session, runs)
+    if sum(counts.values()) > MAX_NEURAL_CHANNELS:
+        raise ValueError(f"{sum(counts.values())} probe channels do not fit the {kind.upper()} CONT ids")
     global_index, n_blocks = 0, 0
-    for probe_id, n_channels in _probe_channel_counts(session, runs).items():
+    for probe_id, n_channels in counts.items():
         parts = []
         for run in runs:
             path = folder(work_dir, run.name, probe_id)
@@ -204,7 +229,7 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
     from dhspec.cont import ContSignalType
 
     counts = _probe_channel_counts(session, runs)
-    if sum(counts.values()) > ANALOG_FIRST_CONT_ID - RAW_FIRST_CONT_ID:
+    if sum(counts.values()) > MAX_NEURAL_CHANNELS:
         raise ValueError(f"{sum(counts.values())} probe channels do not fit the raw CONT ids")
     global_index, n_blocks = 0, 0
     for probe_id, n_channels in counts.items():
@@ -222,6 +247,8 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
         if run.aux_stream is not None:
             recording = run.format.aux_analog_recording(run)
             parts.append((recording, *stream_timing(run, AUX, recording.sampling_frequency, offsets[run.name], syncs)))
+    if parts and parts[0][0].get_num_channels() > MAX_ANALOG_CHANNELS:
+        raise ValueError(f"{parts[0][0].get_num_channels()} analog inputs do not fit the analog CONT ids")
     if parts:
         n_blocks += _write_cont_blocks(file, parts, ANALOG_FIRST_CONT_ID, -1, "aux", ContSignalType.ANALOG,
                                        "analog input of the aux stream")

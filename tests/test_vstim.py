@@ -6,6 +6,7 @@ import pytest
 
 from conftest import DATA_FOLDER, skip_if_no_data
 from ephyscon.cli.main import main
+from ephyscon.dh5 import EYE_CONT_IDS
 from ephyscon.io.base import open_session
 from ephyscon.stimulus.base import detect_stimulus_system
 from ephyscon.timing import extract_run_timing
@@ -77,4 +78,4 @@ def test_timing_and_export(tmp_path, output_format):
         with dh5io.DH5File(out, "r") as file:
             trialmap = file.get_trialmap()
             assert len(trialmap) == 13 and list(trialmap["Outcome"][[2, 12]]) == [6, 10]
-            assert file.get_cont_group_by_id(6002).name == "eye position x"
+            assert file.get_cont_group_by_id(EYE_CONT_IDS[0]).name == "eye position x"

@@ -96,9 +96,9 @@ exclude_roles = ["sync", "wheel"]
 |---|---|
 | CONT 1 – 1600 | raw AP/wideband data (`export --raw`), one block per channel over all probes |
 | CONT 1601 – 2000 | analog inputs of the aux stream (`export --raw`) |
-| CONT 2001 – 4000 | LFP |
-| CONT 4001 – 6000 | MUA envelope |
-| CONT 6001 | running speed; CONT 6002/6003 eye position x/y |
+| CONT 2001 – 3600 | LFP |
+| CONT 3601 | running speed; CONT 3602/3603 eye position x/y |
+| CONT 4001 – 5600 | MUA envelope |
 | SPIKE `10000 · probe index + unit id` | spike times and mean waveform per unit |
 | TRIALMAP | trials of all runs |
 | EV02 | TTL edges (`+line`/`-line`), VStim network events (`word + 1000`), names as attributes |
