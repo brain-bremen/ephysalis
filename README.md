@@ -17,7 +17,9 @@ Steps (each one optional, outputs in a work dir per session):
 |---|---|
 | `sync` | sync edges of all streams (clock maps between probes and the aux stream) |
 | `timing` | trials of all paradigms (stimulus system plugins: stimstage, VStim), running speed, eye position, events (TTL lines, VStim network events) |
-| `lfp` | LFP per run and probe, 1 kHz |
+| `calibrate` | channel gains from a calibration-sine recording (`[calibration]`) |
+| `lfp` | LFP per run and probe, 1 kHz; mains removal with the recorded mains (`[line_noise]`) |
+| `csd` | current source density of 2-D arrays (`[probes.<id>.csd]`, port of Borisov's `dh_csd`) |
 | `mua` | MUA envelope per run and probe, 1 kHz (300 Hz high-pass, rectified) |
 | `sort` | spike sorting per probe over all runs |
 | `export` | one NWB or DH5 file (optionally with the raw data), optionally into a BIDS dataset |
@@ -80,6 +82,25 @@ the trigger lines its TTL lines. Two boards (2006: ADC64 + MC-128) are synchroni
 of trigger lines 1-16 on lines 17-32. Gains are the voltage at the ADC input. The record index of
 each file is cached in `%LOCALAPPDATA%/ephyscon` (`EPHYSCON_CACHE_DIR`).
 
+### Calibration, mains removal, CSD (epidural arrays)
+
+The lab's preprocessing of the Fritz/Mini epidural recordings, as `session.toml` settings:
+
+```toml
+[calibration]
+run = "15hz_after_2005_03_30"      # 100 µV sine on all inputs (or file = "../other/ephyscon/calibration.json")
+[line_noise]
+enabled = true                     # dh_remove_50hz with the recorded mains (1 kHz LFP)
+subtract_reference_mean = true     # as the BIDS conversions (default false: as dh_remove_50hz)
+[aux_channels.analog]
+mains = 46
+[probes.epidural.csd]              # dh_csd V3.1 [RBF]: grid 3 mm, RBF parameter 2.2758, 1 Ohm m
+exclude_inputs = ["AI20"]
+```
+
+`ephyscon calibrate`, then `lfp` (with mains removal) and `csd`. On Fritz 2005-03-30 the LFP after
+mains removal equals the BIDS dataset sample by sample (with `subtract_reference_mean`).
+
 ### `session.toml`
 
 One file per session describes which runs are used, the probes, the sorter, the roles of the
@@ -87,7 +108,7 @@ aux channels and the events. It replaces the Excel font-colour convention, `Dept
 `BrokenChannelsProbe<N>_0Index.txt` and `folders2Combine.txt` of the MATLAB pipeline:
 
 ```toml
-schema_version = 3
+schema_version = 4
 session_id = "SOMxCD1_172_20250109_Recording1"
 subject_id = "SOMxCD1_172"
 
@@ -121,6 +142,7 @@ exclude_roles = ["sync", "wheel"]
 | CONT 2001 – 3600 | LFP |
 | CONT 3601 | running speed; CONT 3602/3603 eye position x/y |
 | CONT 4001 – 5600 | MUA envelope |
+| CONT 8001 – 9600 | CSD (int16 scaled as `dh_csd`: max / 32766.99 A/m³ per count) |
 | SPIKE `10000 · probe index + unit id` | spike times and mean waveform per unit |
 | TRIALMAP | trials of all runs |
 | EV02 | TTL edges (`+line`/`-line`), VStim network events (`word + 1000`), names as attributes |

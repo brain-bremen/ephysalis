@@ -15,6 +15,8 @@ The reach is symmetric (as far into the past as into the future). For IIR filter
 |---|---|---|
 | raw (`export --raw`) | none (only the acquisition hardware's analog filters) | 0 |
 | LFP (`ephyscon lfp`, 1 kHz) | spikeinterface `resample` (`scipy.signal.resample_poly` design): Kaiser-windowed FIR (β = 5), cutoff 500 Hz (−6 dB), flat to 400 Hz (< 0.02 dB), ≥ 62 dB above 700 Hz; applied as a symmetric (zero-phase) FIR. 601 taps at 30 kHz, 501 at 25 kHz, 101 (at 5 kHz after upsampling by 2) for the 2.5 kHz Neuropixels LF band | **10 ms** exactly (finite FIR, 10 output samples, for every input rate) |
+| mains removal in the LFP (`[line_noise]`, port of `dh_remove_50hz`) | per mains cycle a 30-sample template, each phase position low-pass filtered across cycles (4th-order IIR, causal: cycles up to the current one); the cycle starts are the zero crossings of the recorded mains | **0** in the LFP (a sample is corrected with its own value and the earlier cycles); the crossing test looks 1 ms ahead in the mains reference |
+| CSD (`ephyscon csd`, port of `dh_csd` V3.1) | spatial only (RBF interpolation and Laplacian per sample) of the LFP after mains removal | that of the LFP: **10 ms** |
 | MUA (`ephyscon mua`, 1 kHz) | 4th-order Butterworth high-pass 300 Hz, `filtfilt`; rectified (no reach); then the LFP resampling filter | **≈ 13 ms**: high-pass 3 ms (6.5 ms) + resampling 10 ms |
 | running speed (1 kHz) | derivative of a Gaussian (σ ≈ 42.5 ms, 1 s kernel, centred) on the 1 ms bin counts (port of `get_wheelspeed.m`) | 500 ms kernel; weights > 10⁻³ of the peak within **179 ms** |
 | eye position (1 kHz) | mean over 1 ms bins, time stamp at the bin centre | 0.5 ms |

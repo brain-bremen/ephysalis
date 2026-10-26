@@ -14,7 +14,9 @@ import pandas as pd
 STEPS = [
     ("sync", "Sync", "extract the sync edges of all streams once (reads the AP files)"),
     ("timing", "Timing", "trial times of all paradigms, running speed and eye position"),
-    ("lfp", "LFP", "LFP of every run and probe at 1 kHz"),
+    ("calibrate", "Calibration", "channel gains from the calibration-sine run ([calibration] in session.toml)"),
+    ("lfp", "LFP", "LFP of every run and probe at 1 kHz (mains removal with [line_noise])"),
+    ("csd", "CSD", "current source density of the probes with [probes.<id>.csd]"),
     ("mua", "MUA", "MUA envelope of every run and probe at 1 kHz (300 Hz high-pass, rectified)"),
     ("sort", "Spike sorting", "spike sorting per probe over all runs, cut back into runs"),
     ("export", "Export", "one NWB or DH5 file, optionally in a BIDS dataset"),
@@ -46,7 +48,7 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
         if step not in options.steps:
             continue
         args = [step, str(options.session), *common]
-        if step in ("lfp", "mua", "sort"):
+        if step in ("lfp", "csd", "mua", "sort"):
             args += ["--n-jobs", str(options.n_jobs)]
         if step == "sort":
             if options.scratch_dir is not None:
@@ -80,7 +82,9 @@ def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]
         files = sorted((work_dir / kind).glob("*.npy"))
         if files:
             rows.append((kind, f"{unit} of {len(files)} runs"))
-    for kind in ("lfp", "mua"):
+    if (work_dir / "calibration.json").exists():
+        rows.append(("calibration.json", "channel gains from the calibration run"))
+    for kind in ("lfp", "csd", "mua"):
         folders = sorted(p for p in (work_dir / kind).glob("*") if (p / "binary.json").exists())
         if folders:
             rows.append((kind, f"{len(folders)} run × probe recordings"))

@@ -354,6 +354,44 @@ def _add_derived(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dic
     return n
 
 
+def _add_csd(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+             syncs: dict[str, RunSync], compression: str | None) -> int:
+    """CSD of every run and probe (``ephyscon csd``) in the processing module ``csd``: one
+    TimeSeries per run and probe (A/m^3), columns = the probe's channels."""
+    import json
+
+    import spikeinterface.core as si
+    from hdmf.backends.hdf5 import H5DataIO
+    from pynwb import TimeSeries
+
+    from ephyscon.csd import CSD_UNIT, csd_folder
+    from ephyscon.dh5 import stream_timing
+
+    n = 0
+    for run in runs:
+        for probe_id in run.probes:
+            path = csd_folder(work_dir, run.name, probe_id)
+            if not (path / "binary.json").exists():
+                continue
+            recording = si.load(path)
+            info = json.loads((path / "csd.json").read_text(encoding="utf-8")) if (path / "csd.json").exists() else {}
+            start, rate = stream_timing(run, probe_id, recording.sampling_frequency, offsets[run.name], syncs)
+            if "csd" not in nwbfile.processing:
+                nwbfile.create_processing_module("csd", "current source density of 2-D electrode arrays (dh_csd V3.1 "
+                                                 "[RBF] port, ephyscon.csd)")
+            data = recording.get_traces(return_in_uV=False)
+            nwbfile.processing["csd"].add(TimeSeries(
+                name=f"CSD_{run.name}_{probe_id}", data=H5DataIO(data, compression=compression) if compression else data,
+                unit=CSD_UNIT, starting_time=start, rate=rate,
+                description=(f"CSD of {probe_id} in run {run.name}, columns = channels "
+                             f"{', '.join(str(c) for c in recording.channel_ids)}; inputs {', '.join(info.get('inputs', []))}; "
+                             f"grid spacing {info.get('grid_spacing_m')} m, RBF parameter {info.get('rbf_parameter')}, "
+                             f"specific resistance {info.get('specific_resistance_ohm_m')} Ohm m"),
+            ))
+            n += 1
+    return n
+
+
 def _add_raw(nwbfile: NWBFile, runs: list[Run], offsets: dict[str, float], syncs: dict[str, RunSync],
              electrode_rows: dict, compression: str | None) -> None:
     """Raw AP (wideband) data of every run and probe and the analog aux inputs in ``acquisition``."""
@@ -512,6 +550,7 @@ def write_session_nwb(
     if lfp:
         _add_derived(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression, "lfp")
     _add_derived(nwbfile, work_dir, runs, offsets, syncs or {}, electrode_rows, compression, "mua")
+    _add_csd(nwbfile, work_dir, runs, offsets, syncs or {}, compression)
     _add_events(nwbfile, work_dir, runs, offsets)
     if processing is not None:
         from ephyscon.provenance import NWB_SCRATCH_NAME

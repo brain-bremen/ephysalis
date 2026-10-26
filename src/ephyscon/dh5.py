@@ -14,6 +14,8 @@ DH5                    content
 ``CONT3601``           running speed (calibration: cm/s per bit)
 ``CONT3602``, ``3603``   eye position x, y (uncalibrated volts of the eye tracker outputs)
 ``CONT4001``...        MUA envelope (``ephyscon mua``), ids ``4001 +`` channel index
+``CONT8001``...        CSD (``ephyscon csd``), ids ``8001 +`` channel index; int16 scaled as
+                       ``dh_csd`` (calibration = max |CSD| / (32767 - 0.01) A/m^3 per count)
                        All CONT blocks have one INDEX region per run, or more if the stream's
                        clock is off the block's sample period (see :data:`MAX_CLOCK_ERROR_SAMPLES`)
 ``SPIKE<n>``           one block per sorted unit, ``n = 10000 * probe index + unit id``;
@@ -40,7 +42,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -80,16 +82,18 @@ except ImportError:  # dh5io <= 0.4.2; remove with the next dh5io release
         LFP = "LFP"
         ANALOG_DOWNSAMPLED = "ANALOG_DOWNSAMPLED"
         MUA = "MUA/ESA"
+        CSD = "CSD"
 
     CONT_BLOCK_RANGES = {ContBlockGroup.RAW: (1, 1600), ContBlockGroup.ANALOG: (1601, 2000),  # type: ignore[dict-item]
                          ContBlockGroup.LFP: (2001, 3600), ContBlockGroup.ANALOG_DOWNSAMPLED: (3601, 4000),
-                         ContBlockGroup.MUA: (4001, 5600)}
+                         ContBlockGroup.MUA: (4001, 5600), ContBlockGroup.CSD: (8001, 9600)}
 
 # CONT block ids of the lab's converters (dhspec.cont.CONT_BLOCK_RANGES)
 RAW_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.RAW][0]
 ANALOG_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG][0]
 LFP_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.LFP][0]
 MUA_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.MUA][0]
+CSD_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.CSD][0]
 RUNNING_SPEED_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG_DOWNSAMPLED][0]
 EYE_CONT_IDS = (RUNNING_SPEED_CONT_ID + 1, RUNNING_SPEED_CONT_ID + 2)
 MAX_NEURAL_CHANNELS = CONT_BLOCK_RANGES[ContBlockGroup.RAW][1] - RAW_FIRST_CONT_ID + 1
@@ -136,11 +140,14 @@ def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[st
 
 def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, float]], first_id: int,
                        first_global: int, label: str, signal_type: ContSignalType | None, comment: str,
-                       to_int16: bool = False) -> int:
+                       to_int16: bool = False, full_scale: float = 32000.0, unit_factor: float = 1e-6,
+                       c_rounding: bool = False) -> int:
     """One CONT block per channel of the recordings ``parts`` = ``[(recording, start s, true
     rate)]`` (the runs, in order), ids ``first_id + channel``. int16 recordings are copied with
-    their gains as calibration; with ``to_int16`` (float µV, e.g. MUA) each channel is scaled to
-    the int16 range. Returns the number of blocks."""
+    their gains as calibration; with ``to_int16`` (float, e.g. MUA in µV) each channel is scaled
+    so that its peak is ``full_scale`` counts (calibration in the unit of the traces times
+    ``unit_factor``; rounding half away from zero with ``c_rounding``, as ``dh_csd``). Returns
+    the number of blocks."""
     import dh5io.cont
     from dhspec.cont import create_empty_index_array
 
@@ -161,7 +168,7 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
             for begin in range(0, n, CHUNK_SAMPLES):
                 traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES))
                 peak = np.maximum(peak, np.nanmax(np.abs(traces), axis=0))
-        calibration = np.maximum(peak, 1e-3) * 1e-6 / 32000  # V per bit
+        calibration = np.where(peak > 0, peak, 1.0) * unit_factor / full_scale  # per bit
     else:
         calibration = first.get_channel_gains() * 1e-6
     groups = []
@@ -180,7 +187,8 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple[BaseRecording, float, 
         for begin in range(0, n, CHUNK_SAMPLES):
             traces = recording.get_traces(start_frame=begin, end_frame=min(n, begin + CHUNK_SAMPLES), return_in_uV=False)
             if to_int16:
-                traces = np.round(np.nan_to_num(traces) * 1e-6 / calibration).astype(np.int16)
+                scaled = np.nan_to_num(traces).astype(np.float64) * unit_factor / calibration
+                traces = (np.sign(scaled) * np.floor(np.abs(scaled) + 0.5) if c_rounding else np.round(scaled)).astype(np.int16)
             for channel, data in enumerate(groups):
                 data[written + begin: written + begin + len(traces), 0] = traces[:, channel]
         written += n
@@ -194,14 +202,21 @@ def _probe_channel_counts(session: Session, runs: list[Run]) -> dict[str, int]:
 
 def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list[Run], offsets: dict[str, float],
                    syncs: dict[str, RunSync], kind: str) -> int:
-    """LFP (``kind="lfp"``) or MUA (``"mua"``) of all probes from the work dir."""
+    """LFP (``kind="lfp"``), MUA (``"mua"``) or CSD (``"csd"``) of all probes from the work dir."""
     import spikeinterface.core as si
     from dhspec.cont import ContSignalType
+
+    from ephyscon.csd import CSD_UNIT, DH5_FULL_SCALE, csd_folder
 
     folder, first_id, signal_type, comment = {
         "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, f"LFP: {LFP_FILTERING}"),
         "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA, f"MUA envelope: {MUA_FILTERING}"),
+        "csd": (csd_folder, CSD_FIRST_CONT_ID, ContSignalType.CSD,
+                f"CSD of the LFP (dh_csd V3.1 [RBF] port, ephyscon.csd); Calibration in {CSD_UNIT} per count"),
     }[kind]
+    scaling: dict[str, Any] = ({"to_int16": True} if kind == "mua" else
+               {"to_int16": True, "full_scale": DH5_FULL_SCALE, "unit_factor": 1.0, "c_rounding": True} if kind == "csd"
+               else {})
     counts = _probe_channel_counts(session, runs)
     if sum(counts.values()) > MAX_NEURAL_CHANNELS:
         raise ValueError(f"{sum(counts.values())} probe channels do not fit the {kind.upper()} CONT ids")
@@ -217,7 +232,7 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
         if parts:
             n_blocks += _write_cont_blocks(
                 file, parts, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
-                f"{comment}; INDEX regions placed on the session time axis", to_int16=kind == "mua")
+                f"{comment}; INDEX regions placed on the session time axis", **scaling)
         global_index += n_channels
     return n_blocks
 
@@ -450,6 +465,7 @@ def write_session_dh5(
         n_raw = _write_raw(file, session, runs, offsets, syncs or {}) if raw else 0
         n_lfp = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "lfp") if lfp else 0
         n_mua = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "mua")
+        n_csd = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "csd")
         n_events = _write_events(file, work_dir, runs, offsets, config)
         _write_running_speed(file, work_dir, runs, offsets)
         _write_eye_position(file, work_dir, runs, offsets)
@@ -469,6 +485,6 @@ def write_session_dh5(
         trials.to_csv(sidecars["trials"], index=False)
     if not units.empty:
         units.to_csv(sidecars["units"], index=False)
-    logger.info("wrote %s (%d raw, %d LFP, %d MUA blocks, %d units, %d trials, %d events)", path, n_raw, n_lfp,
-                n_mua, len(units), len(trials), n_events)
+    logger.info("wrote %s (%d raw, %d LFP, %d MUA, %d CSD blocks, %d units, %d trials, %d events)", path, n_raw,
+                n_lfp, n_mua, n_csd, len(units), len(trials), n_events)
     return path

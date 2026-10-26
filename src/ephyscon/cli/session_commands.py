@@ -178,7 +178,7 @@ def _sync(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     cache = SyncEdgeCache(args.cache_dir) if args.cache_dir else SyncEdgeCache(work_dir / "sync")
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
@@ -240,7 +240,7 @@ def _sort(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     print(f"Config: {config_path or 'none (sorting all channels)'}")
     syncs = _included_run_syncs(session, config, work_dir)
     params = dict(kv.split("=", 1) for kv in args.param or [])
@@ -258,6 +258,63 @@ def _sort(args: argparse.Namespace) -> int:
     return 0
 
 
+def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path) -> None:
+    """Probes from session.toml and the calibration (``[calibration]``, ``ephyscon calibrate``)."""
+    from ephyscon.calibration import apply_calibration, load_calibration
+
+    config_dir = config_path.parent if config_path else None
+    configure_probes(session, config, config_dir)
+    apply_calibration(session, load_calibration(config, config_dir, work_dir))
+
+
+def _calibrate(args: argparse.Namespace) -> int:
+    from ephyscon.calibration import compute_calibration, write_calibration
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    if config is None or config.calibration.run is None:
+        print("Nothing to do: [calibration] run is not set in session.toml")
+        return 0
+    configure_probes(session, config, config_path.parent if config_path else None)
+    calibration = compute_calibration(session, config)
+    path = write_calibration(calibration, work_dir)
+    for probe_id, entry in calibration["probes"].items():
+        gains = [g for g in entry["gains_uv"] if g is not None]
+        print(f"{probe_id}: sine {entry['frequency_hz']:.3f} Hz in {entry['run']}, {len(gains)} channels calibrated "
+              f"(median {sorted(gains)[len(gains) // 2] if gains else float('nan'):.4f} uV per count), "
+              f"without signal: {', '.join(entry['without_signal']) or 'none'}")
+    _record_step("calibrate", args, session, work_dir, config, config_path)
+    print(f"Output: {path}")
+    return 0
+
+
+def _csd(args: argparse.Namespace) -> int:
+    from ephyscon.csd import extract_csd
+    from ephyscon.timing import WORK_DIR_NAME
+
+    session = open_session(args.session, args.format)
+    work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
+    config, config_path = _load_config_for(session.path, work_dir, args.config)
+    _configure(session, config, config_path, work_dir)
+    probes = {pid: p.csd for pid, p in (config.probes.items() if config else []) if p.csd is not None}
+    if not probes:
+        print("Nothing to do: no probe has [probes.<id>.csd] in session.toml")
+        return 0
+    for run in session.runs:
+        run_config = config.run_config(run.name) if config else None
+        if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
+            continue
+        for probe_id, csd_config in probes.items():
+            if probe_id in run.probes and (not args.probes or probe_id in args.probes):
+                csd = extract_csd(run, probe_id, work_dir, csd_config, args.n_jobs, args.force)
+                print(f"{run.name} {probe_id}: CSD {csd.get_num_channels()} channels, {csd.get_total_duration():.0f} s")
+    _record_step("csd", args, session, work_dir, config, config_path)
+    print(f"Output: {work_dir / 'csd'}")
+    return 0
+
+
 def _load_config_for(session_path: Path, work_dir: Path, config: str | None) -> tuple[SessionConfig | None, Path | None]:
     candidates = [Path(config)] if config else [session_path / SESSION_CONFIG_FILENAME, work_dir / SESSION_CONFIG_FILENAME]
     path = next((p for p in candidates if p.exists() or config), None)
@@ -272,7 +329,7 @@ def _timing(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     cache = SyncEdgeCache(work_dir / "sync")
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     (work_dir / "running_speed").mkdir(exist_ok=True)
@@ -305,7 +362,7 @@ def _lfp(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
@@ -313,6 +370,15 @@ def _lfp(args: argparse.Namespace) -> int:
         for probe_id in args.probes or list(run.probes):
             lfp = extract_lfp(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
             print(f"{run.name} {probe_id}: LFP {lfp.get_num_channels()} channels, {lfp.get_total_duration():.0f} s")
+            if config is not None and config.line_noise.enabled:
+                from ephyscon.linenoise import clean_lfp
+                from ephyscon.lfp import lfp_folder
+                from ephyscon.sync import synchronize_run
+                from ephyscon.timing import aux_channel_map
+
+                sync = synchronize_run(run, aux_channel_map(run, config), cache=SyncEdgeCache(work_dir / "sync"))
+                status = clean_lfp(run, probe_id, lfp_folder(work_dir, run.name, probe_id), config, sync)
+                print(f"{run.name} {probe_id}: mains removal {'applied' if status['applied'] else 'not applied: ' + status['reason']}")
     _record_step("lfp", args, session, work_dir, config, config_path)
     print(f"Output: {work_dir / 'lfp'}")
     return 0
@@ -325,7 +391,7 @@ def _mua(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
@@ -345,7 +411,7 @@ def _export(args: argparse.Namespace) -> int:
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else session.path / WORK_DIR_NAME
     config, config_path = _load_config_for(session.path, work_dir, args.config)
-    configure_probes(session, config, config_path.parent if config_path else None)
+    _configure(session, config, config_path, work_dir)
     print(f"Config: {config_path or 'none'}")
     extension = f".{args.output_format}"
     if args.bids:
@@ -490,6 +556,24 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
     p.add_argument("--force", action="store_true", help="Overwrite existing LFP")
     p.set_defaults(func=per_session(_lfp))
+
+    p = sub.add_parser("calibrate", help="Channel gains from the calibration-sine run ([calibration] in session.toml)")
+    p.add_argument("sessions", nargs="+", type=Path, metavar="session")
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder, calibration.json goes there (default: <session>/ephyscon)")
+    p.set_defaults(func=per_session(_calibrate))
+
+    p = sub.add_parser("csd", help="Write the CSD of every run and probe with [probes.<id>.csd] (from the LFP)")
+    p.add_argument("sessions", nargs="+", type=Path, metavar="session")
+    p.add_argument("--format", help="Input format (default: auto-detect)")
+    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+    p.add_argument("--work-dir", help="Output folder with lfp/, CSD goes to <work-dir>/csd (default: <session>/ephyscon)")
+    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+    p.add_argument("--probes", nargs="+", help="Only these probes (default: all with [probes.<id>.csd])")
+    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
+    p.add_argument("--force", action="store_true", help="Overwrite existing CSD")
+    p.set_defaults(func=per_session(_csd))
 
     p = sub.add_parser("mua", help="Write the MUA envelope (300 Hz high-pass, rectified, 1 kHz) of every run and probe")
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")

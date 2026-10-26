@@ -15,6 +15,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
@@ -42,6 +44,9 @@ class ProbeInfo:
     # probes defined in session.toml (ephyscon.io.probes): channels of the stream, geometry
     channel_ids: tuple[str, ...] | None = None
     geometry: dict | None = None
+    # calibration (ephyscon.calibration): factors on the recorded gains of the probe's channels
+    # (AP and LF streams), NaN for channels without calibration
+    gain_factors: tuple[float, ...] | None = None
 
 
 @dataclass
@@ -63,6 +68,11 @@ class Run:
             from ephyscon.io.probes import apply_probe
 
             recording = apply_probe(recording, info)
+        if info is not None and kind in (StreamKind.AP, StreamKind.LF) and info.gain_factors is not None:
+            gains = recording.get_channel_gains() * np.asarray(info.gain_factors)
+            if info.channel_ids is None and not info.geometry:
+                recording = recording.select_channels(list(recording.channel_ids))  # a copy: readers cache theirs
+            recording.set_channel_gains(list(gains))
         return recording
 
 

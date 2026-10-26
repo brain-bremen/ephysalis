@@ -11,6 +11,8 @@ Schema versions (``schema_version``, see :mod:`ephyscon.schema`):
 2. ``lab``, ``institution``, ``[subject]``, ``[sorting]``; probes: ``stream``, ``channels``,
    ``geometry``, ``sorting`` (non-Neuropixels probes, per-probe sorter)
 3. ``[events]`` (TTL lines left out of the events, offset of the network event codes)
+4. ``[calibration]`` (gains from a calibration-sine recording), ``[line_noise]`` (mains removal
+   with the recorded mains reference), probes: ``csd`` (current source density)
 """
 
 from __future__ import annotations
@@ -26,12 +28,13 @@ from pydantic import BaseModel, Field
 from ephyscon.schema import Migration, migrate
 from ephyscon.session import Session
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
     1: lambda data: data,  # 2 only added fields, all with defaults
     2: lambda data: data,  # 3 added [events], with defaults
+    3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
 }
 
 
@@ -64,6 +67,20 @@ class ProbeGeometry(BaseModel):
     wiring: str | None = Field(default=None, description="probeinterface wiring to the headstage, e.g. ASSY-156>RHD2164")
 
 
+class CsdConfig(BaseModel):
+    """Current source density of a 2-D electrode array (Borisov's ``dh_csd`` V3.1 [RBF], :mod:`ephyscon.csd`):
+    Gaussian RBF interpolation of the LFP through the input electrodes, CSD = -Laplacian /
+    specific resistance at the output electrodes. Defaults: the lab's parameters for the Fritz array."""
+
+    grid_spacing_m: float = Field(default=0.003, description="Array grid spacing (m); the RBF width is "
+                                  "grid_spacing_m x rbf_parameter")
+    rbf_parameter: float = Field(default=2.2758, description="RBF interpolation parameter (dh_csd 'rbfparam')")
+    specific_resistance_ohm_m: float = Field(default=1.0, description="Specific resistance of the tissue (Ohm m)")
+    exclude_inputs: list[str] = Field(
+        default_factory=list, description="Channel ids not used as inputs (e.g. a bad electrode); channels "
+        "without calibration are left out as well. Outputs: all channels of the probe")
+
+
 class ProbeConfig(BaseModel):
     stream: str | None = Field(
         default=None, description="Input stream of a probe the reader does not detect (non-Neuropixels), "
@@ -85,6 +102,8 @@ class ProbeConfig(BaseModel):
     sorting: SortingConfig | None = Field(
         default=None, description="Sorter for this probe, instead of the session's [sorting]"
     )
+    csd: CsdConfig | None = Field(default=None, description="Compute the CSD of this probe (ephyscon csd); "
+                                  "needs the probe geometry")
     notes: str = ""
 
 
@@ -142,6 +161,38 @@ class EventsConfig(BaseModel):
     )
 
 
+class CalibrationConfig(BaseModel):
+    """Channel gains from a recording of a calibration sine on all inputs (``ephyscon calibrate``,
+    :mod:`ephyscon.calibration`). Without ``run`` and ``file`` the gains of the recording are used."""
+
+    run: str | None = Field(default=None, description="Calibration run of this session, e.g. 15hz_after_2005_03_30")
+    file: str | None = Field(default=None, description="calibration.json of another session's work dir (relative "
+                             "to session.toml), for sessions without their own calibration recording")
+    amplitude_uv: float = Field(default=100.0, description="Amplitude of the calibration sine at the electrodes (µV)")
+    frequency_range_hz: tuple[float, float] = Field(default=(14.5, 16.5), description="Search range of the sine "
+                                                    "frequency (the lab's generator ran at about 15.4 Hz)")
+    min_relative_amplitude: float = Field(default=0.3, description="Channels whose sine is below this fraction of "
+                                          "the median amplitude of the probe have no calibration signal")
+    missing: str = Field(default="nan", description="Gain of channels without calibration signal: 'nan' (left "
+                         "out of the CSD) or 'median' (median gain of the probe)")
+
+
+class LineNoiseConfig(BaseModel):
+    """Mains removal in the LFP (``ephyscon lfp``) with the recorded mains reference: port of the lab's
+    ``dh_remove_50hz`` (M. Borisov 2004, :mod:`ephyscon.linenoise`). Needs a 1 kHz LFP."""
+
+    enabled: bool = False
+    reference_role: str = Field(default="mains", description="Analog role ([aux_channels.analog]) of the "
+                                "recorded mains")
+    min_cycle_fraction: float = Field(default=0.95, description="The reference of a run is used only if this "
+                                      "fraction of its cycles lasts 19-21 ms ...")
+    min_peak_db: float = Field(default=20.0, description="... and its 50 Hz peak is this far above the spectrum "
+                               "5-20 Hz away (else the run is left unchanged)")
+    subtract_reference_mean: bool = Field(default=False, description="Find the zero crossings of the reference "
+                                          "after subtracting its mean (as the Fritz/Mini BIDS conversions) instead "
+                                          "of on the reference as recorded (dh_remove_50hz)")
+
+
 class SessionConfig(BaseModel):
     schema_version: int = SCHEMA_VERSION
     session_id: str
@@ -157,6 +208,8 @@ class SessionConfig(BaseModel):
     sorting: SortingConfig = Field(default_factory=SortingConfig)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
     events: EventsConfig = Field(default_factory=EventsConfig)
+    calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
+    line_noise: LineNoiseConfig = Field(default_factory=LineNoiseConfig)
     notes: str = ""
 
     def run_config(self, name: str) -> RunConfig | None:
