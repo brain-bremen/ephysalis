@@ -113,6 +113,31 @@ def run_offsets(runs: list[Run]) -> dict[str, float]:
     return offsets
 
 
+def time_axis(session: Session, config: SessionConfig | None, run_clock: bool = False
+              ) -> tuple[list[Run], dict[str, float], datetime]:
+    """Included runs, their start in s on the file's time axis, and the time of its 0: the
+    session axis (``SESSION_START_MARGIN_S`` before the first run), or with ``run_clock`` the
+    own clock of the session's only run (its acquisition clock where the format keeps one,
+    ``run.extra["clock_start_s"]``, e.g. the DAQ clock; else 0 at its first sample)."""
+    runs = included_runs(session, config)
+    if not run_clock:
+        offsets = run_offsets(runs)
+        assert runs[0].start_time is not None  # checked by run_offsets
+        return runs, offsets, runs[0].start_time - timedelta(seconds=SESSION_START_MARGIN_S)
+    if len(runs) != 1:
+        raise ValueError(f"a file on the run clock holds one run, not {len(runs)}")
+    run = runs[0]
+    if run.start_time is None:
+        raise ValueError(f"run {run.name} has no start time")
+    origin = float(run.extra.get("clock_start_s", 0.0))
+    return runs, {run.name: origin}, run.start_time - timedelta(seconds=origin)
+
+
+def single_run_session(session: Session, run: Run) -> Session:
+    """The session with only ``run`` (for one file per run)."""
+    return Session(name=session.name, path=session.path, format=session.format, runs=[run])
+
+
 def sorting_info(work_dir: Path, probe_id: str) -> dict:
     """``sorting/<probe>/segments.json``: runs, channels, sorter and its parameters (sortings
     before the sorter was recorded there are Kilosort4)."""
@@ -500,13 +525,12 @@ def _add_eye_position(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets
         _behavior_module(nwbfile).add(EyeTracking(spatial_series=series, name="EyeTracking"))
 
 
-def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionConfig | None = None) -> NWBFile:
+def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionConfig | None = None,
+                             run_clock: bool = False) -> NWBFile:
     """In-memory NWBFile with the session metadata only: subject, devices, electrodes, epochs
     and trials (no LFP or units); the source of the BIDS sidecars of other formats."""
-    runs = included_runs(session, config)
-    offsets = run_offsets(runs)
-    assert runs[0].start_time is not None  # checked by run_offsets
-    nwbfile = _new_nwbfile(session, config, runs[0].start_time - timedelta(seconds=SESSION_START_MARGIN_S))
+    runs, offsets, start = time_axis(session, config, run_clock)
+    nwbfile = _new_nwbfile(session, config, start)
     _add_electrodes(nwbfile, session, runs, config)
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
     return nwbfile
@@ -522,8 +546,10 @@ def write_session_nwb(
     compression: str | None = "gzip",
     processing: dict | None = None,
     raw: bool = False,
+    run_clock: bool = False,
 ) -> Path:
-    """Write the NWB file of a session from the outputs in ``work_dir`` (see the module docs).
+    """Write the NWB file of a session from the outputs in ``work_dir`` (see the module docs);
+    with ``run_clock`` the file of the session's only run on that run's clock (:func:`time_axis`).
 
     ``syncs`` maps run names to their :class:`RunSync`; it is needed to place the LFP of
     probes other than the reference probe. Missing outputs (e.g. no sorting yet) are skipped.
@@ -532,10 +558,8 @@ def write_session_nwb(
     """
     from pynwb import NWBHDF5IO
 
-    runs = included_runs(session, config)
-    offsets = run_offsets(runs)
-    assert runs[0].start_time is not None  # checked by run_offsets
-    nwbfile = _new_nwbfile(session, config, runs[0].start_time - timedelta(seconds=SESSION_START_MARGIN_S))
+    runs, offsets, start = time_axis(session, config, run_clock)
+    nwbfile = _new_nwbfile(session, config, start)
     electrode_rows = _add_electrodes(nwbfile, session, runs, config)
     channel_index = {
         p: {str(c): i for i, c in enumerate(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)}

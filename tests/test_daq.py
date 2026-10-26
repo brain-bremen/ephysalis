@@ -242,3 +242,30 @@ def test_pipeline(tmp_path):
         np.testing.assert_array_equal(f["CONT2"]["DATA"][:100, 0], 100 + np.arange(100))  # raw AI1
         assert f["CONT1601"].attrs["Name"] == b"aux AI5"  # the board-1 channel outside the probe
         assert "CONT2001" in f and "CONT4001" in f
+
+
+def test_export_per_run_on_the_daq_clock(tmp_path):
+    """--per-run: one DH5 per run whose times are the DAQ clock (as the lab's conversion)."""
+    import h5py
+
+    t0 = 13_127_830_000_000
+    a, b = np.zeros((500, 4), np.int16), np.ones((300, 4), np.int16)
+    session = tmp_path / "ses"
+    session.mkdir()
+    write_v2(session / "rec_a.daq", [(t0, a)], events=[(t0 + 100_000_000, 1, 1)])
+    write_v2(session / "rec_b.daq", [(t0 + 60_000_000_000, b)], events=[(t0 + 60_200_000_000, 4, 8)])
+    (tmp_path / "session.toml").write_text('schema_version = 4\nsession_id = "s"\nsubject_id = "fritz"\n'
+                                           '[probes.p]\nstream = "ADC64 Rev F"\nchannels = ["AI0", "AI1"]\n')
+    common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
+    assert main(["timing", str(session), *common]) == 0
+    assert main(["export", str(session), *common, "--output-format", "dh5", "--raw", "--per-run",
+                 "--bids", str(tmp_path / "bids")]) == 0
+    folder = tmp_path / "bids" / "sub-fritz" / "ses-s" / "ecephys"
+    first, second = folder / "sub-fritz_ses-s_run-01_ecephys.dh5", folder / "sub-fritz_ses-s_run-02_ecephys.dh5"
+    with h5py.File(first) as f:
+        assert f["CONT1"]["INDEX"]["time"][0] == t0 and f["CONT1"]["DATA"].shape[0] == 500
+        assert f["EV02"]["time"].tolist() == [t0 + 100_000_000]
+    with h5py.File(second) as f:
+        assert f["CONT1"]["INDEX"]["time"][0] == t0 + 60_000_000_000 and f["CONT1"]["DATA"][0, 0] == 1
+        assert f["EV02"]["time"].tolist() == [t0 + 60_200_000_000]
+    assert (folder / "sub-fritz_ses-s_run-02_channels.tsv").exists()

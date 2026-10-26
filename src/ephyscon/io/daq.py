@@ -835,6 +835,7 @@ class DaqFormat(InputFormat):
                         "streams": [s.name for s in file.streams],
                         "aux_streams": [main.name],
                         "start_ns": t0,
+                        "clock_start_s": t0 / 1e9,  # the DAQ clock (time axis of a file per run)
                         "board_fit": file.fit,
                         "damaged": list(index.damaged),
                         "truncated_bytes": index.truncated_bytes,

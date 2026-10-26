@@ -405,7 +405,9 @@ def _mua(args: argparse.Namespace) -> int:
 
 
 def _export(args: argparse.Namespace) -> int:
-    """NWB or DH5 file of a session, optionally in a BIDS (NWB) or BIDS-like (DH5) dataset."""
+    """NWB or DH5 file of a session (or one per run, ``--per-run``), optionally in a BIDS (NWB)
+    or BIDS-like (DH5) dataset."""
+    from ephyscon.nwb import included_runs, single_run_session
     from ephyscon.timing import WORK_DIR_NAME
 
     session = open_session(args.session, args.format)
@@ -414,42 +416,67 @@ def _export(args: argparse.Namespace) -> int:
     _configure(session, config, config_path, work_dir)
     print(f"Config: {config_path or 'none'}")
     extension = f".{args.output_format}"
+    subject = session_label = ""
     if args.bids:
-        from ephyscon.bids import bids_labels, ecephys_path
+        from ephyscon.bids import bids_labels
 
         subject, session_label = bids_labels(
             config.subject_id if config else session.name, config.session_id if config else session.name)
         subject, session_label = args.subject or subject, args.session_label or session_label
-        output = ecephys_path(Path(args.bids), subject, session_label, extension)
+    if args.per_run and args.existing:
+        print("--existing takes one session file, not --per-run", file=sys.stderr)
+        return 1
+    # (session to write, BIDS run index or None, output path)
+    files: list[tuple[Session, int | None, Path]] = []
+    if args.per_run:
+        for run in included_runs(session, config):
+            if args.bids:
+                from ephyscon.bids import ecephys_path
+
+                output = ecephys_path(Path(args.bids), subject, session_label, extension, run=run.index + 1)
+            else:
+                base = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
+                output = base.with_name(f"{base.stem}_{run.name}{extension}")
+            files.append((single_run_session(session, run), run.index + 1, output))
     else:
-        output = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
-    existing = Path(args.existing) if args.existing else None
-    if existing is None:
+        if args.bids:
+            from ephyscon.bids import ecephys_path
+
+            output = ecephys_path(Path(args.bids), subject, session_label, extension)
+        else:
+            output = Path(args.output) if args.output else work_dir / f"{session.name}{extension}"
+        files.append((session, None, output))
+    processing = None
+    if args.existing is None:
         from ephyscon.provenance import processing_record
 
         processing = processing_record(work_dir, _record_step("export", args, session, work_dir, config, config_path))
-        syncs = _included_run_syncs(session, config, work_dir)
-        if args.output_format == "nwb":
-            from ephyscon.nwb import write_session_nwb
+    syncs = _included_run_syncs(session, config, work_dir) if args.existing is None else {}
+    for file_session, run_index, output in files:
+        existing = Path(args.existing) if args.existing else None
+        if existing is None:
+            if args.output_format == "nwb":
+                from ephyscon.nwb import write_session_nwb
 
-            write_session_nwb(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                              compression=None if args.no_compression else "gzip", processing=processing,
-                              raw=args.raw)
-        else:
-            from ephyscon.dh5 import write_session_dh5
+                write_session_nwb(file_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                                  compression=None if args.no_compression else "gzip", processing=processing,
+                                  raw=args.raw, run_clock=args.per_run)
+            else:
+                from ephyscon.dh5 import write_session_dh5
 
-            write_session_dh5(session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                              processing=processing, raw=args.raw)
-        existing = output
-    if args.bids:
-        from ephyscon.bids import add_dh5_to_bids, add_nwb_to_bids
+                write_session_dh5(file_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                                  processing=processing, raw=args.raw, run_clock=args.per_run)
+            existing = output
+        if args.bids:
+            from ephyscon.bids import add_dh5_to_bids, add_nwb_to_bids
 
-        options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
-        if args.output_format == "nwb":
-            add_nwb_to_bids(existing, Path(args.bids), subject, session_label, **options)
-        else:
-            add_dh5_to_bids(session, work_dir, existing, Path(args.bids), subject, session_label, config, **options)
-    print(f"Output: {output}")
+            options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
+            if args.output_format == "nwb":
+                add_nwb_to_bids(existing, Path(args.bids), subject, session_label, run=run_index, **options)
+            else:
+                add_dh5_to_bids(file_session, work_dir, existing, Path(args.bids), subject, session_label, config,
+                                run=run_index, **options)
+        print(f"Output: {output}")
     return 0
 
 
@@ -606,6 +633,8 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--power-line-frequency", type=float, default=50.0, help="Mains frequency in Hz (default 50)")
     p.add_argument("--dataset-name", help="Name in dataset_description.json (default: folder name)")
     p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
+    p.add_argument("--per-run", action="store_true", help="One file per run, on the run's own clock (DAQ: the DAQ "
+                   "clock; BIDS: run-<n>, n = position of the run in the session)")
     p.add_argument("--raw", action="store_true", help="Include the raw data (AP/wideband streams and analog aux "
                    "inputs; about the size of the recording)")
     p.add_argument("--no-compression", action="store_true", help="NWB: write the LFP without gzip compression")

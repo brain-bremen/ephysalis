@@ -62,9 +62,10 @@ def bids_labels(subject_id: str, session_id: str) -> tuple[str, str]:
     return bids_label(subject_id), bids_label(session)
 
 
-def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb") -> Path:
-    """Path of the session's data file in the BIDS dataset at ``root``."""
-    return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"sub-{subject}_ses-{session}_ecephys{extension}"
+def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb", run: int | None = None) -> Path:
+    """Path of the session's data file (or of run ``run``'s) in the BIDS dataset at ``root``."""
+    entities = f"sub-{subject}_ses-{session}" + (f"_run-{run:02d}" if run is not None else "")
+    return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"{entities}_ecephys{extension}"
 
 
 def _na(value: Any) -> Any:
@@ -322,9 +323,10 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
     logger.info("wrote the BIDS sidecars of %s", data_path)
 
 
-def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, **kwargs: Any) -> Path:
-    """Copy an existing session NWB file into the dataset at ``root`` and write its sidecars."""
-    target = ecephys_path(root, subject, session)
+def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, run: int | None = None,
+                    **kwargs: Any) -> Path:
+    """Copy an existing session (or run) NWB file into the dataset at ``root`` and write its sidecars."""
+    target = ecephys_path(root, subject, session, run=run)
     if nwb_path.resolve() != target.resolve():
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.stem + ".partial.nwb")
@@ -335,7 +337,7 @@ def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, **kw
 
 
 def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, subject: str, session_label: str,
-                    config: Any = None, **kwargs: Any) -> Path:
+                    config: Any = None, run: int | None = None, **kwargs: Any) -> Path:
     """Copy a session DH5 file (:mod:`ephyscon.dh5`) into a BIDS-like dataset at ``root``
     (``_ecephys.dh5``, with its ``_trials.csv``/``_units.csv``) and write its sidecars."""
     import h5py
@@ -344,7 +346,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
     from ephyscon.lfp import LFP_FILTERING
     from ephyscon.nwb import session_metadata_nwbfile
 
-    target = ecephys_path(root, subject, session_label, ".dh5")
+    target = ecephys_path(root, subject, session_label, ".dh5", run=run)
     target.parent.mkdir(parents=True, exist_ok=True)
     if dh5_path.resolve() != target.resolve():
         tmp = target.with_name(target.stem + ".partial.dh5")
@@ -362,7 +364,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
                 rate = 1e9 / float(group.attrs["SamplePeriod"])
                 streams[row] = ([name], rate)
                 lfp = (rate, LFP_FILTERING)
-    nwbfile = session_metadata_nwbfile(session, work_dir, config)
+    nwbfile = session_metadata_nwbfile(session, work_dir, config, run_clock=run is not None)
     write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
     ignore = root / ".bidsignore"
     lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []

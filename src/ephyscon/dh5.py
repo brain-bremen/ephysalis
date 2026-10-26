@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,11 +51,9 @@ from ephyscon.lfp import LFP_FILTERING, lfp_folder
 from ephyscon.mua import MUA_FILTERING, mua_folder
 from ephyscon.nwb import (
     RUNNING_SPEED_BIN_S,
-    SESSION_START_MARGIN_S,
-    included_runs,
-    run_offsets,
     session_trials,
     sorting_info,
+    time_axis,
 )
 from ephyscon.session import Run, Session, StreamKind
 from ephyscon.sorting import load_run_spikes
@@ -381,6 +379,8 @@ def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[
                 spikes = load_run_spikes(path)
                 times.append(spikes.time.to_numpy() + offsets[run.name])
                 ids.append(spikes.unit_id.to_numpy())
+        if not times:  # no spikes of this probe in the file's runs
+            continue
         all_times, all_ids = np.concatenate(times), np.concatenate(ids)
         order = np.lexsort((all_times, all_ids))
         all_times, all_ids = all_times[order], all_ids[order]
@@ -444,9 +444,12 @@ def write_session_dh5(
     lfp: bool = True,
     processing: dict | None = None,
     raw: bool = False,
+    run_clock: bool = False,
 ) -> Path:
     """Write the DH5 file of a session from the outputs in ``work_dir`` (see the module docs),
-    plus ``<name>_trials.csv`` and ``<name>_units.csv`` next to it.
+    plus ``<name>_trials.csv`` and ``<name>_units.csv`` next to it; with ``run_clock`` the file
+    of the session's only run on that run's clock (:func:`ephyscon.nwb.time_axis`; DAQ runs: the
+    DAQ clock, as the lab's DAQ -> DH5 conversion).
 
     ``syncs`` maps run names to their :class:`RunSync`; it places the LFP of probes other than
     the reference probe. Missing outputs (e.g. no sorting yet) are skipped. ``processing`` is
@@ -460,10 +463,7 @@ def write_session_dh5(
     from ephyscon.provenance import DH5_ATTRIBUTE_NAME, DH5_OPERATION_NAME
     from ephyscon.version import get_version_from_pyproject
 
-    runs = included_runs(session, config)
-    offsets = run_offsets(runs)
-    assert runs[0].start_time is not None  # checked by run_offsets
-    session_start = runs[0].start_time - timedelta(seconds=SESSION_START_MARGIN_S)
+    runs, offsets, session_start = time_axis(session, config, run_clock)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.stem + ".partial.dh5")
     trials = session_trials(work_dir, runs, offsets)

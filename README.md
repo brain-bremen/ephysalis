@@ -22,7 +22,7 @@ Steps (each one optional, outputs in a work dir per session):
 | `csd` | current source density of 2-D arrays (`[probes.<id>.csd]`, port of Borisov's `dh_csd`) |
 | `mua` | MUA envelope per run and probe, 1 kHz (300 Hz high-pass, rectified) |
 | `sort` | spike sorting per probe over all runs |
-| `export` | one NWB or DH5 file (optionally with the raw data), optionally into a BIDS dataset |
+| `export` | one NWB or DH5 file per session (or per run, `--per-run`, on the run's own clock: DAQ files keep the DAQ clock), optionally with the raw data and into a BIDS dataset |
 
 All filters are zero phase (acausal): the LFP at time *t* depends on the raw data up to 10 ms after *t*,
 the MUA up to about 13 ms. See [docs/filters.md](docs/filters.md) for every filter and its reach into the
@@ -59,7 +59,7 @@ ephyscon timing  <session> [<session> ...] --work-dir D:/work/{session}
 ephyscon lfp     <session> [<session> ...] --work-dir D:/work/{session}
 ephyscon mua     <session> [<session> ...] --work-dir D:/work/{session}
 ephyscon sort    <session> [<session> ...] --work-dir D:/work/{session} --scratch-dir <fast local disk>
-ephyscon export  <session> [<session> ...] --work-dir D:/work/{session} --output-format nwb|dh5 [--raw] [--bids <root>]
+ephyscon export  <session> [<session> ...] --work-dir D:/work/{session} --output-format nwb|dh5 [--raw] [--bids <root>] [--per-run]
 
 # redo the processing of an output file from its embedded processing record
 ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--run]
