@@ -32,3 +32,18 @@ def test_mua_highpass_reach():
     before = response[:30000][::-1]  # output before the impulse, i.e. the reach into the future
     last = np.flatnonzero(before > 1e-3 * response.max()).max()
     assert last / fs * 1000 <= MUA_HIGHPASS_REACH_MS
+
+
+def test_lfp_resampling_has_no_phase_shift():
+    """Sines through the LFP resampling (spikeinterface resample) keep their phase and amplitude."""
+    import spikeinterface.core as si
+    import spikeinterface.preprocessing as spre
+
+    fs, freqs = 30000.0, np.array([1.0, 10.0, 40.0, 100.0, 300.0])
+    t = np.arange(int(2 * fs)) / fs
+    sines = np.sin(2 * np.pi * freqs * t[:, None]).astype("float32")
+    lfp = spre.resample(si.NumpyRecording(sines, fs), LFP_RATE, dtype="float32").get_traces()
+    t_lfp = np.arange(lfp.shape[0]) / LFP_RATE
+    inner = slice(100, -100)  # away from the edges
+    expected = np.sin(2 * np.pi * freqs * t_lfp[:, None])
+    np.testing.assert_allclose(lfp[inner], expected[inner], atol=3e-3)
