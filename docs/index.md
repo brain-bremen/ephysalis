@@ -1,6 +1,6 @@
-# ephyscon — Electrophysiology Converter
+# ephysalis — Electrophysiology Converter
 
-ephyscon converts extracellular electrophysiology recordings into one
+ephysalis converts extracellular electrophysiology recordings into one
 [NWB](https://nwb.org) or [DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) file per
 session, optionally inside a [BIDS](https://bids.neuroimaging.io) dataset. On the way it can extract
 trials, LFP, MUA and CSD, select channels, remove mains noise, and sort spikes with
@@ -10,7 +10,7 @@ Input formats: SpikeGLX (Neuropixels) and Open Ephys (Binary, NWB and the legacy
 format). Readers for the lab's historic recordings are also included (the lab's DAQ program,
 DataWave UFF, Multi Channel Systems MC_Rack). They are described in {doc}`legacy/index`.
 
-ephyscon is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
+ephysalis is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
 MATLAB Neuropixels preprocessing scripts.
 
 ```{toctree}

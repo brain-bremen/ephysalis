@@ -1,6 +1,6 @@
 # Output files
 
-`ephyscon export` writes one file per session from the work dir. Session time 0 is 1 s before
+`ephysalis export` writes one file per session from the work dir. Session time 0 is 1 s before
 the first run, and the runs are placed by their start times. With `--per-run`, one file per run
 is written, on the run's own clock.
 
@@ -37,7 +37,7 @@ The NWB file contains:
   `start_time_method`.
 - **Units:** the units of the spike sorting.
 
-The processing record is stored in `scratch/ephyscon_processing`.
+The processing record is stored in `scratch/ephysalis_processing`.
 
 ## BIDS
 

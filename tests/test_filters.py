@@ -5,8 +5,8 @@ import pytest
 from scipy import signal
 from spikeinterface.preprocessing._resampling_tools import get_polyphase_filter, get_resampling_factors
 
-from ephyscon.lfp import LFP_FILTER_REACH_MS, LFP_RATE
-from ephyscon.mua import MUA_FILTER_ORDER, MUA_HIGHPASS_HZ, MUA_HIGHPASS_REACH_MS
+from ephysalis.lfp import LFP_FILTER_REACH_MS, LFP_RATE
+from ephysalis.mua import MUA_FILTER_ORDER, MUA_HIGHPASS_HZ, MUA_HIGHPASS_REACH_MS
 
 
 @pytest.mark.parametrize("rate", [30000.0, 30000.27, 25000.0, 2500.0])

@@ -98,18 +98,18 @@ the trial start on the run's clock:
 4. **Jitter:** if no rate gives a common window (the stamps jitter by about 0.2 s in some 2004
    runs), the windows are widened by up to 0.5 s.
 
-`ephyscon timing` stores this start in `<work>/run_start/<run>.json`. It places the runs of a
+`ephysalis timing` stores this start in `<work>/run_start/<run>.json`. It places the runs of a
 session file and becomes the BIDS `acq_time`, and the method text goes into `scans.tsv`.
 
 ## API
 
 ```{eval-rst}
-.. autoclass:: ephyscon.legacy.vstim_td01.VStimTD01System
+.. autoclass:: ephysalis.legacy.vstim_td01.VStimTD01System
    :members: load_trials, run_start
 
-.. autofunction:: ephyscon.legacy.vstim_td01.find_tdr
+.. autofunction:: ephysalis.legacy.vstim_td01.find_tdr
 
-.. autofunction:: ephyscon.legacy.vstim_td01.match_by_time
+.. autofunction:: ephysalis.legacy.vstim_td01.match_by_time
 
-.. autofunction:: ephyscon.legacy.pcclock.pc_fit
+.. autofunction:: ephysalis.legacy.pcclock.pc_fit
 ```

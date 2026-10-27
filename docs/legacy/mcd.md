@@ -141,7 +141,7 @@ These times exceed the int64 range (2010 ≈ 1.29 × 10¹⁹ ns), so use unsigne
   stream has the same size, 16 + 2 · samples · *n*.
 - **Analog value:** sample − AD zero, as int16 counts. Times the resolution, this gives volts.
 - **Digital stream:** one channel with the raw 16-bit word. Bit *k* is digital input *k*, and
-  ephyscon reads it as TTL line *k* + 1.
+  ephysalis reads it as TTL line *k* + 1.
 
 **Trigger streams** (`trig`):
 - **Payload:** the trigger events in the block, or nothing; a chunk without events has size 16.
@@ -157,7 +157,7 @@ These times exceed the int64 range (2010 ≈ 1.29 × 10¹⁹ ns), so use unsigne
   | +18 | int32 | stimulus number | 22 bytes |
 
 - **22-byte records** are written with trial synchronisation, i.e. when VStim 1.x sends the trial
-  and stimulus number through the USB box. There are 4 events per trial, 150 ms apart. ephyscon
+  and stimulus number through the USB box. There are 4 events per trial, 150 ms apart. ephysalis
   uses them as the trial descriptors of the run (see {doc}`vstim-td01`), like the `TD01` records
   of {doc}`daq`.
 
@@ -198,7 +198,7 @@ MC_Rack writes a long recording into several files of at most 2–3 GB: `name.mc
 recording.
 
 Each file has its own header, and its first block continues the previous file's last block
-without a gap. ephyscon makes one run of consecutive files (sorted by name) that meet both
+without a gap. ephysalis makes one run of consecutive files (sorted by name) that meet both
 conditions:
 - their streams (tags, channels, rates) are the same;
 - the first block of each starts within half a block of the previous file's end.
@@ -223,16 +223,16 @@ To compare with the library, note how it names a channel entity:
 ## Reader API
 
 ```{eval-rst}
-.. autoclass:: ephyscon.legacy.mcd.McdFormat
+.. autoclass:: ephysalis.legacy.mcd.McdFormat
    :members: read_ttl_events, read_trigger_events, read_trial_descriptors, clock_maps
 
-.. autoclass:: ephyscon.legacy.mcd.McdRecordingExtractor
+.. autoclass:: ephysalis.legacy.mcd.McdRecordingExtractor
 
-.. autofunction:: ephyscon.legacy.mcd.parse_streams
+.. autofunction:: ephysalis.legacy.mcd.parse_streams
 
-.. autofunction:: ephyscon.legacy.mcd.scan_file
+.. autofunction:: ephysalis.legacy.mcd.scan_file
 
-.. autofunction:: ephyscon.legacy.mcd.group_files
+.. autofunction:: ephysalis.legacy.mcd.group_files
 
-.. autofunction:: ephyscon.legacy.mcd.digital_transitions
+.. autofunction:: ephysalis.legacy.mcd.digital_transitions
 ```

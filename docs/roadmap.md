@@ -1,21 +1,21 @@
-# ephyscon roadmap
+# ephysalis roadmap
 
-ephyscon replaces the MATLAB preprocessing pipeline
+ephysalis replaces the MATLAB preprocessing pipeline
 (`Combine_SortScript_ChockaNpx2_KS4_mPC.m` →
 `multiParadigmArtefactRemovalAndSpikesortingComb_contEye_CRSE.m`). It is a fork of
 [oecon](https://github.com/brain-bremen/oecon) (Open Ephys → DH5 only). The oecon conversion
-pipeline (`ephyscon convert`) was replaced by the session pipeline; its raw data, MUA and event
+pipeline (`ephysalis convert`) was replaced by the session pipeline; its raw data, MUA and event
 (EV02) outputs are part of the session DH5/NWB files.
 
 ## Decisions
 
-- **Inputs**: pluggable readers (`ephyscon.input_formats` entry points) returning
+- **Inputs**: pluggable readers (`ephysalis.input_formats` entry points) returning
   spikeinterface recordings. SpikeGLX (spikeinterface/neo), Open Ephys (all three formats:
   Binary, NWB, legacy; open-ephys-python-tools) and the lab's DAQ files (`.daq`, file versions
   1.0-3.3, 1999-2006; probes defined in `session.toml`), DataWave UFF (1999) and Multi Channel
-  Systems MC_Rack (`.mcd`, 2010-2011); the historic formats are in `ephyscon.legacy`, to be
+  Systems MC_Rack (`.mcd`, 2010-2011); the historic formats are in `ephysalis.legacy`, to be
   removed once their datasets are converted.
-- **Stimulus systems**: pluggable (`ephyscon.stimulus_systems`). The current MATLAB
+- **Stimulus systems**: pluggable (`ephysalis.stimulus_systems`). The current MATLAB
   "stimulusStage" system is one plugin. A VStim plugin (Open Ephys network messages,
   wrapping the existing `trialmap.py`) and future systems are added the same way.
 - **Spike sorting**: spikeinterface + Kilosort4, sorted per probe over the concatenated runs.
@@ -28,13 +28,13 @@ pipeline (`ephyscon convert`) was replaced by the session pipeline; its raw data
 
 | # | Content | Status |
 |---|---|---|
-| 0 | Fork oecon, rename to ephyscon, plugin registries | done |
+| 0 | Fork oecon, rename to ephysalis, plugin registries | done |
 | 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, stimstage conditions | done |
 | 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
-| 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephyscon sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
-| 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | done (`ephyscon lfp`, `ephyscon mua`) |
-| 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephyscon export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
-| 6 | CLI/GUI batch processing, provenance, replacing `ephyscon convert` | done: several sessions per command and in the GUI (one converter page), provenance and `ephyscon reproduce`, config schema versions, raw data/MUA/events in DH5 and NWB, `ephyscon convert` removed |
+| 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephysalis sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
+| 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | done (`ephysalis lfp`, `ephysalis mua`) |
+| 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephysalis export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
+| 6 | CLI/GUI batch processing, provenance, replacing `ephysalis convert` | done: several sessions per command and in the GUI (one converter page), provenance and `ephysalis reproduce`, config schema versions, raw data/MUA/events in DH5 and NWB, `ephysalis convert` removed |
 
 ## Legacy behaviour (phase 2)
 
@@ -42,7 +42,7 @@ From the MATLAB code, for 8-channel NIDQ rigs (defaults in `AuxChannelMap`):
 
 | Signal | Channel | Notes |
 |---|---|---|
-| sync | digital bit 1 (NIDQ), bit 6 (imec SY) | MATLAB smooths edge differences and resamples NIDQ to 30 kHz; ephyscon maps edge times instead |
+| sync | digital bit 1 (NIDQ), bit 6 (imec SY) | MATLAB smooths edge differences and resamples NIDQ to 30 kHz; ephysalis maps edge times instead |
 | photodiode | AI2 | trials: smoothed, gated by `photodiode_invalid`, threshold 4000 |
 | photodiode invalid | digital bit 2 | high = photodiode signal not valid |
 | paradigm | digital bit 3 | separates paradigms in old multi-paradigm runs |
@@ -53,10 +53,10 @@ Validated against the MATLAB output on `tests/data/SOMxCD1_172_20250109_crop`:
 
 - **Trial times** (`sampleIndsStart`/`Stop`) agree within 5 samples (0.17 ms). The rest is
   consistent with the MATLAB sync, which smooths the sync offset over 100 edges (~50 s) and
-  so mixes in later clock drift near the start of a run; ephyscon interpolates between the
+  so mixes in later clock drift near the start of a run; ephysalis interpolates between the
   neighbouring sync edges of each event.
 - **Photodiode gating**: MATLAB zeroes the photodiode up to the first falling edge of the
-  "invalid" line even if the line starts low (and fails if it never falls). ephyscon only
+  "invalid" line even if the line starts low (and fails if it never falls). ephysalis only
   gates when the line starts high.
 - **Multi-paradigm runs** (several `<k>_stimulusStage*` folders per run, split by the paradigm
   line) are not supported yet. All 22 runs in `RawData` have one paradigm each.
@@ -69,16 +69,16 @@ replaced by a more robust stimulus-side clock.
 ## Known issues in the legacy pipeline (not reproduced)
 
 - Channels used for sorting were `1:ProbeDepth/10`. This assumes the Neuropixels 1.0 bank-0
-  layout and is wrong for multi-shank 2.0 probes. ephyscon will select channels by contact
+  layout and is wrong for multi-shank 2.0 probes. ephysalis will select channels by contact
   depth from the probe geometry.
-- Unit "depth" was the index of the peak channel. ephyscon uses unit locations in µm.
+- Unit "depth" was the index of the peak channel. ephysalis uses unit locations in µm.
 - For 2.0 probes, shanks were re-stacked into one virtual column for Kilosort.
 - NP1 LFP was decimated from 2.5 kHz to 1 kHz by picking samples, without an anti-alias filter.
 - **Running speed was about 8–9× too high** (8× over the full RF run of SOMxCD1_172, 9× in the 5 s crop). The wheel encoder line was resampled from the NIDQ
   rate to 30 kHz with MATLAB `resample` and thresholded at `> 0`; filter ringing turns every
   encoder pulse into several. Simulating that resampling reproduces the MATLAB
   `RunningVelocity_1kHz` (r = 0.98), so the rest of `get_wheelspeed.m` is ported correctly.
-  ephyscon counts the real pulses. Analyses with running-speed thresholds must be re-tuned.
+  ephysalis counts the real pulses. Analyses with running-speed thresholds must be re-tuned.
 - The lab Excel sheets can disagree with the recordings. For example, the probe serial
   numbers of imec0 and imec1 are swapped in `SOMxCD1_172_20250109_Recording1`. The
   recording metadata is treated as ground truth.

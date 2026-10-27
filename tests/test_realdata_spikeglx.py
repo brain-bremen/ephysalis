@@ -1,6 +1,6 @@
 """Checks against a real session processed by the legacy MATLAB pipeline.
 
-Set ``EPHYSCON_TEST_SESSION`` to a SpikeGLX session folder that still contains the
+Set ``EPHYSALIS_TEST_SESSION`` to a SpikeGLX session folder that still contains the
 ``mergedCombined_Uncurated_DataForProbe0.mat`` files written by MATLAB.
 """
 
@@ -8,14 +8,14 @@ import h5py
 import numpy as np
 import pytest
 
-from ephyscon.io.base import open_session
-from ephyscon.stimulus.base import detect_stimulus_system
+from ephysalis.io.base import open_session
+from ephysalis.stimulus.base import detect_stimulus_system
 from conftest import real_session_path
 
 SESSION = real_session_path()
 pytestmark = [
     pytest.mark.realdata,
-    pytest.mark.skipif(SESSION is None, reason="EPHYSCON_TEST_SESSION not set"),
+    pytest.mark.skipif(SESSION is None, reason="EPHYSALIS_TEST_SESSION not set"),
 ]
 
 

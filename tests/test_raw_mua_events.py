@@ -1,4 +1,4 @@
-"""Raw data, MUA and events in DH5/NWB, against the DH5 file of the old ``ephyscon convert``
+"""Raw data, MUA and events in DH5/NWB, against the DH5 file of the old ``ephysalis convert``
 (Open Ephys test session) and on the 5 s SpikeGLX crop; several sessions per command."""
 
 import h5py
@@ -10,11 +10,11 @@ import spikeinterface.core as si
 
 import dh5io
 from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_SESSION, skip_if_no_data
-from ephyscon.cli.main import main
-from ephyscon.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
-from ephyscon.events import load_run_events
-from ephyscon.io.base import open_session
-from ephyscon.mua import mua_folder
+from ephysalis.cli.main import main
+from ephysalis.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
+from ephysalis.events import load_run_events
+from ephysalis.io.base import open_session
+from ephysalis.mua import mua_folder
 
 OE_RUN = "experiment1_recording1"
 CROP_RUN = "3_rfmappingFine_g0"

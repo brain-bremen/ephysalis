@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 from scipy.signal import find_peaks, resample_poly
 
-from ephyscon.auxsignals import AuxSignals, wheel_speed
-from ephyscon.io.base import open_session
-from ephyscon.session import StreamKind
-from ephyscon.session_config import AuxChannelMap, default_session_config
-from ephyscon.stimulus.base import detect_stimulus_system
-from ephyscon.sync import AUX
-from ephyscon.timing import extract_run_timing
+from ephysalis.auxsignals import AuxSignals, wheel_speed
+from ephysalis.io.base import open_session
+from ephysalis.session import StreamKind
+from ephysalis.session_config import AuxChannelMap, default_session_config
+from ephysalis.stimulus.base import detect_stimulus_system
+from ephysalis.sync import AUX
+from ephysalis.timing import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
 
 RUN = "3_rfmappingFine_g0"
@@ -133,8 +133,8 @@ def test_trial_times_match_legacy(run, timing, probe_id):
 
     The remaining difference (about 1 sample for imec0, 4 for imec1) is consistent with the
     MATLAB sync: it smooths the sync offset over 100 edges (~50 s), which near the start of a
-    run averages in later clock drift. ephyscon maps every pulse with its neighbouring edges.
-    MATLAB reports the first sample above threshold; ephyscon the interpolated crossing.
+    run averages in later clock drift. ephysalis maps every pulse with its neighbouring edges.
+    MATLAB reports the first sample above threshold; ephysalis the interpolated crossing.
     """
     (trials,) = timing.trials.values()
     assert len(trials) == 23
@@ -174,8 +174,8 @@ def test_running_speed_legacy_artefact(run):
 
 
 def test_sync_edge_cache(run, tmp_path, monkeypatch):
-    import ephyscon.sync as sync_module
-    from ephyscon.sync import SyncEdgeCache, load_or_extract_edges
+    import ephysalis.sync as sync_module
+    from ephysalis.sync import SyncEdgeCache, load_or_extract_edges
 
     channels = AuxChannelMap.legacy_default(8)
     cache = SyncEdgeCache(tmp_path)
@@ -203,7 +203,7 @@ def test_sync_edge_cache(run, tmp_path, monkeypatch):
 
 
 def test_cli_sync(tmp_path, capsys):
-    from ephyscon.cli.main import main
+    from ephysalis.cli.main import main
 
     assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path), "--work-dir", str(tmp_path / "work")]) == 0
     assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
@@ -211,7 +211,7 @@ def test_cli_sync(tmp_path, capsys):
 
 
 def test_cli_timing_and_lfp(tmp_path, capsys):
-    from ephyscon.cli.main import main
+    from ephysalis.cli.main import main
 
     assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
     assert "RF: 23 trials" in capsys.readouterr().out

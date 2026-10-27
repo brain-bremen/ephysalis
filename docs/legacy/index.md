@@ -1,15 +1,15 @@
 # Historic recording formats
 
-The package `ephyscon.legacy` reads the lab's historic recordings. It will be removed once those
+The package `ephysalis.legacy` reads the lab's historic recordings. It will be removed once those
 datasets are converted. These pages describe the file formats in enough detail to write another
-reader without ephyscon.
+reader without ephysalis.
 
 | Format | Files | Years | Recordings | Reader |
 |---|---|---|---|---|
-| {doc}`daq` | `.daq` | 1999–2006 | Fritz, Mini (epidural and intracortical arrays, ADC64/MC-128 cards) | `ephyscon.legacy.daq` |
-| {doc}`uff` | `M*.UFF` + `P*.UFF` | 1999 | Eddi (Tallon-Baudry et al. 2004) | `ephyscon.legacy.uff` |
-| {doc}`mcd` | `.mcd` | 2010–2011 | Iris (USB-ME256) | `ephyscon.legacy.mcd` |
-| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephyscon.legacy.vstim_td01` |
+| {doc}`daq` | `.daq` | 1999–2006 | Fritz, Mini (epidural and intracortical arrays, ADC64/MC-128 cards) | `ephysalis.legacy.daq` |
+| {doc}`uff` | `M*.UFF` + `P*.UFF` | 1999 | Eddi (Tallon-Baudry et al. 2004) | `ephysalis.legacy.uff` |
+| {doc}`mcd` | `.mcd` | 2010–2011 | Iris (USB-ME256) | `ephysalis.legacy.mcd` |
+| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephysalis.legacy.vstim_td01` |
 
 None of these formats is documented by its authors:
 - the DAQ format was reconstructed from Michael Borisov's DAQ → HDF5 converter;
@@ -20,7 +20,7 @@ None of these formats is documented by its authors:
 Byte offsets that are given here were checked on real files. Fields marked *unknown* were not
 needed and were not identified.
 
-## How the readers map onto ephyscon
+## How the readers map onto ephysalis
 
 All three readers fit the same model as the Open Ephys and SpikeGLX readers:
 
@@ -37,7 +37,7 @@ All three readers fit the same model as the Open Ephys and SpikeGLX readers:
 
   ```toml
   [probes.epidural]
-  stream = "ADC64 Rev F"                 # ephyscon inspect lists the streams
+  stream = "ADC64 Rev F"                 # ephysalis inspect lists the streams
   channels = ["AI0", "AI1", "AI2"]
   ```
 
@@ -51,12 +51,12 @@ All three readers fit the same model as the Open Ephys and SpikeGLX readers:
   file (`.tdr`).
 - **Clocks.** Each reader provides clock maps from every stream onto the run's reference clock.
 - **Caches.** Indexing a large file on a network share is slow, so the DAQ record index and the
-  MCD digital transitions are cached in `EPHYSCON_CACHE_DIR` (default `%LOCALAPPDATA%/ephyscon`
-  or `~/.cache/ephyscon`).
+  MCD digital transitions are cached in `EPHYSALIS_CACHE_DIR` (default `%LOCALAPPDATA%/ephysalis`
+  or `~/.cache/ephysalis`).
 
 ## Isolation
 
-Nothing outside `ephyscon.legacy` imports it, which `tests/test_legacy_isolation.py` checks. The
+Nothing outside `ephysalis.legacy` imports it, which `tests/test_legacy_isolation.py` checks. The
 readers plug in only through the entry points in `pyproject.toml` (`daq`, `uff`, `mcd`,
 `vstim_td01`). Removing them means deleting the package, `tests/legacy/` and these four entry
 points.

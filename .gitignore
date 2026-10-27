@@ -17,7 +17,8 @@ wheels/
 # processing outputs
 *.nwb
 
-# ephyscon processing files written next to sessions (sync edge cache, ...)
+# ephysalis processing files written next to sessions (sync edge cache, ...)
+tests/data/**/ephysalis/
 tests/data/**/ephyscon/
 
 # Sphinx output

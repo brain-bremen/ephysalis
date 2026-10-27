@@ -10,10 +10,10 @@ import probeinterface
 import pytest
 from scipy import signal
 
-from ephyscon.calibration import fit_sine
-from ephyscon.cli.main import main
-from ephyscon.csd import DH5_FULL_SCALE, c_round, csd_operator
-from ephyscon.linenoise import A, B, N_POINTS, line_noise_templates, matlab_int16, reference_quality, zero_crossings
+from ephysalis.calibration import fit_sine
+from ephysalis.cli.main import main
+from ephysalis.csd import DH5_FULL_SCALE, c_round, csd_operator
+from ephysalis.linenoise import A, B, N_POINTS, line_noise_templates, matlab_int16, reference_quality, zero_crossings
 from synthetic import write_openephys
 
 FS = 1000.0
@@ -201,8 +201,8 @@ def _common_lfp(n: int, n_chan: int, rng) -> np.ndarray:
 
 
 def test_channel_quality():
-    from ephyscon.quality import channel_quality
-    from ephyscon.session_config import ChannelQualityConfig
+    from ephysalis.quality import channel_quality
+    from ephysalis.session_config import ChannelQualityConfig
 
     channels, xy_um = fritz_grid()
     rng = np.random.default_rng(7)

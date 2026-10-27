@@ -6,7 +6,7 @@ on any input format.
 
 ```toml
 [calibration]
-run = "15hz_after_2005_03_30"      # 100 µV sine on all inputs (or file = "../other/ephyscon/calibration.json")
+run = "15hz_after_2005_03_30"      # 100 µV sine on all inputs (or file = "../other/ephysalis/calibration.json")
 
 [line_noise]
 enabled = true                     # dh_remove_50hz with the recorded mains (1 kHz LFP)
@@ -22,7 +22,7 @@ neighbour_radius_um = 3100         # intracortical arrays: 2100
 exclude_inputs = ["AI20"]
 ```
 
-Run `ephyscon calibrate`, then `lfp` (with mains removal), `quality` and `csd`.
+Run `ephysalis calibrate`, then `lfp` (with mains removal), `quality` and `csd`.
 
 - **`calibrate`** fits the recorded calibration sine per channel (`<work>/calibration.json`). The
   gains are applied in every later step.

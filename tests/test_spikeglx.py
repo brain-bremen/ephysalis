@@ -2,9 +2,9 @@ from datetime import datetime
 
 import pytest
 
-from ephyscon.io.base import open_session
-from ephyscon.io.spikeglx import SpikeGLXFormat, read_meta
-from ephyscon.session import StreamKind
+from ephysalis.io.base import open_session
+from ephysalis.io.spikeglx import SpikeGLXFormat, read_meta
+from ephysalis.session import StreamKind
 from conftest import SPIKEGLX_TEMPLATES
 
 

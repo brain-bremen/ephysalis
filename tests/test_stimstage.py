@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from ephyscon.io.base import open_session
-from ephyscon.stimulus.base import detect_stimulus_system
-from ephyscon.stimulus.stimstage import get_stim_from_index
+from ephysalis.io.base import open_session
+from ephysalis.stimulus.base import detect_stimulus_system
+from ephysalis.stimulus.stimstage import get_stim_from_index
 from conftest import write_stimstage_paradigm
 
 STIM_FUNC = {"function_handle": {"function": "stimulusStageTest", "type": "simple"}}

@@ -7,13 +7,13 @@ import spikeinterface.core as si
 from pynwb import NWBHDF5IO
 
 from conftest import SPIKEGLX_CROP_SESSION
-from ephyscon.cli.main import main
-from ephyscon.io.base import open_session
-from ephyscon.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephyscon.session_config import ProbeConfig, SubjectConfig, default_session_config
-from ephyscon.sorting import save_run_spikes
-from ephyscon.sync import synchronize_run
-from ephyscon.timing import aux_channel_map
+from ephysalis.cli.main import main
+from ephysalis.io.base import open_session
+from ephysalis.nwb import SESSION_START_MARGIN_S, write_session_nwb
+from ephysalis.session_config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.sorting import save_run_spikes
+from ephysalis.sync import synchronize_run
+from ephysalis.timing import aux_channel_map
 
 RUN = "3_rfmappingFine_g0"
 

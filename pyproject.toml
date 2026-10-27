@@ -1,7 +1,7 @@
 [project]
-name = "ephyscon"
+name = "ephysalis"
 version = "0.3.0.dev0"
-description = "Preprocessing of extracellular electrophysiology recordings (Open Ephys, SpikeGLX) to DH5 and NWB (successor of oecon)"
+description = "Conversion and preprocessing of extracellular electrophysiology recordings (SpikeGLX, Open Ephys) to NWB, DH5 and BIDS (successor of oecon)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -66,25 +66,26 @@ docs = [
 
 
 [project.scripts]
-ephyscon = "ephyscon.cli.main:main"
-ephyscon-gui = "ephyscon.gui.app:main"
-ephyscon-inspect = "ephyscon.gui.inspector_app:main"
+ephysalis = "ephysalis.cli.main:main"
+ephyscon = "ephysalis.cli.main:main"  # old name, for existing scripts
+ephysalis-gui = "ephysalis.gui.app:main"
+ephysalis-inspect = "ephysalis.gui.inspector_app:main"
 
 # Plugin registries. Other packages can register additional input formats or
 # stimulus systems under the same entry point groups.
-[project.entry-points."ephyscon.input_formats"]
-spikeglx = "ephyscon.io.spikeglx:SpikeGLXFormat"
-openephys = "ephyscon.io.openephys:OpenEphysFormat"
-daq = "ephyscon.legacy.daq:DaqFormat"
-uff = "ephyscon.legacy.uff:UffFormat"
-mcd = "ephyscon.legacy.mcd:McdFormat"
+[project.entry-points."ephysalis.input_formats"]
+spikeglx = "ephysalis.io.spikeglx:SpikeGLXFormat"
+openephys = "ephysalis.io.openephys:OpenEphysFormat"
+daq = "ephysalis.legacy.daq:DaqFormat"
+uff = "ephysalis.legacy.uff:UffFormat"
+mcd = "ephysalis.legacy.mcd:McdFormat"
 
-[project.entry-points."ephyscon.stimulus_systems"]
-stimstage = "ephyscon.stimulus.stimstage:StimStageSystem"
-vstim = "ephyscon.stimulus.vstim:VStimSystem"
-vstim_td01 = "ephyscon.legacy.vstim_td01:VStimTD01System"
+[project.entry-points."ephysalis.stimulus_systems"]
+stimstage = "ephysalis.stimulus.stimstage:StimStageSystem"
+vstim = "ephysalis.stimulus.vstim:VStimSystem"
+vstim_td01 = "ephysalis.legacy.vstim_td01:VStimTD01System"
 
 [tool.pytest.ini_options]
 markers = [
-    "realdata: tests that need a real recording session (set EPHYSCON_TEST_SESSION)",
+    "realdata: tests that need a real recording session (set EPHYSALIS_TEST_SESSION)",
 ]

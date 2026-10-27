@@ -14,9 +14,9 @@ from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from conftest import DATA_FOLDER, SPIKEGLX_CROP_SESSION  # noqa: E402
-from ephyscon.gui import session_page  # noqa: E402
-from ephyscon.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
-from ephyscon.session_config import load_session_config, save_session_config  # noqa: E402
+from ephysalis.gui import session_page  # noqa: E402
+from ephysalis.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
+from ephysalis.session_config import load_session_config, save_session_config  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +50,7 @@ def test_step_commands(tmp_path):
                               bids_root=tmp_path / "bids", export_lfp=False, scratch_dir=tmp_path / "scratch")
     commands = step_commands(options)
     assert [step for step, _ in commands] == ["sync", "sort", "export"]  # pipeline order
-    assert all(argv[:4] == [sys.executable, "-u", "-m", "ephyscon.cli.main"] for _, argv in commands)
+    assert all(argv[:4] == [sys.executable, "-u", "-m", "ephysalis.cli.main"] for _, argv in commands)
     sort = commands[1][1][4:]
     assert sort[:2] == ["sort", str(tmp_path / "s")]
     assert "--sorter" in sort and "mountainsort5" in sort and "--scratch-dir" in sort

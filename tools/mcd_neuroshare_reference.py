@@ -4,7 +4,7 @@ Python on Windows (e.g. ``uv python install cpython-3.11-windows-x86-none``):
 
     python mcd_neuroshare_reference.py <nsMCDLibrary.dll> <file.mcd> <out.json> [max samples per entity]
 
-The library is part of MCS's Neuroshare download; it is not distributed with ephyscon. It can mix
+The library is part of MCS's Neuroshare download; it is not distributed with ephysalis. It can mix
 up files with the same name in different folders (it returned another folder's Data.mcd).
 
 Writes entity infos, analog infos, the first samples of every analog entity (as doubles, in

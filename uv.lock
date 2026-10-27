@@ -688,7 +688,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ephyscon"
+name = "ephysalis"
 version = "0.3.0.dev0"
 source = { editable = "." }
 dependencies = [

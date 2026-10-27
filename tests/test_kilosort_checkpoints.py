@@ -8,7 +8,7 @@ import pytest
 kilosort = pytest.importorskip("kilosort")
 from kilosort import datashift, spikedetect, template_matching  # noqa: E402
 
-from ephyscon.kilosort_checkpoints import CheckpointStore, checkpoints  # noqa: E402
+from ephysalis.kilosort_checkpoints import CheckpointStore, checkpoints  # noqa: E402
 
 
 class FakeKilosort:

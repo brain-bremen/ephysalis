@@ -11,10 +11,10 @@ import probeinterface
 import pytest
 
 from conftest import OE_TOOLS_DATA, skip_if_no_oe_tools_data
-from ephyscon.cli.main import main
-from ephyscon.io.base import open_session
-from ephyscon.io.openephys import OpenEphysFormat
-from ephyscon.session import StreamKind
+from ephysalis.cli.main import main
+from ephysalis.io.base import open_session
+from ephysalis.io.openephys import OpenEphysFormat
+from ephysalis.session import StreamKind
 
 FORMATS = ["v0.6.7_Binary", "v0.6.7_NWB", "v0.6.7_OpenEphys"]
 NODE = "Record Node 105"

@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 
 from conftest import SPIKEGLX_CROP_SESSION
-from ephyscon.bids import add_nwb_to_bids, bids_labels
-from ephyscon.io.base import open_session
-from ephyscon.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephyscon.session_config import ProbeConfig, SubjectConfig, default_session_config
-from ephyscon.sync import synchronize_run
-from ephyscon.timing import aux_channel_map
+from ephysalis.bids import add_nwb_to_bids, bids_labels
+from ephysalis.io.base import open_session
+from ephysalis.nwb import SESSION_START_MARGIN_S, write_session_nwb
+from ephysalis.session_config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.sync import synchronize_run
+from ephysalis.timing import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 
 SUBJECT, SESSION = "SOMxCD1172", "20250109crop"
@@ -46,7 +46,7 @@ def _ecephys(root, suffix):
 
 def test_dataset_files(bids_root):
     description = json.loads((bids_root / "dataset_description.json").read_text(encoding="utf-8"))
-    assert description["DatasetType"] == "raw" and description["GeneratedBy"][0]["Name"] == "ephyscon"
+    assert description["DatasetType"] == "raw" and description["GeneratedBy"][0]["Name"] == "ephysalis"
     participants = _tsv(bids_root / "participants.tsv")
     assert participants.to_dict("records") == [{"participant_id": f"sub-{SUBJECT}", "species": "Mus musculus",
                                                 "sex": "F", "age": "P90D", "strain": "n/a", "genotype": "n/a"}]

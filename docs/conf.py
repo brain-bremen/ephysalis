@@ -1,10 +1,10 @@
-"""Sphinx configuration of the ephyscon documentation (``uv run --group docs sphinx-build docs docs/_build``)."""
+"""Sphinx configuration of the ephysalis documentation (``uv run --group docs sphinx-build docs docs/_build``)."""
 
 from importlib.metadata import version as _version
 
-project = "ephyscon"
+project = "ephysalis"
 author = "Brain Research Institute, University of Bremen"
-release = _version("ephyscon")
+release = _version("ephysalis")
 version = release
 
 extensions = [
@@ -23,4 +23,4 @@ autodoc_typehints = "description"
 autodoc_mock_imports = ["torch", "kilosort"]
 
 html_theme = "furo"
-html_title = f"ephyscon {release}"
+html_title = f"ephysalis {release}"

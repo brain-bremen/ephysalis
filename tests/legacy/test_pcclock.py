@@ -1,4 +1,4 @@
-"""Run start on the stimulus PC's clock from the .tdr trial stamps (ephyscon.legacy.pcclock); BIDS task
+"""Run start on the stimulus PC's clock from the .tdr trial stamps (ephysalis.legacy.pcclock); BIDS task
 entity and scans.tsv."""
 
 from datetime import datetime
@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephyscon.cli.main import main
-from ephyscon.legacy.pcclock import PRIOR_PPM, pc_fit
+from ephysalis.cli.main import main
+from ephysalis.legacy.pcclock import PRIOR_PPM, pc_fit
 from test_vstim_td01 import MS, T0, _session, write_tdr
 
 

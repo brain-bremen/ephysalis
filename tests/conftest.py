@@ -1,4 +1,4 @@
-"""Shared fixtures: the Open Ephys test session (with the DH5 file of the old `ephyscon convert`
+"""Shared fixtures: the Open Ephys test session (with the DH5 file of the old `ephysalis convert`
 as reference) and synthetic SpikeGLX sessions."""
 import os
 import re
@@ -36,13 +36,13 @@ skip_if_no_oe_tools_data = pytest.mark.skipif(
 @pytest.fixture(autouse=True, scope="session")
 def _cache_dir(tmp_path_factory: pytest.TempPathFactory):
     """Caches of input files (e.g. DAQ record indexes) in a temporary folder, not the user's."""
-    previous = os.environ.get("EPHYSCON_CACHE_DIR")
-    os.environ["EPHYSCON_CACHE_DIR"] = str(tmp_path_factory.mktemp("ephyscon-cache"))
+    previous = os.environ.get("EPHYSALIS_CACHE_DIR")
+    os.environ["EPHYSALIS_CACHE_DIR"] = str(tmp_path_factory.mktemp("ephysalis-cache"))
     yield
     if previous is None:
-        os.environ.pop("EPHYSCON_CACHE_DIR", None)
+        os.environ.pop("EPHYSALIS_CACHE_DIR", None)
     else:
-        os.environ["EPHYSCON_CACHE_DIR"] = previous
+        os.environ["EPHYSALIS_CACHE_DIR"] = previous
 
 
 def _write_stream(run_dir: Path, run: str, stream: str, start: str, duration_s: float) -> None:
@@ -99,7 +99,7 @@ def write_v73(path: Path, groups: dict[str, dict[str, np.ndarray]]) -> None:
                 ds = g.create_dataset(name, data=np.atleast_2d(np.asarray(value, float)).T)
                 ds.attrs["MATLAB_class"] = np.bytes_("double")
     with open(path, "r+b") as f:
-        f.write(b"MATLAB 7.3 MAT-file, created by ephyscon tests".ljust(128))
+        f.write(b"MATLAB 7.3 MAT-file, created by ephysalis tests".ljust(128))
 
 
 def write_stimstage_paradigm(
@@ -127,5 +127,5 @@ def write_stimstage_paradigm(
 
 
 def real_session_path() -> Path | None:
-    path = os.environ.get("EPHYSCON_TEST_SESSION")
+    path = os.environ.get("EPHYSALIS_TEST_SESSION")
     return Path(path) if path else None

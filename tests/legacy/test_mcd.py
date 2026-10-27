@@ -1,4 +1,4 @@
-"""The MC_Rack reader (ephyscon.legacy.mcd) on synthetic files: header, samples, digital lines,
+"""The MC_Rack reader (ephysalis.legacy.mcd) on synthetic files: header, samples, digital lines,
 trigger events with trial synchronisation, a recording split over two files, the index with and
 without trigger events, and the pipeline (trials of VStim 1.x through vstim_td01)."""
 
@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephyscon.cli.main import main
-from ephyscon.io.base import open_session
-from ephyscon.legacy.mcd import EPOCH, McdRecordingExtractor, group_files, parse_streams, read_index, scan_file
-from ephyscon.session import StreamKind
+from ephysalis.cli.main import main
+from ephysalis.io.base import open_session
+from ephysalis.legacy.mcd import EPOCH, McdRecordingExtractor, group_files, parse_streams, read_index, scan_file
+from ephysalis.session import StreamKind
 
 PER_BLOCK = 2500  # 100 ms at 25 kHz
 RESOLUTION = 1.25e-7  # V per count

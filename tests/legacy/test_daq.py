@@ -1,6 +1,6 @@
-"""The DAQ reader (ephyscon.legacy.daq) on synthetic files of file versions 1.0, 2.0 and 3.3.
+"""The DAQ reader (ephysalis.legacy.daq) on synthetic files of file versions 1.0, 2.0 and 3.3.
 
-The real recordings (Fritz 2004-2006, Walter 2000) may not be published; ``ephyscon.legacy.daq`` was
+The real recordings (Fritz 2004-2006, Walter 2000) may not be published; ``ephysalis.legacy.daq`` was
 checked against the readers of the BIDS conversions on them (samples, events and trial
 descriptors identical, board fit as in ``clocksync.card_fit``)."""
 
@@ -11,11 +11,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephyscon.cli.main import main
-from ephyscon.io.base import open_session
-from ephyscon.legacy.daq import DaqFormat, board_fit, daq_file, read_index
-from ephyscon.session import StreamKind
-from ephyscon.sync import AUX
+from ephysalis.cli.main import main
+from ephysalis.io.base import open_session
+from ephysalis.legacy.daq import DaqFormat, board_fit, daq_file, read_index
+from ephysalis.session import StreamKind
+from ephysalis.sync import AUX
 
 
 def _record(tag: bytes, body: bytes) -> bytes:
@@ -151,7 +151,7 @@ def test_v3_boards_and_clock_maps(tmp_path):
     fit = daq_file(run.extra["file"]).fit
     assert fit["rate"] == pytest.approx(1.0038, abs=1e-6) and fit["offset_ns"] == pytest.approx(-50e6, abs=2e3)
     # the MC-128 channel as a probe; its samples are left-aligned 12-bit counts
-    run.probes["v1"] = __import__("ephyscon.session", fromlist=["ProbeInfo"]).ProbeInfo(
+    run.probes["v1"] = __import__("ephysalis.session", fromlist=["ProbeInfo"]).ProbeInfo(
         probe_id="v1", streams={StreamKind.AP: "MC-128 - Board 1"})
     v1 = run.get_recording(StreamKind.AP, "v1")
     np.testing.assert_allclose(v1.get_channel_gains(), 8 / 65536 * 1e6)
@@ -189,7 +189,7 @@ def test_v3_damaged_bytes_cut_end_and_pause(tmp_path):
 
 def test_index_cache(tmp_path):
     """The record index is kept on disk and read back identically by a new process."""
-    from ephyscon.legacy import daq
+    from ephysalis.legacy import daq
 
     path = str(write_v3(tmp_path / "f.daq", garbage_after=4, cut_last=10))
     scanned = read_index(path)

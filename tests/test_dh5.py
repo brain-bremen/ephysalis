@@ -7,12 +7,12 @@ import spikeinterface.core as si
 
 import dh5io
 from conftest import SPIKEGLX_CROP_SESSION
-from ephyscon.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_session_dh5
-from ephyscon.io.base import open_session
-from ephyscon.nwb import SESSION_START_MARGIN_S
-from ephyscon.session_config import default_session_config
-from ephyscon.sync import synchronize_run
-from ephyscon.timing import aux_channel_map
+from ephysalis.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_session_dh5
+from ephysalis.io.base import open_session
+from ephysalis.nwb import SESSION_START_MARGIN_S
+from ephysalis.session_config import default_session_config
+from ephysalis.sync import synchronize_run
+from ephysalis.timing import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 
 if not hasattr(dh5io, "Spike"):
@@ -89,7 +89,7 @@ def test_running_speed(dh5_path, work_dir):  # noqa: F811
 def test_export_cli_into_bids(work_dir, tmp_path, output_format):  # noqa: F811
     import json
 
-    from ephyscon.cli.main import main
+    from ephysalis.cli.main import main
 
     root = tmp_path / "bids"
     assert main(["export", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work_dir), "--output-format",

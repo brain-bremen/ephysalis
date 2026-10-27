@@ -5,8 +5,8 @@
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-uv tool install git+https://github.com/brain-bremen/ephyscon.git
-uv tool upgrade ephyscon   # update
+uv tool install git+https://github.com/brain-bremen/ephysalis.git
+uv tool upgrade ephysalis   # update
 ```
 
 Spike sorting needs the `sorting` extra (Kilosort4 and torch) and an NVIDIA GPU.
@@ -14,8 +14,8 @@ Spike sorting needs the `sorting` extra (Kilosort4 and torch) and an NVIDIA GPU.
 ## GUI
 
 ```bash
-ephyscon-gui       # converter: sessions, session.toml, steps, outputs
-ephyscon-inspect   # Open Ephys session inspector
+ephysalis-gui       # converter: sessions, session.toml, steps, outputs
+ephysalis-inspect   # Open Ephys session inspector
 ```
 
 ## Steps
@@ -42,32 +42,32 @@ All filters are zero phase (acausal): the LFP at time *t* depends on the raw dat
 
 Every step takes one or more sessions. With several sessions, per-session paths contain
 `{session}` (the session folder name); without `--work-dir` each session uses
-`<session>/ephyscon`.
+`<session>/ephysalis`.
 
 ```bash
-ephyscon inspect <session> --conditions             # runs, probes, streams, paradigms
-ephyscon init <session> [--excel CR_Experiments25.xlsx]   # create session.toml
+ephysalis inspect <session> --conditions             # runs, probes, streams, paradigms
+ephysalis init <session> [--excel CR_Experiments25.xlsx]   # create session.toml
 
-ephyscon sync    <session> [<session> ...] --work-dir D:/work/{session}
-ephyscon timing  <session> [<session> ...] --work-dir D:/work/{session}
-ephyscon lfp     <session> [<session> ...] --work-dir D:/work/{session}
-ephyscon mua     <session> [<session> ...] --work-dir D:/work/{session}
-ephyscon sort    <session> [<session> ...] --work-dir D:/work/{session} --scratch-dir <fast local disk>
-ephyscon export  <session> [<session> ...] --work-dir D:/work/{session} --output-format nwb|dh5 [--raw] [--bids <root>] [--per-run]
+ephysalis sync    <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis timing  <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis lfp     <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis mua     <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis sort    <session> [<session> ...] --work-dir D:/work/{session} --scratch-dir <fast local disk>
+ephysalis export  <session> [<session> ...] --work-dir D:/work/{session} --output-format nwb|dh5 [--raw] [--bids <root>] [--per-run]
 
 # redo the processing of an output file from its embedded processing record
-ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--run]
+ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--run]
 ```
 
 Every step records its invocation (arguments, `session.toml`, package versions, input file sizes
 and checksums) in the work dir, and `export` embeds all of it in the output file, so
-`ephyscon reproduce` can redo the processing.
+`ephysalis reproduce` can redo the processing.
 
 ## Library
 
 ```python
-from ephyscon.io.base import open_session
-from ephyscon.stimulus.base import detect_stimulus_system
+from ephysalis.io.base import open_session
+from ephysalis.stimulus.base import detect_stimulus_system
 
 session = open_session("/data/SOMxCD1_172_20250109_Recording1")
 run = session.runs[0]

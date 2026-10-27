@@ -1,12 +1,12 @@
-"""Better run start times (ephyscon.runstart), BIDS task entity and scans.tsv."""
+"""Better run start times (ephysalis.runstart), BIDS task entity and scans.tsv."""
 
 from datetime import timedelta
 
 import pandas as pd
 
-from ephyscon.cli.main import main
-from ephyscon.io.base import open_session
-from ephyscon.runstart import RunStart, apply_run_starts, write_run_start
+from ephysalis.cli.main import main
+from ephysalis.io.base import open_session
+from ephysalis.runstart import RunStart, apply_run_starts, write_run_start
 from synthetic import write_openephys
 
 

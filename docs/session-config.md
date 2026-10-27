@@ -3,7 +3,7 @@
 One file per session describes which runs are used, the probes, the sorter, the roles of the aux
 channels and the events. It replaces the Excel font-colour convention, `Depths.txt`,
 `BrokenChannelsProbe<N>_0Index.txt` and `folders2Combine.txt` of the MATLAB pipeline.
-`ephyscon init` writes one from what the reader finds (and from the lab's Excel sheet).
+`ephysalis init` writes one from what the reader finds (and from the lab's Excel sheet).
 
 ```toml
 schema_version = 6
@@ -48,7 +48,7 @@ Readers detect Neuropixels probes. Other electrodes are defined as a list of cha
 
 ```toml
 [probes.v1]
-stream = "elec0001"                # stream name (ephyscon inspect lists the streams)
+stream = "elec0001"                # stream name (ephysalis inspect lists the streams)
 channels = ["01A", "02A", "03A"]   # default: all channels of the stream
 ```
 
@@ -56,4 +56,4 @@ channels = ["01A", "02A", "03A"]   # default: all channels of the stream
 
 `schema_version` is raised whenever the format changes. Older files are migrated when read, and
 newer files are rejected. The changes per version are listed in the docstring of
-`ephyscon.session_config`.
+`ephysalis.session_config`.

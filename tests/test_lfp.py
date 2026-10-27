@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from ephyscon.io.base import open_session
-from ephyscon.lfp import extract_lfp, lfp_recording
+from ephysalis.io.base import open_session
+from ephysalis.lfp import extract_lfp, lfp_recording
 from conftest import SPIKEGLX_CROP_SESSION
 
 RUN = "3_rfmappingFine_g0"

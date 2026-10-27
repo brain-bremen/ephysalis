@@ -1,5 +1,5 @@
 # Builds the Sphinx documentation (docs/) and publishes it on GitHub Pages:
-# https://brain-bremen.github.io/ephyscon/
+# https://brain-bremen.github.io/ephysalis/
 
 name: Documentation
 

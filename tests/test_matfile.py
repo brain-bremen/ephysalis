@@ -1,7 +1,7 @@
 import h5py
 import numpy as np
 
-from ephyscon.matfile import is_v73, read_mat, read_mat_path
+from ephysalis.matfile import is_v73, read_mat, read_mat_path
 from conftest import write_v73
 
 

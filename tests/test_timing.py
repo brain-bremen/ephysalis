@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 from spikeinterface.core import NumpyRecording
 
-from ephyscon.auxsignals import (
+from ephysalis.auxsignals import (
     detect_photodiode_pulses,
     smooth_boxcar,
     threshold_crossings,
     wheel_speed,
 )
-from ephyscon.sync import ClockMap, EdgeAccumulator, Edges, binary_edges, digital_edges, match_edges
+from ephysalis.sync import ClockMap, EdgeAccumulator, Edges, binary_edges, digital_edges, match_edges
 
 
 def _quick_filter_c6(x, n_per, f_order):

@@ -1,4 +1,4 @@
-"""Processing record in the NWB/DH5 outputs and `ephyscon reproduce`, on the 5 s SpikeGLX crop."""
+"""Processing record in the NWB/DH5 outputs and `ephysalis reproduce`, on the 5 s SpikeGLX crop."""
 
 import json
 
@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 
 from conftest import SPIKEGLX_CROP_SESSION
-from ephyscon.cli.main import main
-from ephyscon.provenance import (
+from ephysalis.cli.main import main
+from ephysalis.provenance import (
     compare_environment,
     compare_inputs,
     environment,
@@ -16,7 +16,7 @@ from ephyscon.provenance import (
     record_config,
     replay_argv,
 )
-from ephyscon.session_config import SCHEMA_VERSION, load_session_config, save_session_config
+from ephysalis.session_config import SCHEMA_VERSION, load_session_config, save_session_config
 
 RUN = "3_rfmappingFine_g0"
 # DH5 export needs dh5io with SPIKE block writing (dh5io PR #15)
@@ -56,7 +56,7 @@ def test_record_in_output(processed, fmt):
     assert export["config"]["schema_version"] == SCHEMA_VERSION
     assert record_config(record) == config
     assert record_config(record, "timing") == config and record_config(record, "lfp") == config
-    assert export["argv"][:2] == ["ephyscon", "export"] and export["options"]["output_format"] == fmt
+    assert export["argv"][:2] == ["ephysalis", "export"] and export["options"]["output_format"] == fmt
     assert record["steps"]["lfp"][-1]["options"]["rate"] == 500
     assert record["sorting"]["imec0"]["sorter_params"]["nearest_chans"] == 8
     assert export["environment"]["packages"]["numpy"] == np.__version__
@@ -68,14 +68,14 @@ def test_record_in_output(processed, fmt):
 def test_compare():
     env = environment()
     assert env["packages"]["numpy"] == np.__version__
-    env["ephyscon_source"] = {"commit": "abc", "dirty": False}
+    env["ephysalis_source"] = {"commit": "abc", "dirty": False}
     assert compare_environment(env, env) == []
     changed = json.loads(json.dumps(env))
     changed["packages"]["numpy"] = "0.0.1"
-    changed["ephyscon_source"] = {"commit": "def", "dirty": True}
+    changed["ephysalis_source"] = {"commit": "def", "dirty": True}
     assert compare_environment(changed, env) == [
-        f"numpy: 0.0.1 -> {np.__version__}", "ephyscon commit: def -> abc",
-        "ephyscon had uncommitted changes when the output was made"]
+        f"numpy: 0.0.1 -> {np.__version__}", "ephysalis commit: def -> abc",
+        "ephysalis had uncommitted changes when the output was made"]
     old = {"a.meta": {"size": 1, "sha256": "x"}, "b.bin": {"size": 5}}
     assert compare_inputs(old, {"a.meta": {"size": 1, "sha256": "y"}, "c": {"size": 2}}) == [
         "missing: b.bin", "new: c", "changed: a.meta"]
@@ -97,7 +97,7 @@ def test_reproduce(processed, tmp_path, capsys):
     new = tmp_path / "again"
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new)]) == 0  # dry run
     out = capsys.readouterr().out
-    assert [line.split()[1] for line in out.splitlines() if line.startswith("ephyscon ")] == ["timing", "lfp", "export"]
+    assert [line.split()[1] for line in out.splitlines() if line.startswith("ephysalis ")] == ["timing", "lfp", "export"]
     assert load_session_config(new / "session.toml") == config
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(work)]) == 1  # same work dir
 
@@ -109,3 +109,24 @@ def test_reproduce(processed, tmp_path, capsys):
     for original in lfp_files:
         assert (new / original.relative_to(work)).read_bytes() == original.read_bytes()
     assert (new / f"{SPIKEGLX_CROP_SESSION.name}.{FORMATS[-1]}").exists()
+
+
+def test_records_before_the_rename(tmp_path):
+    """Outputs, work dirs and records made under the old name (ephyscon) are still read."""
+    import h5py
+
+    from ephysalis.timing import default_work_dir
+
+    record = {"packages": {"ephyscon": "0.3.0.dev0"}, "ephyscon_source": {"commit": "abc", "dirty": False}}
+    with h5py.File(tmp_path / "old.nwb", "w") as f:
+        f["scratch/ephyscon_processing/data"] = json.dumps(record)
+    with h5py.File(tmp_path / "old.dh5", "w") as f:
+        f.create_group("Operations/000_ephyscon_export").attrs["Processing"] = json.dumps(record)
+    assert read_processing_record(tmp_path / "old.nwb") == record == read_processing_record(tmp_path / "old.dh5")
+    current = {"packages": {"ephysalis": "0.3.0.dev0"}, "ephysalis_source": {"commit": "abc", "dirty": False},
+               "python": None}
+    assert compare_environment({**record, "python": None}, current) == []
+    session = tmp_path / "session"
+    assert default_work_dir(session) == session / "ephysalis"
+    (session / "ephyscon").mkdir(parents=True)
+    assert default_work_dir(session) == session / "ephyscon"

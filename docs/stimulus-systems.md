@@ -5,15 +5,15 @@ A stimulus system plugin turns what the stimulus program left behind into a tabl
 - **what** was shown, i.e. the condition and its stimulus parameters;
 - **how** the trial went, e.g. the outcome and reaction time.
 
-ephyscon then writes these trials into every output: the NWB trials table, DH5 `TRIALMAP`, and
+ephysalis then writes these trials into every output: the NWB trials table, DH5 `TRIALMAP`, and
 BIDS `events.tsv`.
 
 Behavioural signals such as running speed, eye position and lever presses do not come from these
 plugins. They come from the roles of the aux channels (see [Behaviour signals](#behaviour-signals)).
 
-## How `ephyscon timing` uses a plugin
+## How `ephysalis timing` uses a plugin
 
-For each included run, `ephyscon timing` (`ephyscon.timing.extract_run_timing`) does this:
+For each included run, `ephysalis timing` (`ephysalis.timing.extract_run_timing`) does this:
 
 1. **Clocks.** It synchronises the run's streams, which gives a `RunSync`: clock maps from every
    stream onto the reference clock.
@@ -30,7 +30,7 @@ For each included run, `ephyscon timing` (`ephyscon.timing.extract_run_timing`) 
 5. **Trials.** `load_trials(run, paradigm, sync, aux)` is called for each paradigm. Each table is
    written to `<work>/trials/<run>_<paradigm>.csv`.
 6. **Run start.** `run_start(run, trials)` may return a better start time for the run, from the
-   stimulus PC's clock. It is written to `<work>/run_start/<run>.json` (see `ephyscon.runstart`).
+   stimulus PC's clock. It is written to `<work>/run_start/<run>.json` (see `ephysalis.runstart`).
 
 When exporting, `export` reads all trial files of the included runs. It adds the columns `run`
 and `paradigm`, shifts the times onto the session time axis, and sorts the trials by
@@ -69,7 +69,7 @@ plugin.
 `sync: RunSync`
 : Clock maps of all streams. `sync.to_reference_time(stream, samples)` converts fractional
   sample indices of a stream into seconds on the reference clock. The aux stream is
-  `ephyscon.sync.AUX`. `sync.to_samples(stream, times)` converts back.
+  `ephysalis.sync.AUX`. `sync.to_samples(stream, times)` converts back.
 
 `aux: AuxSignals | None`
 : The aux channels by role. It is `None` if the run has no aux stream.
@@ -103,8 +103,8 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 
-from ephyscon.stimulus.base import Paradigm, StimulusSystem
-from ephyscon.sync import AUX
+from ephysalis.stimulus.base import Paradigm, StimulusSystem
+from ephysalis.sync import AUX
 
 
 class MyStimulusSystem(StimulusSystem):
@@ -138,7 +138,7 @@ Register it in the `pyproject.toml` of your package. Entry points take effect wh
 (re)installed.
 
 ```toml
-[project.entry-points."ephyscon.stimulus_systems"]
+[project.entry-points."ephysalis.stimulus_systems"]
 mystim = "mypackage.stimulus:MyStimulusSystem"
 ```
 
@@ -149,7 +149,7 @@ the first plugin that says yes wins.
 
 ### `vstim`: VStim with Open Ephys
 
-This plugin is for the lab's VStim (C++) with Open Ephys (`ephyscon.stimulus.vstim`).
+This plugin is for the lab's VStim (C++) with Open Ephys (`ephysalis.stimulus.vstim`).
 
 - **Recording:** VStim writes one TDR file (trial data record) per recording. It also sends
   messages to Open Ephys: `START RECORDING … <file>.tdr`, then `TRIAL_START <n> …` and
@@ -166,7 +166,7 @@ This plugin is for the lab's VStim (C++) with Open Ephys (`ephyscon.stimulus.vst
 
 ### `stimstage`: MATLAB/Psychtoolbox stimulusStage
 
-This plugin is for the lab's MATLAB/Psychtoolbox stimulus code (`ephyscon.stimulus.stimstage`).
+This plugin is for the lab's MATLAB/Psychtoolbox stimulus code (`ephysalis.stimulus.stimstage`).
 
 - **Detection:** the run folder contains one `<k>_stimulusStage<Name>` folder per paradigm.
 - **Parameters:** `params.mat` holds a cell array of parameter structs. Every vector-valued field
@@ -174,7 +174,7 @@ This plugin is for the lab's MATLAB/Psychtoolbox stimulus code (`ephyscon.stimul
 - **Order:** `stimulation.mat` holds `stimResults.stimulusOrder`, the condition index per trial.
 - **Conditions:** port of `getStimFromIndex.m`. Conditions are numbered over the structs and,
   within a struct, in MATLAB `ind2sub` order (column-major: the first field varies fastest). The
-  field order of `params` therefore matters, and ephyscon's MAT reader keeps it. Each row has
+  field order of `params` therefore matters, and ephysalis's MAT reader keeps it. Each row has
   `param_set`, `stimulus_function` and the levels of all fields.
 - **Times:** from the screen photodiode (role `photodiode`, with `photodiode_invalid`
   optional), as `fillInSampleIndsInStim_CR.m` does it. In some versions the photodiode square
@@ -192,8 +192,8 @@ day's `.tdr`. It is described in {doc}`legacy/vstim-td01`. It is also the only p
 (behaviour-signals)=
 ## Behaviour signals
 
-These signals are decoded from aux channel roles by `ephyscon.timing`, `ephyscon.auxsignals` and
-`ephyscon.annotations`, independent of the stimulus system:
+These signals are decoded from aux channel roles by `ephysalis.timing`, `ephysalis.auxsignals` and
+`ephysalis.annotations`, independent of the stimulus system:
 
 | Role(s) | Output |
 |---|---|
@@ -208,13 +208,13 @@ A stimulus plugin can use the same roles. For example, `vstim_td01` reads the ou
 ## API
 
 ```{eval-rst}
-.. autoclass:: ephyscon.stimulus.base.StimulusSystem
+.. autoclass:: ephysalis.stimulus.base.StimulusSystem
    :members:
 
-.. autoclass:: ephyscon.stimulus.base.Paradigm
+.. autoclass:: ephysalis.stimulus.base.Paradigm
 
-.. autoclass:: ephyscon.auxsignals.AuxSignals
+.. autoclass:: ephysalis.auxsignals.AuxSignals
    :members:
 
-.. autofunction:: ephyscon.stimulus.stimstage.get_stim_from_index
+.. autofunction:: ephysalis.stimulus.stimstage.get_stim_from_index
 ```
