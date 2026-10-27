@@ -19,3 +19,6 @@ wheels/
 
 # ephyscon processing files written next to sessions (sync edge cache, ...)
 tests/data/**/ephyscon/
+
+# Sphinx output
+docs/_build/

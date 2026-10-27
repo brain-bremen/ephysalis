@@ -37,7 +37,12 @@ uv run ephyscon reproduce <file.nwb|file.dh5> --work-dir <new dir> [--session <p
 
 # Type checking
 uv run mypy src/
+
+# Documentation (Sphinx + MyST, docs/; CI builds it with -W)
+uv run --group docs sphinx-build docs docs/_build
 ```
+
+User documentation lives in `docs/` (the README is only a short entry point). The file formats of the legacy readers are specified in `docs/legacy/<format>.md`; keep them in sync when a reader changes.
 
 ## Architecture
 

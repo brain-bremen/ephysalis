@@ -18,7 +18,8 @@ the pulses paired on both (:func:`pair_pulses`, :func:`p_clock_fit`; port of
 ``eddi.p_clock_regions``), so the DH5 blocks of P get their true period and one INDEX region per
 stretch. The TTL events of a run are the pulses on
 M15 (line 1). Electrodes are defined in ``session.toml`` (probes with ``stream = "M"`` or
-``"P"``). Start time: the modification time of the M file (the header has no date).
+``"P"``). Start time: the modification time of the M file minus its duration (the header has
+no date). The file format is described in ``docs/legacy/uff.md``.
 """
 
 from __future__ import annotations

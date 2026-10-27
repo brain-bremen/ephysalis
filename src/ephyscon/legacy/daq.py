@@ -6,22 +6,9 @@ file (a file has several when the recording was paused) becomes one
 :class:`~ephyscon.session.Run`, named after the file (``<stem>_part<k>`` for files with
 several). Runs are ordered by the start time in the file header.
 
-Format (reverse-documented from Michael Borisov's DAQ -> HDF5 converter, V2.7): little-endian
-packed records ``char tag[4], int32 size`` (size including this header), times are int64 ns of
-the DAQ clock (which need not restart at 0 with a new file).
-
-=================  ==========================================================================
-file version       records
-=================  ==========================================================================
-1.0, 1.1, 2.0      header ``VER1 DATE NAME BORD FCR1`` (one board, all channels at one rate,
-                   which is not stored: it is the spacing of the ``CR01`` times); data
-                   ``CR01`` (time + one sample of every channel), ``EV01`` (time, ±line,
-                   line states), ``TD01`` (time, trial and stimulus number)
-3.1, 3.2, 3.3      header ``VER1 DATE NAME [RECP] BORD EDR1 CDR1`` (nTrodes = groups of
-                   channels with one rate; channel descriptors with the sample rate); data
-                   ``CR02`` (time of the first sample, nTrode id, samples ``[sample][channel]``),
-                   ``EV02`` (time, ±line), ``TD01``
-=================  ==========================================================================
+Format reverse-documented from Michael Borisov's DAQ -> HDF5 converter, V2.7; described in
+``docs/legacy/daq.md``. Records ``char tag[4], int32 size``; versions 1.x/2.0 store ``CR01``
+frames, version 3 ``CR02`` blocks per nTrode.
 
 Version 3.0 files are known to be corrupt and are not read. Also handled: an ``FCR1`` size
 field truncated to its low byte (version 1.0, 2000), a zero-filled end of a preallocated file

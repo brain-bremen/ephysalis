@@ -2,32 +2,9 @@
 lab's USB-ME256 recordings of monkey Iris). Reverse-engineered from the files, with the MCS
 Neuroshare library (nsMCDLibrary 3.1) and its documentation as reference: samples, channels,
 digital words and trigger events equal what the library returns for MC_Rack 3.8/4.0 files
-(header version 10).
+(header versions 10 and 11).
 
-Layout: chunks ``char tag[8], int64 size`` (size of the body), little-endian. ``MCSSTRM ``
-(size -1) holds ``LISThdr `` (``MCSHDR  ``, ``LAYOUT  ``, and per stream ``STRMHDR `` +
-``STRMFMT ``), then the data chunks, named after their stream (``elec0001``, ``anlg0001``,
-``filt0001``, ``digi0001``, ``trig0001``, ...), and the index (``IDX1MCS ``, ``IDXIDX  ``,
-``IDXSWEEP``); ``IDX1POS `` (first data chunk) points to the index.
-
-=============  ================================================================================
-chunk          content
-=============  ================================================================================
-``STRMHDR ``   +2 stream type (``analog`` = electrode or analog inputs, ``filter``, ``digital``,
-               ``trigger``, ``average``, ...), +784 uint32 sample rate in mHz, +788 uint16 number
-               of channels, +792 stream tag; from +804 one record per channel (``(size - 804) /
-               channels`` bytes): +4 uint32 channel index, +8 uint32 hardware id, +790 label
-``STRMFMT ``   +2 unit character (``V``), +4 bits, +6 uint16 AD zero, +8 double resolution
-               (unit per count), +18 uint16 samples per block
-data chunk     int64 start and end time of the block (ns since 1601-01-01, local time of the
-               recording PC), then the samples ``[sample][channel]`` as uint16 (value = sample -
-               AD zero; digital words as recorded) or, for trigger streams, the events: int64
-               time, uint16 trigger value, uint16 trigger number (manual triggers), 2 bytes,
-               with trial synchronisation int32 trial number, int32 stimulus number
-``IDXIDX  ``   per block group (100 ms of all streams): uint64 time, int64 position of its first
-               chunk; within a group the streams follow in a fixed order, all chunks but the
-               trigger chunk have a fixed size
-=============  ================================================================================
+The file format is described in ``docs/legacy/mcd.md``.
 
 MC_Rack writes a long recording into several files (``name.mcd``, ``name0001.mcd``, ... of at
 most 2 or 3 GB) that continue each other without gap; consecutive files of a folder whose blocks

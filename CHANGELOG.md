@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sphinx documentation** (`docs/`, `uv run --group docs sphinx-build docs docs/_build`, built in CI): usage, `session.toml`, preprocessing, output layouts, filters, plugins, and one page per historic format (DAQ, UFF, MC_Rack, VStim 1.x trials) describing the file layout for writing other readers; `tools/mcd_neuroshare_reference.py` dumps the MCS Neuroshare library's values of an MCD file. The README is now short
+
 - **`ephyscon.legacy`**: the DAQ and UFF readers, the `vstim_td01` plugin and the VStim PC-clock fit in one package that the rest never imports (checked by a test); it plugs in through entry points and the generic interfaces, so it can be deleted once the historic datasets are converted. New generic hooks: `StimulusSystem.run_start` (`ephyscon.runstart`), typed `Run.streams` / `clock_start_s` / `recorded_start_time` / `start_time_method` instead of format-specific `Run.extra` keys; a plugin that fails to import is skipped with a warning
 - **Reader for Multi Channel Systems MC_Rack files** (`ephyscon.legacy.mcd`, `.mcd` of MC_Rack 3.8-4.0, monkey Iris 2010-2011), reverse-engineered with the MCS Neuroshare library as reference: electrode, analog, filtered and digital streams, trigger events with trial and stimulus numbers (trial descriptors for `vstim_td01`), recordings split over several files joined into one run, chunk index from the file's `IDXIDX`; equal to the Neuroshare library on 8 files (all samples read, digital and trigger events)
 - **`[events] lines_without_role`** (`session.toml` schema 6) and `InputFormat.read_ttl_events(run, lines)`: only the TTL lines with a role, for digital inputs that toggle when unconnected
