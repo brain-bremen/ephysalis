@@ -5,8 +5,7 @@
 Like the physalis berry in its papery husk, ephysalis wraps the juicy core of a recording, the
 raw signals, in a shell of metadata: probes and channel maps, trials and stimuli, clocks, events,
 and the record of how every output was made. The shell protects the data and keeps it good for
-longer. One self-describing NWB or DH5 file per session, laid out as a BIDS dataset, can be
-shared and archived, and still be understood years later.
+longer, so it can be shared and archived, and still be understood years later.
 
 Converts extracellular electrophysiology recordings (SpikeGLX/Neuropixels, Open Ephys) into one
 [NWB](https://nwb.org) or [DAQ-HDF5](https://github.com/cog-neurophys-lab/DAQ-HDF5) (DH5) file per
