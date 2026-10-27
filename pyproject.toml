@@ -8,7 +8,7 @@ dependencies = [
     "dh5io>=0.4.1",
     "scipy>=1.15.2",
     "numpy>2.0",
-    "vstim>=0.2.0",
+    "vstim>=0.3.0",
     "pydantic>=2.0",
     "pyside6>=6.7",
     "comtypes>=1.4.0; sys_platform == 'win32'",
@@ -39,6 +39,8 @@ build-backend = "setuptools.build_meta"
 package = true
 
 [tool.uv.sources]
+# 0.3.0 (old TDR versions, outcomes 10/-1) is not on PyPI yet
+vstim = { git = "https://github.com/brain-bremen/VStimPython.git", tag = "v0.3.0" }
 torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }]
 
 [[tool.uv.index]]

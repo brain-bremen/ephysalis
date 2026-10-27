@@ -757,7 +757,7 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.2" },
     { name = "torch", marker = "(sys_platform == 'linux' and extra == 'sorting') or (sys_platform == 'win32' and extra == 'sorting')", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'sorting'", specifier = ">=2.4" },
-    { name = "vstim", specifier = ">=0.2.0" },
+    { name = "vstim", git = "https://github.com/brain-bremen/VStimPython.git?tag=v0.3.0" },
 ]
 provides-extras = ["sorting"]
 
@@ -3852,12 +3852,8 @@ wheels = [
 
 [[package]]
 name = "vstim"
-version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/ee/d07f24dbcacfad823391ec7930fd73f53ff68b848a072970cd88735a94cd/vstim-0.2.0.tar.gz", hash = "sha256:6cfd54403f1a0fed654815234dbdde57e0ff1a747274cf817f3c85fddf7ae9e8", size = 520311, upload-time = "2026-06-17T08:30:42.411Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/8b/ceefd87edf22bb5b3303caf8f95afa5b420f53c0161dea1a6347cbb14976/vstim-0.2.0-py3-none-any.whl", hash = "sha256:3592951f996a7f7ce029e52d1a3291d196bea0af64f0b3c48915dda32f0fdd2d", size = 10779, upload-time = "2026-06-17T08:30:40.457Z" },
-]
+version = "0.3.0"
+source = { git = "https://github.com/brain-bremen/VStimPython.git?tag=v0.3.0#54850f003011df9b1c700dae6c4003de0acda98b" }
 
 [[package]]
 name = "wrapt"
