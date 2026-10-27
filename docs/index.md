@@ -19,6 +19,7 @@ MATLAB Neuropixels preprocessing scripts.
 
 usage
 session-config
+stimulus-systems
 preprocessing
 output
 filters

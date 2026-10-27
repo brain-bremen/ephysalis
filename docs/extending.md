@@ -23,10 +23,7 @@ with trial records inside the data file.
 
 ## Stimulus systems
 
-```{eval-rst}
-.. autoclass:: ephyscon.stimulus.base.StimulusSystem
-   :members:
-```
+See {doc}`stimulus-systems`: how `timing` uses a plugin, the trial table, and a minimal example.
 
 ## Development
 
