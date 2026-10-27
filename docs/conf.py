@@ -24,3 +24,6 @@ autodoc_mock_imports = ["torch", "kilosort"]
 
 html_theme = "furo"
 html_title = f"ephysalis {release}"
+html_static_path = ["_static"]
+html_logo = "_static/ephysalis-mark.svg"
+html_favicon = "_static/ephysalis-mark.svg"

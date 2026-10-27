@@ -1,3 +1,5 @@
+<img src="docs/_static/ephysalis-logo.svg" alt="ephysalis" width="480">
+
 # ephysalis — Electrophysiology Converter
 
 Like the physalis berry in its papery husk, ephysalis wraps the juicy core of a recording, the
