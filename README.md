@@ -31,8 +31,8 @@ ephyscon export <session> --work-dir D:/work/{session} --output-format nwb|dh5 [
 
 ## Documentation
 
-The documentation is in `docs/`: steps, `session.toml`, output layouts, filters, and plugins.
-Build it with:
+The documentation is at https://brain-bremen.github.io/ephyscon/: steps, `session.toml`, output
+layouts, filters, and plugins. It is built from `docs/`; build it locally with:
 
 ```bash
 uv run --group docs sphinx-build docs docs/_build
