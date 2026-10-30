@@ -6,7 +6,7 @@ channels and the events. It replaces the Excel font-colour convention, `Depths.t
 `ephysalis init` writes one from what the reader finds (and from the lab's Excel sheet).
 
 ```toml
-schema_version = 6
+schema_version = 7
 session_id = "SOMxCD1_172_20250109_Recording1"
 subject_id = "SOMxCD1_172"
 task = "rfmapping"         # BIDS task entity (also per run)
@@ -50,6 +50,19 @@ Readers detect Neuropixels probes. Other electrodes are defined as a list of cha
 [probes.v1]
 stream = "elec0001"                # stream name (ephysalis inspect lists the streams)
 channels = ["01A", "02A", "03A"]   # default: all channels of the stream
+```
+
+## Re-referencing
+
+`reference_channels` subtracts the mean of other channels of the same stream (e.g. a local
+reference electrode) from the probe's channels. It applies to everything read from the probe:
+LFP, MUA, CSD and spike sorting. The reference channels must have the same gain as the probe's.
+
+```toml
+[probes.v4]
+stream = "elec0003"
+channels = ["18C", "20C"]
+reference_channels = ["14C"]       # local reference electrode on the dura
 ```
 
 ## Schema versions

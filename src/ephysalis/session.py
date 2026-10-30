@@ -44,6 +44,9 @@ class ProbeInfo:
     # probes defined in session.toml (ephysalis.io.probes): channels of the stream, geometry
     channel_ids: tuple[str, ...] | None = None
     geometry: dict | None = None
+    # re-reference (session.toml probes.<id>.reference_channels): the mean of these channels of the same stream is
+    # subtracted from the probe's channels
+    reference_channel_ids: tuple[str, ...] | None = None
     # calibration (ephysalis.calibration): factors on the recorded gains of the probe's channels
     # (AP and LF streams), NaN for channels without calibration
     gain_factors: tuple[float, ...] | None = None
@@ -70,7 +73,8 @@ class Run:
     def get_recording(self, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
         recording = self.format.get_recording(self, kind, probe_id)
         info = self.probes.get(probe_id) if probe_id is not None else None
-        if info is not None and kind in (StreamKind.AP, StreamKind.LF) and (info.channel_ids or info.geometry):
+        if info is not None and kind in (StreamKind.AP, StreamKind.LF) and (
+                info.channel_ids or info.geometry or info.reference_channel_ids):
             from ephysalis.io.probes import apply_probe
 
             recording = apply_probe(recording, info)

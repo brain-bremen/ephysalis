@@ -16,6 +16,7 @@ Schema versions (``schema_version``, see :mod:`ephysalis.schema`):
 5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``;
    probes: ``quality`` (channel selection); ``task`` of the session and of the runs (BIDS ``task`` entity)
 6. ``[events] lines_without_role``
+7. probes: ``reference_channels`` (re-reference to the mean of other channels of the stream)
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from pydantic import BaseModel, Field
 from ephysalis.schema import Migration, migrate
 from ephysalis.session import Session
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
@@ -40,6 +41,7 @@ MIGRATIONS: dict[int, Migration] = {
     3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
     4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
     5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
+    6: lambda data: data,  # 7 added probes.reference_channels (default none: no re-reference)
 }
 
 
@@ -109,6 +111,9 @@ class ProbeConfig(BaseModel):
         "e.g. 'Acquisition_Board-100.Rhythm Data'"
     )
     channels: list[str] | None = Field(default=None, description="Channel ids of the probe in `stream` (default: all)")
+    reference_channels: list[str] | None = Field(
+        default=None, description="Re-reference: channel ids of `stream` whose mean is subtracted from the probe's "
+        "channels before every step (LFP, MUA, CSD, sorting), e.g. a local reference electrode")
     geometry: ProbeGeometry | None = None
     area: str | None = Field(default=None, description="Target brain area, e.g. V1")
     insertion_depth_um: float | None = Field(

@@ -12,21 +12,29 @@ the Open Ephys acquisition board (Intan headstage), is defined in ``[probes.<id>
 The geometry comes from the probeinterface library (downloaded once) or a probeinterface
 file; ``wiring`` maps the probe's contacts to the headstage channels (probeinterface
 ``wiring_to_device``). Without ``wiring``, ``channels`` are in contact order.
+
+``reference_channels`` re-references the probe: the mean of these channels of the same stream
+(e.g. a local reference electrode) is subtracted from the probe's channels in every step::
+
+    [probes.v4]
+    stream = "elec0003"
+    channels = ["18C", "20C"]
+    reference_channels = ["14C"]
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
 from ephysalis.session import ProbeInfo, Session, StreamKind
 
 if TYPE_CHECKING:
     from probeinterface import Probe
-    from spikeinterface.core import BaseRecording
 
     from ephysalis.session_config import ProbeGeometry, SessionConfig
 
@@ -67,6 +75,8 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
                 streams={StreamKind.AP: stream},
                 channel_ids=tuple(probe_config.channels) if probe_config.channels else None,
                 geometry=geometry,
+                reference_channel_ids=(tuple(probe_config.reference_channels)
+                                       if probe_config.reference_channels else None),
             )
         if not found:
             logger.warning("probe %s: no run has a stream %r", probe_id, probe_config.stream)
@@ -85,11 +95,64 @@ def build_probe(geometry: dict) -> Probe:
     return probe
 
 
+class _RereferencedSegment(BaseRecordingSegment):
+    def __init__(self, parent: Any, sampling_frequency: float, channels: np.ndarray, references: np.ndarray):
+        BaseRecordingSegment.__init__(self, sampling_frequency=sampling_frequency, t_start=getattr(parent, "t_start", None))
+        self._parent, self._channels, self._references = parent, channels, references
+
+    def get_num_samples(self) -> int:
+        return self._parent.get_num_samples()
+
+    def get_traces(self, start_frame=None, end_frame=None, channel_indices=None):
+        channels = self._channels if channel_indices is None else self._channels[channel_indices]
+        wanted = np.unique(np.r_[channels, self._references])
+        traces = self._parent.get_traces(start_frame, end_frame, wanted).astype(np.float32)
+        column = {c: k for k, c in enumerate(wanted)}
+        reference = traces[:, [column[c] for c in self._references]].mean(axis=1, keepdims=True)
+        return traces[:, [column[c] for c in channels]] - reference
+
+
+class RereferencedRecording(BaseRecording):
+    """``channel_ids`` of ``recording`` minus the mean of its ``reference_ids`` (float32, in the recording's counts;
+    the gains of all channels involved must be equal)."""
+
+    def __init__(self, recording: BaseRecording, channel_ids: list, reference_ids: list):
+        all_ids = list(recording.channel_ids)
+        missing = [c for c in [*channel_ids, *reference_ids] if c not in all_ids]
+        if missing:
+            raise ValueError(f"re-reference: channels {missing} are not in the stream")
+        gains = recording.get_channel_gains()
+        involved = [all_ids.index(c) for c in [*channel_ids, *reference_ids]]
+        if not np.allclose(gains[involved], gains[involved[0]]):
+            raise ValueError("re-reference: the channels and the reference channels have different gains")
+        BaseRecording.__init__(self, recording.sampling_frequency, list(channel_ids), np.dtype("float32"))
+        channels = np.array([all_ids.index(c) for c in channel_ids])
+        references = np.array([all_ids.index(c) for c in reference_ids])
+        for segment in recording._recording_segments:
+            self.add_recording_segment(_RereferencedSegment(segment, recording.sampling_frequency, channels, references))
+        self.set_channel_gains(gains[channels])
+        self.set_channel_offsets(0.0)
+        for key in recording.get_property_keys():
+            values = recording.get_property(key)
+            if values is not None and len(values) == len(all_ids):
+                self.set_property(key, np.asarray(values)[channels])
+        self.annotate(reference_channels=list(reference_ids))
+        self._kwargs = {"recording": recording, "channel_ids": list(channel_ids), "reference_ids": list(reference_ids)}
+
+
+def rereference(recording: BaseRecording, channel_ids: list, reference_ids: list) -> BaseRecording:
+    """The probe's channels minus the mean of the reference channels (``probes.<id>.reference_channels``)."""
+    return RereferencedRecording(recording, channel_ids, reference_ids)
+
+
 def apply_probe(recording: BaseRecording, info: ProbeInfo) -> BaseRecording:
     """Select the probe's channels of its stream and attach its geometry."""
     # always a new (channel-selected) recording: set_probe changes it in place, and readers cache theirs
     channel_ids = list(info.channel_ids) if info.channel_ids is not None else list(recording.channel_ids)
-    recording = recording.select_channels(channel_ids)
+    if info.reference_channel_ids:
+        recording = rereference(recording, channel_ids, list(info.reference_channel_ids))
+    else:
+        recording = recording.select_channels(channel_ids)
     if info.geometry is None:
         return recording
     probe = build_probe(info.geometry)
