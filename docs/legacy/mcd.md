@@ -129,7 +129,7 @@ group.
 Every data chunk starts with the time of its block:
 
 ```text
-uint64  start    ns since 1601-01-01 00:00, local time of the recording PC
+uint64  start    ns since 1601-01-01 00:00 UTC (Windows FILETIME × 100)
 uint64  end      ns, = start + 100 ms
 ...     payload
 ```
@@ -209,6 +209,12 @@ For example, 2010-07-28 is 11 files that form one 59-minute run.
 
 All streams of a USB-ME share its sample clock. The block times place the blocks and the files
 of a run. Channel offsets within a block are the sample index divided by the stream's rate.
+
+The block times are UTC, not the local time of the recording PC. On 2010-12-07 (CET) trial 87 of
+Iris's recording starts at 15:09:00 by the block times and at 16:08:44 in VStim's `.tdr` (local
+time); the trial-pulse sequences of the recordings and their `.tdr` files match at offsets of
+1 h (winter) and 2 h (summer) plus a few seconds of clock difference. Convert to local time
+(Europe/Berlin) before comparing with VStim.
 
 ## Neuroshare names
 

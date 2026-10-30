@@ -154,10 +154,12 @@ def stamp_seconds(trial: Any) -> int | None:
     return hh * 3600 + mm * 60 + ss
 
 
-def match_by_time(pc_s: np.ndarray, tdr: dict[int, Any], outcomes: list[int | None]) -> tuple[list[int | None], dict]:
+def match_by_time(pc_s: np.ndarray, tdr: dict[int, Any], outcomes: list[int | None],
+                  required: int | None = None) -> tuple[list[int | None], dict]:
     """``.tdr`` trial number (or None) per trial start (``pc_s``: approximate PC time of day in
     s); ``outcomes``: the trigger-line outcome per trial (for the check). Raises ValueError if
-    the checks fail (see the module docs)."""
+    the checks fail (see the module docs). ``required``: the number of trials that must be
+    matched (95 % of it), default the number of starts."""
     from vstim.tdr import TrialOutcome
 
     candidates = sorted((n for n, t in tdr.items() if t.outcome != TrialOutcome.NotStarted and stamp_seconds(t) is not None),
@@ -188,8 +190,15 @@ def match_by_time(pc_s: np.ndarray, tdr: dict[int, Any], outcomes: list[int | No
     out = [int(numbers[j[k]]) if ok[k] else None for k in range(len(j))]
     agree = sum(o == int(tdr[n].outcome.value) for o, n in zip(outcomes, out) if n is not None)
     matched = int(ok.sum())
-    report = {"n_trials": len(out), "n_matched": matched, "shift_s": round(shift, 2), "outcome_agreement": int(agree)}
-    if matched < MIN_MATCHED * len(out) or agree < MIN_OUTCOME_AGREEMENT * max(matched, 1):
+    # trials with a trigger-line outcome (setups without error lines, e.g. Botox: only the reward line, so only
+    # Hit trials have one; with all outcome lines every trial has one)
+    with_outcome = sum(1 for o, n in zip(outcomes, out) if n is not None and o is not None)
+    report = {"n_trials": len(out), "n_matched": matched, "shift_s": round(shift, 2), "outcome_agreement": int(agree),
+              "n_with_outcome": with_outcome}
+    if required is not None:
+        report["n_required"] = required
+    if matched < MIN_MATCHED * (len(out) if required is None else required) \
+            or agree < MIN_OUTCOME_AGREEMENT * max(with_outcome, 1):
         raise ValueError(f"time matching with the .tdr failed: {report}")
     return out, report
 
@@ -266,17 +275,57 @@ def _descriptors(run: Run) -> pd.DataFrame | None:
     return read(run) if read is not None else None
 
 
+def tdr_for_time(run: Run) -> Path | None:
+    """For runs without trial descriptors (MC_Rack files without trial synchronisation, e.g. Botox 2010): the
+    ``.tdr`` of the run's day with the most trial stamps within the run (run start = local wall clock)."""
+    if run.start_time is None:
+        return None
+    day = run.start_time.date()
+    t0 = _seconds_of_day(run.start_time)
+    t1 = t0 + (run.duration_s or 0.0)
+    best, best_n = None, 0
+    for path in _candidates(run):
+        if tdr_date(path) != day:
+            continue
+        trials = _readable_tdr(path)
+        if trials is None:
+            continue
+        n = sum(1 for t in trials.values() if (s := stamp_seconds(t)) is not None and t0 - 60 <= s <= t1 + 60)
+        if n > best_n:
+            best, best_n = path, n
+    return best
+
+
+def stamps_in_window(tdr: dict[int, Any], t0: float, t1: float) -> int:
+    """Started ``.tdr`` trials with a time stamp in [t0, t1] (s since midnight)."""
+    from vstim.tdr import TrialOutcome
+
+    return sum(1 for t in tdr.values() if t.outcome != TrialOutcome.NotStarted
+               and (s := stamp_seconds(t)) is not None and t0 <= s <= t1)
+
+
 class VStimTD01System(StimulusSystem):
     name: ClassVar[str] = "vstim_td01"
 
     def can_handle(self, run: Run) -> bool:
         descriptors = _descriptors(run)
-        return descriptors is not None and len(descriptors) > 0
+        if descriptors is None:
+            return False
+        return len(descriptors) > 0 or tdr_for_time(run) is not None
 
     def discover(self, run: Run) -> list[Paradigm]:
         descriptors = _descriptors(run)
-        if descriptors is None or not len(descriptors):
+        if descriptors is None:
             return []
+        if not len(descriptors):  # no trial descriptors: trial-start pulses matched to the .tdr by time
+            path = tdr_for_time(run)
+            if path is None:
+                return []
+            header = _read_tdr(str(path)).headers[0]
+            ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
+            return [Paradigm(name=ini or path.stem, run_name=run.name, index_in_run=0, system=self.name, path=path,
+                             metadata={"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None),
+                                       "trial_descriptors": False})]
         is_frozen = frozen(descriptors)
         if is_frozen:  # matched by time in load_trials: the day's .tdr
             day = run.start_time.date() if run.start_time is not None else None
@@ -330,6 +379,31 @@ class VStimTD01System(StimulusSystem):
                 f"{report['n_trials']} trials, shift {report['shift_s']:+.2f} s from the day's clock offset "
                 f"{offset:.1f} s, trigger-line outcome agrees in {report['outcome_agreement']})"), tdr
 
+    @staticmethod
+    def _match_starts(run: Run, records: list, tdr: dict[int, Any], fs: float,
+                      first_pulse: Any) -> tuple[str, dict[int, Any]]:
+        """Trial numbers of a run without trial descriptors: its trial-start pulses matched to the ``.tdr`` stamps
+        by time (run start = recording PC's wall clock, within ±30 s of the VStim PC's). Starts without a
+        ``.tdr`` trial get number -1. Returns (description, .tdr trials; empty if not matched)."""
+        if not tdr or run.start_time is None:
+            logger.warning("Run %s: no trial descriptors and no .tdr; trials without .tdr parameters", run.name)
+            return "no trial descriptors, no .tdr", {}
+        t0 = _seconds_of_day(run.start_time)
+        pc_s = t0 + np.array([r[0] for r in records], float) / fs
+        required = stamps_in_window(tdr, float(pc_s.min()) - 1, float(pc_s.max()) + 1) if len(pc_s) else 0
+        outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
+        try:
+            numbers, report = match_by_time(pc_s, tdr, outcomes, required=required)
+        except ValueError as error:
+            logger.warning("Run %s: no trial descriptors; %s", run.name, error)
+            return f"no trial descriptors, not matched to the .tdr: {error}", {}
+        records[:] = [(start, sample, number if number is not None else -1, stimulus)
+                      for (start, sample, _, stimulus), number in zip(records, numbers)]
+        logger.info("Run %s: no trial descriptors, trial starts matched to the .tdr by time: %s", run.name, report)
+        return (f"trial-start pulses matched to the .tdr by time ({report['n_matched']} of {report['n_trials']} starts, "
+                f"{required} .tdr trials in the run, shift {report['shift_s']:+.2f} s, trigger-line outcome agrees "
+                f"in {report['outcome_agreement']})"), tdr
+
     def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
         """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephysalis.legacy.pcclock`)."""
         from datetime import datetime, timedelta
@@ -349,6 +423,7 @@ class VStimTD01System(StimulusSystem):
     def load_trials(self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None) -> pd.DataFrame:
         descriptors = _descriptors(run)
         assert descriptors is not None
+        no_descriptors = not len(descriptors)
         roles = aux.channels.digital if aux is not None else {}
         needed = {roles.get("trial_start", 0) + 1} | {bit + 1 for role, bit in roles.items()
                                                      if role == "trial_end" or role in OUTCOME_ROLES}
@@ -360,7 +435,8 @@ class VStimTD01System(StimulusSystem):
                                 for s in _rising(ttl, roles[role]))
         pulse_samples = np.array([s for s, _ in outcome_pulses], dtype=np.int64)
         tdr = _tdr_trials(str(paradigm.path)) if paradigm.path is not None else {}
-        records = _records(run, descriptors, starts)
+        records = ([(int(s), int(s), -1, -1) for s in starts] if no_descriptors
+                   else _records(run, descriptors, starts))
         if len(records) < len(descriptors):
             logger.warning("Run %s: %d TD01 records without a trial start edge before them dropped",
                            run.name, len(descriptors) - len(records))
@@ -371,7 +447,13 @@ class VStimTD01System(StimulusSystem):
             return outcome_pulses[pulse] if pulse < len(outcome_pulses) and pulse_samples[pulse] < following else None
 
         number_source = "TD01"
-        if frozen(descriptors):
+        if no_descriptors:
+            number_source, tdr = self._match_starts(run, records, tdr, fs, first_pulse)
+            records = [r for r in records if r[2] >= 0 or not tdr]  # starts without a .tdr trial: VStim restarts
+            if tdr:
+                records = [(start, sample, number, int(tdr[number].stimulusNumber))
+                           for start, sample, number, _ in records]
+        elif frozen(descriptors):
             number_source, tdr = self._match_frozen(run, records, tdr, roles, fs, first_pulse)
             if tdr:
                 records = [(start, sample, number, int(tdr[number].stimulusNumber) if number in tdr else stimulus)

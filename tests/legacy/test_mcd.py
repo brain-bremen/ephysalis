@@ -12,7 +12,8 @@ import pytest
 
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
-from ephysalis.legacy.mcd import EPOCH, McdRecordingExtractor, group_files, parse_streams, read_index, scan_file
+from ephysalis.legacy.mcd import (EPOCH, McdRecordingExtractor, group_files, local_time, parse_streams, read_index,
+                                  scan_file)
 from ephysalis.session import StreamKind
 
 PER_BLOCK = 2500  # 100 ms at 25 kHz
@@ -105,7 +106,8 @@ def test_mcd_reader(tmp_path):
     s = open_session(session)
     assert s.format.name == "mcd" and len(s.runs) == 1
     run = s.runs[0]
-    assert run.aux_stream == "digi0001" and run.streams == ["digi0001", "elec0001"] and run.start_time == start
+    assert run.aux_stream == "digi0001" and run.streams == ["digi0001", "elec0001"]
+    assert run.start_time == local_time(start)  # block times are UTC, runs start on the local wall clock
     rec = McdRecordingExtractor([str(session / "20111219_dotmap.mcd")], "elec0001")
     np.testing.assert_array_equal(rec.get_traces(start_frame=1234, end_frame=7777), elec[1234:7777])
     assert list(rec.channel_ids) == ["01A", "02A", "03A", "04A"]

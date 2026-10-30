@@ -50,6 +50,15 @@ logger = logging.getLogger(__name__)
 
 MAGIC = b"MCSSTRM "
 EPOCH = datetime(1601, 1, 1)
+LOCAL_ZONE = "Europe/Berlin"  # the block times are UTC; the lab's PCs (and VStim's .tdr) ran on local time
+
+
+def local_time(utc: datetime) -> datetime:
+    """A naive UTC time (block times) as naive local time of the lab (Bremen)."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    return utc.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(LOCAL_ZONE)).replace(tzinfo=None)
 CHANNEL_RECORDS = 804  # STRMHDR: start of the channel records
 DATA_STREAMS = ("elec", "anlg", "filt", "chtl", "digi")  # streams with samples
 TRIGGER_EVENT_BYTES = (10, 14, 22)  # time + value (+ number, reserved) (+ trial, stimulus)
@@ -145,6 +154,7 @@ class McdIndex:
 
     @property
     def start(self) -> datetime:
+        """Start of the first block, UTC (naive); :func:`local_time` gives the recording PC's wall clock."""
         return EPOCH + timedelta(microseconds=int(self.group_times[0]) // 1000)
 
     @property
@@ -387,49 +397,81 @@ def _memmap(path: str) -> np.memmap:
     return np.memmap(path, dtype=np.uint8, mode="r")
 
 
+COMBINED = "+"  # a combined stream: tags joined by "+", e.g. "elec0001+elec0002" (same clock and block groups)
+
+
+def combined_electrode_stream(streams: list[McdStream]) -> str | None:
+    """Tag of the combined stream of all electrode streams (``elec*``) if there are several with the same rate
+    and block size: an array split over the USB-ME's amplifier blocks (e.g. Botox's 128 channels on elec0001 and
+    elec0002) can then be one probe."""
+    elec = [s for s in streams if s.kind == "elec"]
+    if len(elec) < 2 or len({(s.sampling_frequency, s.samples_per_block) for s in elec}) != 1:
+        return None
+    if len({c for s in elec for c in s.channel_ids}) != sum(len(s.channel_ids) for s in elec):
+        return None  # channel ids must stay unique
+    return COMBINED.join(s.tag for s in elec)
+
+
+def _stream_parts(streams: list[McdStream], tag: str) -> list[McdStream]:
+    by_tag = {s.tag: s for s in streams}
+    return [by_tag[t] for t in tag.split(COMBINED)]
+
+
 class McdRecordingSegment(BaseRecordingSegment):
     def __init__(self, paths: list[str], tag: str, sampling_frequency: float):
         BaseRecordingSegment.__init__(self, sampling_frequency=sampling_frequency)
         indexes = [read_index(p) for p in paths]
-        stream = next(s for s in indexes[0].streams if s.tag == tag)
+        parts = _stream_parts(indexes[0].streams, tag)
         self._paths, self._tag = paths, tag
-        self._n_channels, self._per_block = len(stream.channel_ids), stream.samples_per_block
-        self._digital, self._ad_zero = stream.is_digital, stream.ad_zero
-        self._file = np.concatenate([np.full(len(ix.offsets[tag]), k, np.int32) for k, ix in enumerate(indexes)])
-        self._offsets = np.concatenate([ix.offsets[tag] for ix in indexes])
+        self._per_block = parts[0].samples_per_block
+        self._digital = parts[0].is_digital
+        self._parts = [(p.tag, len(p.channel_ids), p.ad_zero) for p in parts]
+        self._file = np.concatenate([np.full(len(ix.offsets[parts[0].tag]), k, np.int32)
+                                     for k, ix in enumerate(indexes)])
+        self._offsets = {p.tag: np.concatenate([ix.offsets[p.tag] for ix in indexes]) for p in parts}
 
     def get_num_samples(self) -> int:
-        return int(len(self._offsets) * self._per_block)
+        return int(min(len(v) for v in self._offsets.values()) * self._per_block)
+
+    def _read_part(self, tag: str, n_channels: int, first: int, last: int) -> np.ndarray:
+        values = self._per_block * n_channels
+        offsets = self._offsets[tag]
+        blocks = [np.frombuffer(_memmap(self._paths[self._file[b]]), "<u2", values, int(offsets[b]))
+                  for b in range(first, last + 1)]
+        return (np.concatenate(blocks) if blocks else np.zeros(0, "<u2")).reshape(-1, n_channels)
 
     def get_traces(self, start_frame=None, end_frame=None, channel_indices=None):
         start = 0 if start_frame is None else int(start_frame)
         end = self.get_num_samples() if end_frame is None else int(end_frame)
         first, last = start // self._per_block, (max(end, start + 1) - 1) // self._per_block
-        values = self._per_block * self._n_channels
-        blocks = [np.frombuffer(_memmap(self._paths[self._file[b]]), "<u2", values, int(self._offsets[b]))
-                  for b in range(first, last + 1)] if end > start else []
-        raw = (np.concatenate(blocks) if blocks else np.zeros(0, "<u2")).reshape(-1, self._n_channels)
+        if end <= start:
+            last = first - 1
+        parts = [(self._read_part(tag, n, first, last).astype(np.int32) - zero) for tag, n, zero in self._parts]
+        raw = parts[0] if len(parts) == 1 else np.hstack(parts)
         raw = raw[start - first * self._per_block: end - first * self._per_block]
         if channel_indices is not None:
             raw = raw[:, channel_indices]
         if self._digital:
-            return raw.astype(np.uint16)
-        return (raw.astype(np.int32) - self._ad_zero).astype(np.int16)
+            return (raw + self._parts[0][2]).astype(np.uint16)
+        return raw.astype(np.int16)
 
 
 class McdRecordingExtractor(BaseRecording):
-    """One stream of a run (its chain of files): int16 counts (sample - AD zero) with the
-    resolution as gain (µV per count); the digital stream as uint16 words (gain 1)."""
+    """One stream of a run (its chain of files), or several electrode streams side by side (tags joined by
+    "+"): int16 counts (sample - AD zero) with the resolution as gain (µV per count); the digital stream as
+    uint16 words (gain 1)."""
 
     def __init__(self, paths: list[str], tag: str):
-        stream = next(s for s in read_index(paths[0]).streams if s.tag == tag)
-        dtype = np.dtype("uint16") if stream.is_digital else np.dtype("int16")
-        BaseRecording.__init__(self, stream.sampling_frequency, list(stream.channel_ids), dtype)
-        self.add_recording_segment(McdRecordingSegment(paths, tag, stream.sampling_frequency))
-        scale = {"V": 1e6, "": 1.0}.get(stream.unit, 1e6)
-        self.set_channel_gains(1.0 if stream.is_digital else stream.resolution * scale)
+        parts = _stream_parts(read_index(paths[0]).streams, tag)
+        digital = parts[0].is_digital
+        dtype = np.dtype("uint16") if digital else np.dtype("int16")
+        BaseRecording.__init__(self, parts[0].sampling_frequency, [c for p in parts for c in p.channel_ids], dtype)
+        self.add_recording_segment(McdRecordingSegment(paths, tag, parts[0].sampling_frequency))
+        gains = [1.0 if digital else p.resolution * {"V": 1e6, "": 1.0}.get(p.unit, 1e6)
+                 for p in parts for _ in p.channel_ids]
+        self.set_channel_gains(gains)
         self.set_channel_offsets(0.0)
-        self.set_property("hwid", np.array(stream.hwids, dtype=np.int64))
+        self.set_property("hwid", np.array([h for p in parts for h in p.hwids], dtype=np.int64))
         self._kwargs = {"paths": list(paths), "tag": tag}
 
 
@@ -500,10 +542,12 @@ class McdFormat(InputFormat):
             aux = next((s.tag for s in data if s.is_digital), None) or next((s.tag for s in data if s.kind == "anlg"), None)
             main = next(s for s in data if s.tag == (aux or data[0].tag)) if data else None
             n_blocks = sum(len(ix.group_times) for ix in indexes)
+            combined = combined_electrode_stream(data)
             runs.append(Run(
-                name=files[0].stem, path=session_path, index=len(runs), format=self, start_time=indexes[0].start,
+                name=files[0].stem, path=session_path, index=len(runs), format=self,
+                start_time=local_time(indexes[0].start),
                 duration_s=n_blocks * (main.samples_per_block / main.sampling_frequency) if main else None,
-                aux_stream=aux, streams=[s.tag for s in data],
+                aux_stream=aux, streams=[s.tag for s in data] + ([combined] if combined else []),
                 extra={"files": [str(p) for p in files], "mcs_version": list(indexes[0].version),
                        "stream_types": {s.tag: s.type_name for s in streams},
                        "truncated": [str(p) for p, ix in zip(files, indexes) if ix.truncated]},
@@ -540,17 +584,25 @@ class McdFormat(InputFormat):
         tag = self._analog_stream(run)
         return _extractor(tuple(run.extra["files"]), tag) if tag else self.get_recording(run, StreamKind.AUX)
 
-    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
+    def _analog_input(self, run: Run, index: int) -> tuple[str, int]:
+        """(stream tag, column) of an analog role: column ``index`` of the ``anlg`` stream; without an ``anlg``
+        stream (e.g. Botox 2010: eye position on electrode inputs 252-254) the electrode channel with hardware
+        id ``index``."""
         tag = self._analog_stream(run)
-        if tag is None:
-            raise KeyError(f"Run {run.name} has no analog inputs")
-        return _extractor(tuple(run.extra["files"]), tag).get_traces(channel_ids=None)[:, index]
+        if tag is not None:
+            return tag, index
+        for t, s in self._streams(run).items():
+            if s.kind == "elec" and index in s.hwids:
+                return t, s.hwids.index(index)
+        raise KeyError(f"Run {run.name} has no analog inputs and no electrode channel with hardware id {index}")
+
+    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
+        tag, column = self._analog_input(run, index)
+        return _extractor(tuple(run.extra["files"]), tag).get_traces(channel_ids=None)[:, column]
 
     def aux_analog_gain_v(self, run: Run, index: int) -> float:
-        tag = self._analog_stream(run)
-        if tag is None:
-            raise KeyError(f"Run {run.name} has no analog inputs")
-        return float(_extractor(tuple(run.extra["files"]), tag).get_channel_gains()[index]) * 1e-6
+        tag, column = self._analog_input(run, index)
+        return float(_extractor(tuple(run.extra["files"]), tag).get_channel_gains()[column]) * 1e-6
 
     def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
         """All streams of a USB-ME device share its clock; the block times place the files of a run."""
@@ -567,7 +619,7 @@ class McdFormat(InputFormat):
         by_tag = self._streams(run)
         maps = {}
         for key, tag in streams.items():
-            stream = by_tag[tag]
+            stream = by_tag[tag.split(COMBINED)[0]]  # a combined stream: its parts share rate and block size
             samples = np.arange(len(times)) * stream.samples_per_block
             maps[key] = ClockMap(samples.astype(float), times / 1e9, stream.sampling_frequency,
                                  rate=stream.sampling_frequency)
