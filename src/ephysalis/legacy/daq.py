@@ -555,6 +555,13 @@ def board_fit(events: np.ndarray, tolerance_ns: float = 20e6, rate0: float = 1.0
     then match every edge to its nearest copy and refit (6 times)."""
     events = np.asarray(events, dtype=float)
     lines = np.abs(events[:, 1]) if len(events) else np.zeros(0)
+    # lines whose edges follow faster than 5 x the tolerance (e.g. a frame trigger, 10 ms) would be matched to a
+    # neighbouring pulse's copy and pull the fit by whole pulse periods (Fritz 2009: 100 Hz frame line 10/26)
+    fast = [line for line in np.unique(lines[(lines >= 1) & (lines <= COPY_OFFSET)])
+            if np.median(np.diff(np.sort(events[events[:, 1] == line, 0]))) < 5 * tolerance_ns]
+    if fast:
+        keep = ~np.isin(lines, fast) & ~np.isin(lines, np.asarray(fast) + COPY_OFFSET)
+        events, lines = events[keep], lines[keep]
     own = events[(lines >= 1) & (lines <= COPY_OFFSET)]
     copied = events[(lines > COPY_OFFSET) & (lines <= 2 * COPY_OFFSET)]
     original_line = (np.sign(copied[:, 1]) * (np.abs(copied[:, 1]) - COPY_OFFSET)).astype(int)

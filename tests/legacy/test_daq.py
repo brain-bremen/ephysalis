@@ -211,6 +211,23 @@ def test_board_fit_without_copies():
     assert board_fit(np.array([[0, 1], [10, -1]])) is None
 
 
+def test_board_fit_ignores_frame_line():
+    """A 100 Hz frame line (10 ms pulses) and its copy must not pull the fit (Fritz 2009: line 10/26)."""
+    rate, offset = 1.0038, -78.7e6
+    trials = np.arange(1e9, 600e9, 3.1e9)  # trial line 1, every 3.1 s
+    frames = np.arange(0.5e9, 600e9, 10e6)  # frame line 10, every 10 ms
+    rows = []
+    for line, times, width in ((1, trials, 2.5e9), (10, frames, 1e6)):
+        for t in times:
+            rows += [[t, line], [t + width, -line]]
+            c = offset + rate * t
+            rows += [[c, line + 16], [c + rate * width, -(line + 16)]]
+    events = np.array(sorted(rows))
+    fit = board_fit(events)
+    assert fit is not None and fit["n_edges"] == 2 * len(trials)
+    assert fit["rate"] == pytest.approx(rate, abs=1e-9) and fit["offset_ns"] == pytest.approx(offset, abs=1e3)
+
+
 def test_recording_is_serializable(tmp_path):
     from spikeinterface.core import load
 
