@@ -211,7 +211,7 @@ All streams of a USB-ME share its sample clock. The block times place the blocks
 of a run. Channel offsets within a block are the sample index divided by the stream's rate.
 
 The block times are UTC, not the local time of the recording PC. On 2010-12-07 (CET) trial 87 of
-Iris's recording starts at 15:09:00 by the block times and at 16:08:44 in VStim's `.tdr` (local
+A 2010-12-07 recording starts at 15:09:00 by the block times and at 16:08:44 in VStim's `.tdr` (local
 time); the trial-pulse sequences of the recordings and their `.tdr` files match at offsets of
 1 h (winter) and 2 h (summer) plus a few seconds of clock difference. Convert to local time
 (Europe/Berlin) before comparing with VStim.
