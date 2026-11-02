@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import mmap
 import os
 import re
 import struct
@@ -392,11 +393,6 @@ def group_files(paths: list[Path]) -> list[list[Path]]:
 # --- recordings ----------------------------------------------------------------------------
 
 
-@cache
-def _memmap(path: str) -> np.memmap:
-    return np.memmap(path, dtype=np.uint8, mode="r")
-
-
 COMBINED = "+"  # a combined stream: tags joined by "+", e.g. "elec0001+elec0002" (same clock and block groups)
 
 
@@ -434,11 +430,21 @@ class McdRecordingSegment(BaseRecordingSegment):
         return int(min(len(v) for v in self._offsets.values()) * self._per_block)
 
     def _read_part(self, tag: str, n_channels: int, first: int, last: int) -> np.ndarray:
+        """Blocks first..last of a stream, copied from a memory map of each file that is closed again: only the
+        pages of these blocks are read (the streams are interleaved block by block), and they leave the
+        process's working set afterwards (a map kept open keeps every page read, GBs over a run)."""
         values = self._per_block * n_channels
         offsets = self._offsets[tag]
-        blocks = [np.frombuffer(_memmap(self._paths[self._file[b]]), "<u2", values, int(offsets[b]))
-                  for b in range(first, last + 1)]
-        return (np.concatenate(blocks) if blocks else np.zeros(0, "<u2")).reshape(-1, n_channels)
+        out = np.empty(max(last - first + 1, 0) * values, "<u2")
+        b = first
+        while b <= last:
+            k = self._file[b]
+            with open(self._paths[k], "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                while b <= last and self._file[b] == k:
+                    i = (b - first) * values
+                    out[i: i + values] = np.frombuffer(m, "<u2", values, int(offsets[b]))
+                    b += 1
+        return out.reshape(-1, n_channels)
 
     def get_traces(self, start_frame=None, end_frame=None, channel_indices=None):
         start = 0 if start_frame is None else int(start_frame)
