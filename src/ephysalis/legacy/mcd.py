@@ -339,8 +339,29 @@ def _walk(file, streams: list[McdStream], start: int, file_size: int) -> McdInde
 
 
 @cache
-def mcd_index(path: str, size: int, mtime_ns: int) -> McdIndex:  # noqa: ARG001 (size, mtime: cache key)
-    return scan_file(path)
+def mcd_index(path: str, size: int, mtime_ns: int) -> McdIndex:
+    """Index of a file, cached in memory and on disk (``cache_dir()/mcd-index``): files without
+    ``IDXIDX`` are walked chunk by chunk, minutes per file on a network share, and every pipeline
+    step is a process of its own."""
+    import pickle
+
+    from ephysalis.legacy.daq import cache_dir
+
+    key = f"{Path(path).resolve()}|{size}|{mtime_ns}|{_CACHE_VERSION}"
+    cached = cache_dir() / "mcd-index" / f"{Path(path).stem}-{hashlib.sha256(key.encode()).hexdigest()[:16]}.pkl"
+    if cached.exists():
+        try:
+            with open(cached, "rb") as f:
+                return pickle.load(f)
+        except Exception:  # noqa: BLE001 (a damaged cache file is rebuilt)
+            logger.warning("rebuilding damaged index cache %s", cached)
+    index = scan_file(path)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    temporary = cached.with_suffix(f".{os.getpid()}.tmp")
+    with open(temporary, "wb") as f:
+        pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
+    temporary.replace(cached)
+    return index
 
 
 def read_index(path: str | Path) -> McdIndex:

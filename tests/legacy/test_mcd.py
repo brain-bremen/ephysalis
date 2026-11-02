@@ -193,3 +193,18 @@ def test_header_parsing():
     assert (stream.tag, stream.type_name, stream.sampling_frequency, stream.channel_ids, stream.hwids) == \
         ("filt0001", "filter", 1000.0, ["16A", "15A"], [15, 14])
     assert (stream.unit, stream.ad_zero, stream.resolution, stream.samples_per_block) == ("V", 0x8000, RESOLUTION, 100)
+
+
+def test_index_cached_on_disk(tmp_path, monkeypatch):
+    """The index of a file is kept on disk for later processes (the walk is slow on a network share)."""
+    from ephysalis.legacy import mcd
+
+    monkeypatch.setenv("EPHYSALIS_CACHE_DIR", str(tmp_path / "cache"))
+    path = tmp_path / "20101110_task.mcd"
+    write_mcd(path, datetime(2010, 11, 10, 10, 0, 0), *_signals(5000))
+    first = mcd.read_index(path)
+    assert len(list((tmp_path / "cache" / "mcd-index").glob("*.pkl"))) == 1
+    mcd.mcd_index.cache_clear()
+    monkeypatch.setattr(mcd, "scan_file", lambda p: pytest.fail("index read again"))
+    again = mcd.read_index(path)
+    assert again.start == first.start and (again.offsets["elec0001"] == first.offsets["elec0001"]).all()
