@@ -51,6 +51,12 @@ class InputFormat(ABC):
 
         return AuxChannelMap.legacy_default(8)
 
+    def stream_channel_ids(self, run: Run, stream: str) -> list[str] | None:
+        """Channel ids recorded in ``stream`` of ``run`` from the metadata (no samples read), or
+        ``None`` if the format cannot tell cheaply. ``configure_probes`` leaves a probe out of the
+        runs that lack some of its channels (e.g. electrodes connected only in some runs)."""
+        return None
+
     # Sync and auxiliary channels. Optional: formats without them can't be synchronised.
 
     def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:

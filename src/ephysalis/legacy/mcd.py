@@ -579,6 +579,13 @@ class McdFormat(InputFormat):
             raise KeyError(f"Run {run.name} has no auxiliary stream")
         return _extractor(tuple(run.extra["files"]), tag)
 
+    def stream_channel_ids(self, run: Run, stream: str) -> list[str] | None:
+        streams = self._streams(run)
+        tags = stream.split(COMBINED)
+        if not all(t in streams for t in tags):
+            return None
+        return [c for t in tags for c in streams[t].channel_ids]
+
     def _streams(self, run: Run) -> dict[str, McdStream]:
         return {s.tag: s for s in read_index(run.extra["files"][0]).streams}
 

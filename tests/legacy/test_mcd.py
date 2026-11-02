@@ -162,6 +162,27 @@ def test_split_recording_and_pipeline(tmp_path):
         assert f["TRIALMAP"]["TrialNo"].tolist() == [7, 8]
 
 
+def test_probe_left_out_of_runs_without_its_channels(tmp_path, caplog):
+    """A probe whose channels a run does not record (electrodes connected only in some runs) is
+    not added to that run; the other runs keep it."""
+    from ephysalis.io.probes import configure_probes
+    from ephysalis.session_config import load_session_config
+
+    session = tmp_path / "20101110"
+    session.mkdir()
+    write_mcd(session / "20101110_dotmap.mcd", datetime(2010, 11, 10, 10, 0, 0), *_signals(2500, n_channels=2))
+    write_mcd(session / "20101110_task.mcd", datetime(2010, 11, 10, 11, 0, 0), *_signals(2500, n_channels=4))
+    (tmp_path / "session.toml").write_text(
+        'schema_version = 7\nsession_id = "20101110"\nsubject_id = "iris"\n'
+        '[probes.v4]\nstream = "elec0001"\nchannels = ["01A", "03A"]\nreference_channels = ["02A"]\n')
+    s = configure_probes(open_session(session), load_session_config(tmp_path / "session.toml"))
+    dotmap, task = s.runs
+    assert dotmap.format.stream_channel_ids(dotmap, "elec0001") == ["01A", "02A"]
+    assert "v4" not in dotmap.probes and "v4" in task.probes
+    assert "channels ['03A'] not recorded" in caplog.text
+    assert task.get_recording(StreamKind.AP, "v4").get_num_channels() == 2
+
+
 def test_header_parsing():
     header = (_chunk(b"MCSHDR", struct.pack("<6H", 10, 0, 0, 4, 0, 0).ljust(64, b"\0"))
               + _chunk(b"STRMHDR", _stream_header("filter", "filt0001", 1000.0, [(0, 15, "16A"), (1, 14, "15A")], 1112))

@@ -50,7 +50,9 @@ def _match_stream(names: list[str], wanted: str) -> str | None:
 
 
 def configure_probes(session: Session, config: SessionConfig | None, config_dir: Path | None = None) -> Session:
-    """Add the probes defined in ``config`` (``stream`` set) to every run that has the stream."""
+    """Add the probes defined in ``config`` (``stream`` set) to every run that has the stream and,
+    when the format can tell (:meth:`InputFormat.stream_channel_ids`), records all of the probe's
+    channels and reference channels; other runs get no such probe (a warning)."""
     if config is None:
         return session
     for probe_id, probe_config in config.probes.items():
@@ -63,6 +65,12 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
         for run in session.runs:
             stream = _match_stream(run.streams, probe_config.stream)
             if stream is None:
+                continue
+            wanted = [*(probe_config.channels or []), *(probe_config.reference_channels or [])]
+            recorded = run.format.stream_channel_ids(run, stream) if wanted and run.format is not None else None
+            if recorded is not None and (missing := [c for c in wanted if c not in set(recorded)]):
+                logger.warning("probe %s left out of run %s: channels %s not recorded in stream %s",
+                               probe_id, run.name, missing, stream)
                 continue
             found = True
             run.probes[probe_id] = ProbeInfo(
