@@ -11,7 +11,9 @@ embeds it as JSON in the output file:
 
 - NWB: ``scratch/ephysalis_processing`` (text dataset)
 - DH5: attribute ``Processing`` of the ``/Operations/nnn_ephysalis_export`` group (the DH5
-  specification keeps information about an operation in its group's attributes)
+  specification keeps information about an operation in its group's attributes); before it, one
+  ``/Operations/nnn_ephysalis_<step>`` group per step invocation, in the order they ran, with the
+  command, options and parameters as readable attributes (:func:`step_operations`)
 
 :func:`read_processing_record` reads it back, :func:`record_config` returns the
 ``session.toml`` of a step as a :class:`SessionConfig`, :func:`replay_commands` the commands
@@ -42,6 +44,8 @@ RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
 # steps in pipeline order, as replayed by ``ephysalis reproduce``
 REPLAY_STEPS = ("sync", "timing", "lfp", "mua", "sort", "export")
+# all steps in pipeline order: orders step invocations recorded within the same second
+STEP_ORDER = ("sync", "timing", "calibrate", "lfp", "quality", "csd", "mua", "sort", "export")
 # options not replayed: outputs and caches outside the work dir
 _NOT_REPLAYED = {"output", "bids", "existing", "cache_dir", "subject", "session_label", "dataset_name"}
 NWB_SCRATCH_NAME = "ephysalis_processing"
@@ -174,6 +178,32 @@ def processing_record(work_dir: Path, export: dict[str, Any]) -> dict[str, Any]:
         "steps": step_records(work_dir),
         "sorting": sorting,
     }
+
+
+def step_operations(processing: dict[str, Any],
+                    details: dict[str, dict[str, str]] | None = None) -> list[tuple[str, datetime, dict[str, str]]]:
+    """DH5 operations of the steps in a processing record (:func:`processing_record`): one
+    ``(name, date, attributes)`` per step invocation in the order they ran, without the export
+    (the file's own operation). Attributes: ``Tool`` (ephysalis version of that invocation),
+    ``Command``, ``Options`` (JSON), ``Config file`` and, per step, ``details[step]`` (e.g. the
+    filter description of the LFP)."""
+    invocations = [r for step, records in processing.get("steps", {}).items() if step != "export" for r in records]
+    operations = []
+    def order(record: dict[str, Any]) -> tuple[str, int]:
+        step = record["step"]
+        return record.get("time") or "", STEP_ORDER.index(step) if step in STEP_ORDER else len(STEP_ORDER)
+
+    for record in sorted(invocations, key=order):
+        step = record["step"]
+        date = datetime.fromisoformat(record["time"]).astimezone().replace(tzinfo=None) if record.get("time") \
+            else datetime.now()
+        attrs = {"Tool": f"ephysalis {(record.get('software') or {}).get('ephysalis', '')}".strip(),
+                 "Command": " ".join(record.get("argv") or []),
+                 "Options": json.dumps(record.get("options") or {}, sort_keys=True, default=str),
+                 "Config file": record.get("config_file") or ""}
+        attrs.update((details or {}).get(step, {}))
+        operations.append((f"ephysalis_{step}", date, attrs))
+    return operations
 
 
 def read_processing_record(path: str | Path) -> dict[str, Any] | None:

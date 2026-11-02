@@ -65,6 +65,25 @@ def test_record_in_output(processed, fmt):
     assert not any(p.startswith(work.name) for p in export["inputs"])  # work dir is not an input
 
 
+@pytest.mark.skipif("dh5" not in FORMATS, reason="dh5io without SPIKE writing")
+def test_dh5_step_operations(processed):
+    """One readable DH5 operation per step, in the order they ran, before the export."""
+    import h5py
+
+    from ephysalis.lfp import LFP_FILTERING
+
+    _, _, files = processed
+    with h5py.File(files["dh5"], "r") as f:
+        ops = f["Operations"]
+        names = sorted(ops)
+        assert [n[4:] for n in names] == ["create_file", "ephysalis_timing", "ephysalis_lfp", "ephysalis_export"]
+        lfp = ops[names[2]].attrs
+        assert lfp["Tool"].decode().startswith("ephysalis") and "Date" in lfp
+        assert lfp["Command"].decode().startswith("ephysalis lfp")
+        assert json.loads(lfp["Options"])["rate"] == 500
+        assert lfp["Filtering"].decode() == LFP_FILTERING
+
+
 def test_compare():
     env = environment()
     assert env["packages"]["numpy"] == np.__version__

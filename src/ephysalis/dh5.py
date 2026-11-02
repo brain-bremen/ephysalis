@@ -30,7 +30,9 @@ DH5                    content
 ``/Intervals``         ``<role>``: the pulses of each trigger line with a role, ``run_<name>``: the
                        runs (:mod:`ephysalis.annotations`); ``Source`` attribute = description
 ``/Markers``           ``trial_start`` and the ``[[events.markers]]`` of ``session.toml``
-``Operations``         ``nnn_ephysalis_export`` with the processing record (JSON) in its
+``Operations``         ``nnn_ephysalis_<step>`` per step invocation in the order they ran
+                       (command, options, parameters: :func:`step_operation_details`), then
+                       ``nnn_ephysalis_export`` with the processing record (JSON) in its
                        ``Processing`` attribute (:mod:`ephysalis.provenance`)
 =====================  =========================================================================
 
@@ -556,6 +558,27 @@ def sidecar_paths(path: Path) -> dict[str, Path]:
     return {kind: path.with_name(f"{path.stem}_{kind}.csv") for kind in ("trials", "units")}
 
 
+def step_operation_details(processing: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Parameters of each step for its DH5 operation (:func:`ephysalis.provenance.step_operations`):
+    the filters of LFP and MUA, the CSD and channel-quality settings of the probes (from the
+    step's ``session.toml``), the sorter and its parameters per probe."""
+    from ephysalis.lfp import LFP_FILTERING
+    from ephysalis.mua import MUA_FILTERING
+
+    def probe_settings(step: str, key: str) -> str:
+        records = processing.get("steps", {}).get(step) or [{}]
+        probes = ((records[-1].get("config") or {}).get("probes") or {})
+        return json.dumps({p: c[key] for p, c in sorted(probes.items()) if c.get(key)}, sort_keys=True)
+
+    return {
+        "lfp": {"Filtering": LFP_FILTERING},
+        "mua": {"Filtering": MUA_FILTERING},
+        "csd": {"CSD parameters": probe_settings("csd", "csd")},
+        "quality": {"Quality parameters": probe_settings("quality", "quality")},
+        "sort": {"Sorting": json.dumps(processing.get("sorting") or {}, sort_keys=True, default=str)},
+    }
+
+
 def write_session_dh5(
     session: Session,
     work_dir: Path,
@@ -581,7 +604,9 @@ def write_session_dh5(
     from dh5io.create import create_dh_file
     from dh5io.validation import validate_dh5_file
 
-    from ephysalis.provenance import DH5_ATTRIBUTE_NAME, DH5_OPERATION_NAME
+    from dh5io.hdf5_strings import write_str_attr
+
+    from ephysalis.provenance import DH5_ATTRIBUTE_NAME, DH5_OPERATION_NAME, step_operations
     from ephysalis.version import get_version_from_pyproject
 
     runs, offsets, session_start = time_axis(session, config, run_clock)
@@ -602,6 +627,12 @@ def write_session_dh5(
         if not trials.empty:
             _write_trialmap(file, trials)
         _write_annotations(file, work_dir, runs, offsets, config, trials)
+        if processing is not None:
+            for name, date, attrs in step_operations(processing, step_operation_details(processing)):
+                dh5io.operations.add_operation_to_file(file, name, tool=attrs.pop("Tool"), date=date)
+                operation = file["Operations"][sorted(file["Operations"])[-1]]
+                for key, value in attrs.items():
+                    write_str_attr(operation, key, value.encode("ascii", "backslashreplace").decode("ascii"))
         dh5io.operations.add_operation_to_file(file, DH5_OPERATION_NAME, tool=f"ephysalis {get_version_from_pyproject()}",
                                                date=datetime.now())
         if processing is not None:
