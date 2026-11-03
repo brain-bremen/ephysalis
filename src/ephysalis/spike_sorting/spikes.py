@@ -51,6 +51,7 @@ DEFAULT_SORTER_PARAMS: dict[str, dict[str, Any]] = {
     "kilosort4": {"clear_cache": True},  # lower GPU memory peaks (small GPUs)
 }
 ANALYZER_BAND_HZ = (300.0, 6000.0)  # band-pass of the recording the waveforms are taken from
+SPIKE_SORTER_SEED = 0  # for the sorter's unset seed parameters (adapt_sorter_params)
 ANALYZER_SEED = 0  # fixed seeds: the same spikes and noise chunks every time (reproducible waveforms)
 ANALYZER_EXTENSIONS: dict[str, dict] = {
     "random_spikes": {"max_spikes_per_unit": 500, "seed": ANALYZER_SEED},
@@ -72,6 +73,17 @@ class RunSegment:
     num_samples: int
 
 
+def _unset_seed_parameters(sorter: str) -> list[str]:
+    """Parameters of a spikeinterface sorter whose name contains ``seed`` and whose default is ``None``."""
+    try:
+        from spikeinterface.sorters import get_default_sorter_params
+
+        defaults = get_default_sorter_params(sorter)
+    except Exception:  # noqa: BLE001 (an unknown sorter fails later, in run_sorter, with its own message)
+        return []
+    return sorted(name for name, value in defaults.items() if "seed" in name and value is None)
+
+
 def sorter_settings(
     config: RecordingSessionConfig | None, probe_id: str, sorter: str | None = None, params: dict[str, Any] | None = None
 ) -> tuple[str, dict[str, Any]]:
@@ -90,8 +102,14 @@ def sorter_settings(
 
 
 def adapt_sorter_params(sorter: str, params: dict[str, Any], num_channels: int) -> dict[str, Any]:
-    """Limit channel neighbourhoods to the number of channels (probes with few channels)."""
+    """Limit channel neighbourhoods to the number of channels (probes with few channels), and set every seed
+    parameter of the sorter that is unset (``None``: new randomness each run, e.g. MountainSort5's
+    ``whitening_seed``) to :data:`SPIKE_SORTER_SEED`, so that a spike sorting is reproducible."""
     params = dict(params)
+    for seed_parameter in _unset_seed_parameters(sorter):
+        params.setdefault(seed_parameter, SPIKE_SORTER_SEED)
+        if params[seed_parameter] is None:
+            params[seed_parameter] = SPIKE_SORTER_SEED
     if sorter == "kilosort4":
         for key, default in (("nearest_chans", 10), ("nearest_templates", 100)):
             if params.get(key, default) > num_channels:

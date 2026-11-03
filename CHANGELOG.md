@@ -91,6 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Spike sorting is reproducible**: unset seed parameters of the sorter (MountainSort5's `whitening_seed`, whose default `None` gave different units on every run of the same data) are set to `SPIKE_SORTER_SEED`
+
 - DH5 CONT blocks at 30 kHz got one INDEX region for the whole recording although 33333 ns is not 1/30 kHz (about 36 ms error per hour); new regions are added before the error reaches 0.1 sample
 - SortingAnalyzer waveforms and noise levels used unseeded random spikes and chunks; now seeded (`sorting.ANALYZER_SEED`)
 

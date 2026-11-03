@@ -82,4 +82,13 @@ def test_kilosort_neighbourhoods_limited_to_channel_count():
     assert adapt_sorter_params("kilosort4", {}, 8) == {"nearest_chans": 8, "nearest_templates": 8}
     assert adapt_sorter_params("kilosort4", {"nearest_chans": 4}, 32) == {"nearest_chans": 4, "nearest_templates": 32}
     assert adapt_sorter_params("kilosort4", {}, 384) == {}
-    assert adapt_sorter_params("mountainsort5", {}, 4) == {}
+    assert adapt_sorter_params("mountainsort5", {}, 4) == {"whitening_seed": 0}  # neighbourhoods: kilosort4 only
+
+
+def test_unset_sorter_seeds_are_fixed():
+    """MountainSort5's whitening_seed defaults to None (new randomness each run): ephysalis fixes it."""
+    from ephysalis.spike_sorting.spikes import SPIKE_SORTER_SEED, adapt_sorter_params
+
+    params = adapt_sorter_params("mountainsort5", {"detect_threshold": 3.0}, num_channels=2)
+    assert params == {"detect_threshold": 3.0, "whitening_seed": SPIKE_SORTER_SEED}
+    assert adapt_sorter_params("mountainsort5", {"whitening_seed": 7}, 2)["whitening_seed"] == 7  # configured
