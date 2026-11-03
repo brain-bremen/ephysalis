@@ -57,11 +57,11 @@ def test_binary_and_nwb_hold_the_same_samples():
 @skip_if_no_oe_tools_data
 def test_legacy_samples_as_package_loader():
     """Lazy reads across the 1024-sample records equal open-ephys-python-tools' (in-memory) loader."""
-    from open_ephys.analysis import RecordingSession
+    from open_ephys.analysis import Session as OpenEphysAnalysisSession  # open-ephys-python-tools' loader
 
     run = _run(FORMATS[2])
     recording = run.get_recording(StreamKind.AUX)
-    expected = RecordingSession(str(OE_TOOLS_DATA / FORMATS[2])).recordnodes[1].recordings[0].continuous[0].samples
+    expected = OpenEphysAnalysisSession(str(OE_TOOLS_DATA / FORMATS[2])).recordnodes[1].recordings[0].continuous[0].samples
     np.testing.assert_array_equal(recording.get_traces(), expected)
     np.testing.assert_array_equal(recording.get_traces(start_frame=1000, end_frame=3100, channel_ids=["CH16", "CH2"]),
                                   expected[1000:3100][:, [15, 1]])
