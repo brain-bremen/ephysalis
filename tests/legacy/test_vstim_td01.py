@@ -12,7 +12,7 @@ import pytest
 from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.input.base import open_session
-from ephysalis.metadata.base import detect_metadata_plugin
+from ephysalis.metadata.base import run_trial_tables
 from ephysalis.metadata.legacy.vstim_td01 import TRIAL_END_AFTER_OUTCOME_PULSE_MS, tdr_date
 from test_daq import write_v2
 
@@ -60,7 +60,7 @@ def test_trials_from_td01_and_tdr(tmp_path):
         'schema_version = 4\nsession_id = "s"\nsubject_id = "fritz"\n'
         '[aux_channels.digital]\ntrial_start = 0\neye_error = 10\nreward = 13\n')
     run = open_session(session).runs[0]
-    assert detect_metadata_plugin(run).name == "vstim_td01"
+    assert run_trial_tables(run, None, None)[0].name == "vstim_td01"
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
     assert extract_all([str(session), *common]) == 0
     trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("*.csv")))

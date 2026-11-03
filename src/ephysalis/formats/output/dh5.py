@@ -64,6 +64,7 @@ from ephysalis.formats.output.nwb import (
     sorting_info,
     time_axis,
 )
+from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
 from ephysalis.session.model import Run, Session, StreamKind
 from ephysalis.sorting.spikes import load_run_spikes
 from ephysalis.timeline.clocks import AUX
@@ -163,7 +164,7 @@ def stream_times(run: Run, key: str, rate: float, offset: float,
     clock = syncs[run.name].maps.get(key) if run.name in syncs else None
     if clock is None or clock.source_samples.size < 2:
         return None
-    stream_rate = (run.format.aux_sampling_frequency(run) if key == AUX
+    stream_rate = (run.get_recording(StreamKind.AUX).sampling_frequency if key == AUX
                    else run.get_recording(StreamKind.AP, key).sampling_frequency)
     return lambda k: offset + clock.to_reference_time(np.asarray(k, float) * stream_rate / rate)
 
@@ -174,7 +175,7 @@ def stream_timing(run: Run, key: str, rate: float, offset: float, syncs: dict[st
     clock = syncs[run.name].maps.get(key) if run.name in syncs else None
     if clock is None:
         return offset, rate
-    stream_rate = (run.format.aux_sampling_frequency(run) if key == AUX
+    stream_rate = (run.get_recording(StreamKind.AUX).sampling_frequency if key == AUX
                    else run.get_recording(StreamKind.AP, key).sampling_frequency)
     return offset + float(clock.to_reference_time(0.0)), rate * clock.effective_sampling_frequency / stream_rate
 
@@ -336,8 +337,8 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
         global_index += n_channels
     parts = []
     for run in runs:
-        if run.aux_stream is not None:
-            recording = run.format.aux_analog_recording(run)
+        if run.aux_stream is not None and isinstance(run.format, ReadsAuxiliaryAnalogInputs):
+            recording = run.format.auxiliary_analog_recording(run)
             parts.append((recording, *stream_timing(run, AUX, recording.sampling_frequency, offsets[run.name], syncs),
                           stream_times(run, AUX, recording.sampling_frequency, offsets[run.name], syncs)))
     if parts and parts[0][0].get_num_channels() > MAX_ANALOG_CHANNELS:
@@ -355,29 +356,27 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
     from dhspec.event_triggers import EV_DATASET_NAME
 
     from ephysalis.timeline.annotations import active_state, event_code_names as line_code_names
-    from ephysalis.timeline.events import dh5_event_codes, event_code_names, load_run_events
+    from ephysalis.timeline.events import dh5_event_codes, event_word_names, load_run_events
     from ephysalis.session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
     times, codes, names, lines = [], [], {}, {}
-    network = False
     for run in runs:
         path = work_dir / "events" / f"{run.name}.csv"
         if not path.exists():
             continue
         events = load_run_events(path)
         times.append(_ns(events.time.to_numpy(float) + offsets[run.name]))
-        codes.append(dh5_event_codes(events, events_config.network_events_offset))
+        codes.append(dh5_event_codes(events, events_config.event_word_offset))
         ttl = events[(events.source == "ttl") & (events.name != "")]
         for line, name in ttl.groupby("line").name.first().items():
             on = int(line) if active_state(name, events_config) else -int(line)
             names[f"{name}On"], names[f"{name}Off"] = on, -on
             lines[int(line)] = str(name)
-        network |= bool((events.source == "network").any())
+        if (events.source == "word").any():  # names of all the run's event words (metadata plugin)
+            names.update({name: word + events_config.event_word_offset for word, name in event_word_names(run).items()})
     if not times:
         return 0
-    if network:
-        names.update(event_code_names(events_config.network_events_offset))
     all_times, all_codes = np.concatenate(times), np.concatenate(codes)
     order = np.argsort(all_times, kind="stable")
     dh5io.event_triggers.add_event_triggers_to_file(file, timestamps_ns=all_times[order].astype(np.int64),

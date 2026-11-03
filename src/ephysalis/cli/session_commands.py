@@ -25,8 +25,8 @@ from ephysalis.session.config import (
 )
 from ephysalis.formats.input.base import open_session
 from ephysalis.session.probes import configure_probes
+from ephysalis.plugins import ComputesChannelGainCalibration, HasSynchronisedTimestamps
 from ephysalis.timeline.clocks import RunSync, SyncEdgeCache
-from ephysalis.metadata.base import detect_metadata_plugin, get_metadata_plugin
 
 logger = logging.getLogger(__name__)
 SESSION_PLACEHOLDER = "{session}"
@@ -102,21 +102,16 @@ def _inspect(args: argparse.Namespace) -> int:
         if others:  # e.g. for probes defined in session.toml
             print(f"      other streams: {', '.join(others)}")
 
-        system = (
-            get_metadata_plugin(run_config.metadata_plugin)
-            if run_config and run_config.metadata_plugin
-            else detect_metadata_plugin(run)
-        )
-        if system is None:
-            print("      stimulus: none found")
-        else:
-            for paradigm in system.discover(run):
-                count = paradigm.metadata.get("stimulusCount", "?")
-                line = f"      stimulus [{system.name}] {paradigm.name}: {count} trials"
-                if args.conditions:
-                    conditions = system.load_conditions(paradigm)
-                    line += f", {conditions['condition'].nunique()} conditions"
-                print(line)
+        from ephysalis.metadata.base import run_trial_tables
+
+        plugin, tables = run_trial_tables(run, None, None, config)  # without times: no clock alignment
+        if plugin is None:
+            print("      trials: no metadata plugin recognises the run")
+        for paradigm, table in tables.items():
+            line = f"      trials [{plugin.name}] {paradigm}: {len(table)} trials"
+            if args.conditions:
+                line += f", {table['condition'].nunique()} conditions"
+            print(line)
         if args.timing and (run_config is None or run_config.include):
             _print_timing(run, config, _sync_cache(session.path, args.cache_dir))
     return 0
@@ -156,12 +151,13 @@ def _init(args: argparse.Namespace) -> int:
         print(f"{output} exists, use --force to overwrite", file=sys.stderr)
         return 1
 
-    from ephysalis.metadata.base import all_metadata_plugins
+    from ephysalis.plugins import AddsSessionConfigFromMetadataFiles, metadata_plugins
 
     config, warnings = default_session_config(session), []  # what the recording says
-    source = Path(args.metadata) if args.metadata else None
-    for plugin in all_metadata_plugins():  # what the setup's files say
-        warnings += plugin.suggest_config(session, config, source)
+    metadata_file = Path(args.metadata) if args.metadata else None
+    for plugin in metadata_plugins():  # what the setup's metadata files say
+        if isinstance(plugin, AddsSessionConfigFromMetadataFiles):
+            warnings += plugin.add_session_config_from_metadata_files(session, config, metadata_file)
 
     for warning in warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -187,7 +183,8 @@ def _align_clocks(args: argparse.Namespace) -> int:
             continue
         if args.force and cache.path(run.name).exists():
             cache.path(run.name).unlink()
-        if run.format.clock_maps(run, None) is None:  # formats with synchronised timestamps have no edges
+        if not (isinstance(run.format, HasSynchronisedTimestamps)  # formats with synchronised timestamps have no edges
+                and run.format.clock_alignment_from_synchronised_timestamps(run, None) is not None):
             edges = load_or_extract_edges(run, aux_channel_map(run, config), cache)
             counts = ", ".join(f"{stream} {e.samples.size}" for stream, e in edges.items())
             print(f"{run.name}: sync edges {counts}")
@@ -273,8 +270,8 @@ def _configure(session: Session, config: SessionConfig | None, config_path: Path
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
-    if calibration:  # not needed by steps that use no gains (clock alignment, extract steps)
-        session.format.apply_calibration(session, config, config_dir, work_dir)
+    if calibration and isinstance(session.format, ComputesChannelGainCalibration):  # not for steps without gains
+        session.format.apply_channel_gain_calibration(session, config, config_dir, work_dir)
     apply_run_starts(session, work_dir)
 
 
@@ -288,7 +285,8 @@ def _calibrate(args: argparse.Namespace) -> int:
         print("Nothing to do: [calibration] run is not set in session.toml")
         return 0
     configure_probes(session, config, config_path.parent if config_path else None)
-    calibration = session.format.calibrate(session, config, work_dir)
+    calibration = (session.format.compute_channel_gain_calibration(session, config, work_dir)
+                   if isinstance(session.format, ComputesChannelGainCalibration) else None)
     if calibration is None:
         print(f"Nothing to do: the {session.format.name} format has no calibration")
         return 0
@@ -396,7 +394,7 @@ def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_di
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     for old in (work_dir / "trials").glob(f"{run.name}_*.csv"):
         old.unlink()
-    _, trials, run_start = extract_run_trials(run, sync, config)
+    trials, run_start = extract_run_trials(run, sync, config)
     for paradigm, table in trials.items():
         table.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
         print(f"{run.name} {paradigm}: {len(table)} trials")
@@ -653,7 +651,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     for name, func, help_text, outputs in (
         ("extract-trials", _extract_trials, "Write the trial tables of all paradigms of the metadata plugin and the "
          "run start times from its clock (on the reference clock)", "trials/, run_start/"),
-        ("extract-events", _extract_events, "Write the edges of the digital lines and the network events of every run "
+        ("extract-events", _extract_events, "Write the edges of the digital lines and the event words of every run "
          "(on the reference clock)", "events/"),
         ("extract-behavior", _extract_behavior, "Write the eye position (1 kHz, V) and running speed (1 kHz, cm/s) of "
          "every run (on the reference clock)", "eye/, running_speed/"),
@@ -758,7 +756,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--metadata", help="Metadata file outside the session folder for the metadata plugins, e.g. the lab "
-                   "workbook of the stimstage setup (its sheet is the session folder name)")
+                   "workbook of the psychtoolbox_neuropixels_freiburg setup (its sheet is the session folder name)")
     p.add_argument("-o", "--output", help=f"Output path (default: <session>/{SESSION_CONFIG_FILENAME})")
     p.add_argument("--force", action="store_true", help="Overwrite an existing config")
     p.set_defaults(func=per_session(_init))

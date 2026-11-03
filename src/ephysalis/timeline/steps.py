@@ -7,7 +7,7 @@
     trial tables of all paradigms of the metadata plugin and the run start time from its clock
     (:func:`extract_run_trials`; ``trials/``, ``run_start/``)
 ``ephysalis extract-events``
-    edges of the digital lines and network events (:mod:`ephysalis.timeline.events`; ``events/``)
+    edges of the digital lines and event words (:mod:`ephysalis.timeline.events`; ``events/``)
 ``ephysalis extract-behavior``
     eye position and running speed at 1 kHz (:func:`extract_run_behavior`; ``eye/``,
     ``running_speed/``)
@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -33,11 +33,8 @@ from ephysalis.session.model import Run, StreamKind
 from ephysalis.timeline.events import run_events
 from ephysalis.metadata.runstart import RunStart
 from ephysalis.session.config import AuxChannelMap, EventsConfig, SessionConfig
-from ephysalis.metadata.base import Paradigm, detect_metadata_plugin, get_metadata_plugin
+from ephysalis.metadata.base import run_start_time, run_trial_tables
 from ephysalis.timeline.clocks import AUX, RunSync, SyncEdgeCache, synchronize_run
-
-if TYPE_CHECKING:
-    from ephysalis.metadata.base import MetadataPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +58,6 @@ def default_sync_cache(session_path: str | Path) -> SyncEdgeCache:
 class RunTiming:
     run_name: str
     sync: RunSync
-    paradigms: list[Paradigm] = field(default_factory=list)
     trials: dict[str, pd.DataFrame] = field(default_factory=dict)  # paradigm name -> trials
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
     eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
@@ -76,7 +72,7 @@ class RunTiming:
 def aux_channel_map(run: Run, config: SessionConfig | None = None) -> AuxChannelMap:
     if config is not None:
         return config.aux_channels
-    return run.format.default_aux_channels(run)
+    return run.format.default_auxiliary_channel_roles(run)
 
 
 def align_run_clocks(run: Run, config: SessionConfig | None = None,
@@ -110,34 +106,22 @@ def write_clock_report(work_dir: Path, run_name: str, sync: RunSync) -> Path:
     return path
 
 
-def run_metadata_plugin(run: Run, config: SessionConfig | None = None) -> MetadataPlugin | None:
-    run_config = config.run_config(run.name) if config is not None else None
-    return (
-        get_metadata_plugin(run_config.metadata_plugin)
-        if run_config is not None and run_config.metadata_plugin
-        else detect_metadata_plugin(run)
-    )
-
-
 def _aux(run: Run, config: SessionConfig | None) -> AuxSignals | None:
     return AuxSignals(run, aux_channel_map(run, config)) if run.aux_stream is not None else None
 
 
 def extract_run_trials(run: Run, sync: RunSync, config: SessionConfig | None = None
-                       ) -> tuple[list[Paradigm], dict[str, pd.DataFrame], RunStart | None]:
-    """``(paradigms, trials per paradigm, run start)`` from the run's metadata plugin."""
-    system = run_metadata_plugin(run, config)
-    if system is None:
-        logger.info("Run %s: no metadata plugin found", run.name)
-        return [], {}, None
-    aux = _aux(run, config)
-    paradigms = system.discover(run)
-    trials = {paradigm.name: system.load_trials(run, paradigm, sync, aux) for paradigm in paradigms}
-    return paradigms, trials, system.run_start(run, trials)
+                       ) -> tuple[dict[str, pd.DataFrame], RunStart | None]:
+    """``(trial table per paradigm, run start time)`` from the run's metadata plugin."""
+    plugin, tables = run_trial_tables(run, sync, _aux(run, config), config)
+    if plugin is None:
+        logger.info("Run %s: no metadata plugin recognises it (no trials)", run.name)
+        return {}, None
+    return tables, run_start_time(plugin, run, tables)
 
 
 def extract_run_events(run: Run, sync: RunSync, config: SessionConfig | None = None) -> pd.DataFrame:
-    """Edges of the digital lines and network events (:func:`ephysalis.timeline.events.run_events`)."""
+    """Edges of the digital lines and event words (:func:`ephysalis.timeline.events.run_events`)."""
     return run_events(run, sync, aux_channel_map(run, config), config.events if config is not None else EventsConfig())
 
 
@@ -170,5 +154,5 @@ def extract_run_timing(
     timing = RunTiming(run_name=run.name, sync=sync)
     timing.running_speed, timing.eye_position = extract_run_behavior(run, sync, config)
     timing.events = extract_run_events(run, sync, config)
-    timing.paradigms, timing.trials, timing.run_start = extract_run_trials(run, sync, config)
+    timing.trials, timing.run_start = extract_run_trials(run, sync, config)
     return timing

@@ -42,8 +42,16 @@ MIGRATIONS: dict[int, Migration] = {
     4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
     5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
     6: lambda data: data,  # 7 added probes.reference_channels (default none: no re-reference)
-    7: lambda data: _rename_run_key(data, "stimulus_system", "metadata_plugin"),  # 8: stimulus systems -> metadata plugins
+    7: lambda data: _schema_8(data),  # 8: runs[].stimulus_system -> metadata_plugin, events.network_events_offset -> event_word_offset
 }
+
+
+def _schema_8(data: dict) -> dict:
+    data = _rename_run_key(data, "stimulus_system", "metadata_plugin")
+    events = data.get("events", {})
+    if "network_events_offset" in events:
+        events["event_word_offset"] = events.pop("network_events_offset")
+    return data
 
 
 def _rename_run_key(data: dict, old: str, new: str) -> dict:
@@ -212,9 +220,9 @@ class EventsConfig(BaseModel):
         default_factory=lambda: ["sync", "wheel"],
         description="Digital line roles ([aux_channels]) left out of the events, e.g. fast pulse trains",
     )
-    network_events_offset: int = Field(
-        default=1000, description="Added to the VStim network event words for the DH5 event codes "
-        "(TTL lines are +line / -line)"
+    event_word_offset: int = Field(
+        default=1000, description="Added to the event words (e.g. VStim's) for their DH5 event codes "
+        "(TTL lines are +line / -line); used only by the DH5 export"
     )
     lines_without_role: bool = Field(
         default=True, description="Also TTL lines without a role in [aux_channels.digital]; switch off for "
@@ -324,7 +332,7 @@ def default_session_config(session: Session) -> SessionConfig:
             probes.setdefault(pid, ProbeConfig(serial_number=info.serial_number))
 
     with_aux = [r for r in session.runs if r.aux_stream is not None] or session.runs
-    aux_channels = session.format.default_aux_channels(with_aux[0] if with_aux else None)
+    aux_channels = session.format.default_auxiliary_channel_roles(with_aux[0] if with_aux else None)
     return SessionConfig(
         session_id=session.name,
         subject_id=subject,

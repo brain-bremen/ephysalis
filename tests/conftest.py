@@ -102,7 +102,7 @@ def write_v73(path: Path, groups: dict[str, dict[str, np.ndarray]]) -> None:
         f.write(b"MATLAB 7.3 MAT-file, created by ephysalis tests".ljust(128))
 
 
-def write_stimstage_paradigm(
+def write_stimulus_stage_paradigm(
     run_dir: Path, folder: str, params: list[dict], stimulus_order: Sequence[float]
 ) -> Path:
     paradigm = run_dir / folder

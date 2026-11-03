@@ -20,8 +20,7 @@ import numpy as np
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.formats.input.base import InputFormat
-
+    from ephysalis.plugins import InputFormat
 
 class StreamKind(StrEnum):
     AP = "ap"  # wideband / action potential band
@@ -71,7 +70,7 @@ class Run:
     start_time_method: str = ""  # how ``start_time`` was obtained, if not from the recording
     extra: dict = field(default_factory=dict)  # format-specific details, used only by the format
     def get_recording(self, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
-        recording = self.format.get_recording(self, kind, probe_id)
+        recording = self.format.get_stream_recording(self, kind, probe_id)
         info = self.probes.get(probe_id) if probe_id is not None else None
         if info is not None and kind in (StreamKind.AP, StreamKind.LF) and (
                 info.channel_ids or info.geometry or info.reference_channel_ids):

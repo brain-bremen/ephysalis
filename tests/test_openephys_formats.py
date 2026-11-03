@@ -14,7 +14,6 @@ from conftest import OE_TOOLS_DATA, skip_if_no_oe_tools_data
 from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.input.base import open_session
-from ephysalis.formats.input.openephys import OpenEphysFormat
 from ephysalis.session.model import StreamKind
 
 FORMATS = ["v0.6.7_Binary", "v0.6.7_NWB", "v0.6.7_OpenEphys"]
@@ -31,7 +30,7 @@ def _run(fmt):
 @pytest.mark.parametrize("fmt", FORMATS)
 def test_discovery(fmt):
     session = open_session(OE_TOOLS_DATA / fmt / NODE)
-    assert isinstance(session.format, OpenEphysFormat)
+    assert session.format.name == "openephys"
     run = session.runs[0]
     assert [r.name for r in session.runs] == ["experiment1_recording1"]
     assert run.streams == [STREAM] and run.aux_stream == STREAM and run.probes == {}
@@ -50,7 +49,7 @@ def test_binary_and_nwb_hold_the_same_samples():
     np.testing.assert_array_equal(a.get_traces(), b.get_traces())
     np.testing.assert_array_equal(a.get_traces(start_frame=1000, end_frame=1100, channel_ids=["CH3", "CH1"]),
                                   a.get_traces()[1000:1100, [2, 0]])
-    ma, mb = (r.format.clock_maps(r).maps["aux"] for r in (binary, nwb))
+    ma, mb = (r.format.clock_alignment_from_synchronised_timestamps(r).maps["aux"] for r in (binary, nwb))
     np.testing.assert_allclose(ma.reference_times, mb.reference_times)
     assert ma.to_reference_time(40000) == pytest.approx(1.0)
 
@@ -74,7 +73,7 @@ def test_legacy_samples_as_package_loader():
 def test_network_events_as_full_words(fmt):
     """Words rebuilt from the line states equal the full words the formats store."""
     run = _run(fmt)
-    events = run.format.read_network_events(run)
+    events = run.format.read_event_words(run)
     if fmt == "v0.6.7_Binary":
         folder = OE_TOOLS_DATA / fmt / NODE / "experiment1/recording1/events/Network_Events-108.example_data/TTL"
         words, samples = np.load(folder / "full_words.npy"), np.load(folder / "sample_numbers.npy")
@@ -91,10 +90,10 @@ def test_network_events_as_full_words(fmt):
 @pytest.mark.parametrize("fmt", FORMATS)
 def test_messages(fmt):
     run = _run(fmt)
-    messages = run.format.read_messages(run)
+    messages = run.format.read_text_messages(run)
     assert len(messages) >= 14 and messages.text.str.startswith(("TTL Line", "Start Time")).all()
     assert (messages.aux_sample >= 0).all() and messages.aux_sample.is_monotonic_increasing
-    assert len(run.format.read_ttl_events(run)) == 0  # the File Reader stream has no TTL lines
+    assert len(run.format.read_digital_line_edges(run)) == 0  # the File Reader stream has no TTL lines
 
 
 @skip_if_no_oe_tools_data
@@ -114,7 +113,7 @@ def test_pipeline(fmt, tmp_path):
     assert main(["export", session, *common, "-o", str(tmp_path / "out.nwb")]) == 0
     assert main(["export", session, *common, "--output-format", "dh5", "--raw", "-o", str(tmp_path / "out.dh5")]) == 0
     events = pd.read_csv(tmp_path / "events" / "experiment1_recording1.csv")
-    assert (events.source == "network").sum() == len(_run(fmt).format.read_network_events(_run(fmt)))
+    assert (events.source == "word").sum() == len(_run(fmt).format.read_event_words(_run(fmt)))
     with h5py.File(tmp_path / "out.dh5") as f:
         raw = f["CONT1"]["DATA"][:, 0]
     np.testing.assert_array_equal(raw, _run(fmt).get_recording(StreamKind.AUX).get_traces()[:, 0])
@@ -166,8 +165,8 @@ def test_neuropixels_probe_from_settings(tmp_path):
     assert lf.sampling_frequency == 2500 and lf.get_num_channels() == 384
     aux = run.get_recording(StreamKind.AUX)
     assert list(aux.channel_ids) == [f"AI{i}" for i in range(8)]
-    assert run.format.aux_analog_gain_v(run, 2) == pytest.approx(0.000305)
-    sync = run.format.clock_maps(run)
+    assert run.format.auxiliary_analog_volts_per_count(run, 2) == pytest.approx(0.000305)
+    sync = run.format.clock_alignment_from_synchronised_timestamps(run)
     assert set(sync.maps) == {"ProbeA", "aux"} and sync.maps["ProbeA"].to_reference_time(0) == 0.0
 
 

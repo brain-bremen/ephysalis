@@ -10,7 +10,7 @@ from ephysalis.timeline.auxsignals import AuxSignals, wheel_speed
 from ephysalis.formats.input.base import open_session
 from ephysalis.session.model import StreamKind
 from ephysalis.session.config import AuxChannelMap, default_session_config
-from ephysalis.metadata.base import detect_metadata_plugin
+from ephysalis.metadata.base import run_trial_tables
 from ephysalis.timeline.clocks import AUX
 from ephysalis.timeline.steps import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
@@ -68,13 +68,12 @@ def test_default_aux_roles_match_recording(run):
 
 
 def test_conditions_and_legacy_reference(run):
-    system = detect_metadata_plugin(run)
-    (paradigm,) = system.discover(run)
-    assert paradigm.metadata["stimulusCount"] == 6707
-    conditions = system.load_conditions(paradigm)
+    _, tables = run_trial_tables(run, None, None)
+    (conditions,) = tables.values()
+    assert conditions.attrs["stimulusCount"] == 6707
     assert len(conditions) == 6707
 
-    reference = np.load(paradigm.path / "legacy_reference_imec0.npz")
+    reference = np.load(run.path / conditions.attrs["folder"] / "legacy_reference_imec0.npz")
     starts = reference["trial_start_samples"]
     assert len(starts) == 23
     assert starts[0] / 30000 == pytest.approx(0.605, abs=0.01)  # 17.105 s in the full run

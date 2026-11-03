@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sys
 import mmap
 import os
 import re
@@ -34,13 +35,12 @@ from collections.abc import Collection
 from datetime import datetime, timedelta
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephysalis.formats.input.base import InputFormat
 from ephysalis.session.model import Run, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -553,167 +553,187 @@ def _mcd_files(folder: Path) -> list[Path]:
                   key=lambda p: (re.sub(r"\d{4}$", "", p.stem), p.stem))
 
 
-class McdFormat(InputFormat):
-    name: ClassVar[str] = "mcd"
+# --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
 
-    def can_read(self, session_path: Path) -> bool:
-        return any(p.suffix.lower() == ".mcd" for p in session_path.iterdir() if p.is_file())
+name = 'mcd'
+plugin_api_version = 1
 
-    def open_session(self, session_path: Path) -> Session:
-        runs: list[Run] = []
-        chains = sorted(group_files(_mcd_files(session_path)), key=lambda files: read_index(files[0]).start)
-        for files in chains:
-            indexes = [read_index(p) for p in files]
-            streams = indexes[0].streams
-            data = [s for s in streams if s.kind in DATA_STREAMS]
-            aux = next((s.tag for s in data if s.is_digital), None) or next((s.tag for s in data if s.kind == "anlg"), None)
-            main = next(s for s in data if s.tag == (aux or data[0].tag)) if data else None
-            n_blocks = sum(len(ix.group_times) for ix in indexes)
-            combined = combined_electrode_stream(data)
-            runs.append(Run(
-                name=files[0].stem, path=session_path, index=len(runs), format=self,
-                start_time=local_time(indexes[0].start),
-                duration_s=n_blocks * (main.samples_per_block / main.sampling_frequency) if main else None,
-                aux_stream=aux, streams=[s.tag for s in data] + ([combined] if combined else []),
-                extra={"files": [str(p) for p in files], "mcs_version": list(indexes[0].version),
-                       "stream_types": {s.tag: s.type_name for s in streams},
-                       "truncated": [str(p) for p, ix in zip(files, indexes) if ix.truncated]},
-            ))
-        return Session(name=session_path.name, path=session_path, format=self, runs=runs)
 
-    def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
-        from ephysalis.session.config import AuxChannelMap
+def can_read_session_folder(session_path: Path) -> bool:
+    return any(p.suffix.lower() == ".mcd" for p in session_path.iterdir() if p.is_file())
 
-        return AuxChannelMap(analog={}, digital={})
 
-    def get_recording(self, run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
-        if kind == StreamKind.AUX:
-            tag = run.aux_stream
-        else:
-            if probe_id is None:
-                raise ValueError(f"probe_id is required for {kind} streams")
-            try:
-                tag = run.probes[probe_id].streams[kind]
-            except KeyError:
-                raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
-        if tag is None:
-            raise KeyError(f"Run {run.name} has no auxiliary stream")
-        return _extractor(tuple(run.extra["files"]), tag)
+def open_session(session_path: Path) -> Session:
+    runs: list[Run] = []
+    chains = sorted(group_files(_mcd_files(session_path)), key=lambda files: read_index(files[0]).start)
+    for files in chains:
+        indexes = [read_index(p) for p in files]
+        streams = indexes[0].streams
+        data = [s for s in streams if s.kind in DATA_STREAMS]
+        aux = next((s.tag for s in data if s.is_digital), None) or next((s.tag for s in data if s.kind == "anlg"), None)
+        main = next(s for s in data if s.tag == (aux or data[0].tag)) if data else None
+        n_blocks = sum(len(ix.group_times) for ix in indexes)
+        combined = combined_electrode_stream(data)
+        runs.append(Run(
+            name=files[0].stem, path=session_path, index=len(runs), format=sys.modules[__name__],
+            start_time=local_time(indexes[0].start),
+            duration_s=n_blocks * (main.samples_per_block / main.sampling_frequency) if main else None,
+            aux_stream=aux, streams=[s.tag for s in data] + ([combined] if combined else []),
+            extra={"files": [str(p) for p in files], "mcs_version": list(indexes[0].version),
+                   "stream_types": {s.tag: s.type_name for s in streams},
+                   "truncated": [str(p) for p, ix in zip(files, indexes) if ix.truncated]},
+        ))
+    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
 
-    def stream_channel_ids(self, run: Run, stream: str) -> list[str] | None:
-        streams = self._streams(run)
-        tags = stream.split(COMBINED)
-        if not all(t in streams for t in tags):
-            return None
-        return [c for t in tags for c in streams[t].channel_ids]
 
-    def _streams(self, run: Run) -> dict[str, McdStream]:
-        return {s.tag: s for s in read_index(run.extra["files"][0]).streams}
+def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:
+    from ephysalis.session.config import AuxChannelMap
 
-    def _analog_stream(self, run: Run) -> str | None:
-        return next((t for t, s in self._streams(run).items() if s.kind == "anlg"), None)
+    return AuxChannelMap(analog={}, digital={})
 
-    def aux_analog_recording(self, run: Run) -> BaseRecording:
-        """The analog inputs (``anlg`` stream), else the digital word."""
-        tag = self._analog_stream(run)
-        return _extractor(tuple(run.extra["files"]), tag) if tag else self.get_recording(run, StreamKind.AUX)
 
-    def _analog_input(self, run: Run, index: int) -> tuple[str, int]:
-        """(stream tag, column) of an analog role: column ``index`` of the ``anlg`` stream; without an ``anlg``
-        stream (e.g. Botox 2010: eye position on electrode inputs 252-254) the electrode channel with hardware
-        id ``index``."""
-        tag = self._analog_stream(run)
-        if tag is not None:
-            return tag, index
-        for t, s in self._streams(run).items():
-            if s.kind == "elec" and index in s.hwids:
-                return t, s.hwids.index(index)
-        raise KeyError(f"Run {run.name} has no analog inputs and no electrode channel with hardware id {index}")
+def get_stream_recording(run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
+    if kind == StreamKind.AUX:
+        tag = run.aux_stream
+    else:
+        if probe_id is None:
+            raise ValueError(f"probe_id is required for {kind} streams")
+        try:
+            tag = run.probes[probe_id].streams[kind]
+        except KeyError:
+            raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
+    if tag is None:
+        raise KeyError(f"Run {run.name} has no auxiliary stream")
+    return _extractor(tuple(run.extra["files"]), tag)
 
-    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
-        tag, column = self._analog_input(run, index)
-        return _extractor(tuple(run.extra["files"]), tag).get_traces(channel_ids=None)[:, column]
 
-    def aux_analog_gain_v(self, run: Run, index: int) -> float:
-        tag, column = self._analog_input(run, index)
-        return float(_extractor(tuple(run.extra["files"]), tag).get_channel_gains()[column]) * 1e-6
+def auxiliary_sampling_frequency(run: Run) -> float:
+    return get_stream_recording(run, StreamKind.AUX, None).sampling_frequency
 
-    def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
-        """All streams of a USB-ME device share its clock; the block times place the files of a run."""
-        from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
 
-        indexes = [read_index(p) for p in run.extra["files"]]
-        t0 = indexes[0].group_times[0]
-        times = (np.concatenate([ix.group_times for ix in indexes]) - t0).astype(np.int64)
-        streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
-        if run.aux_stream:
-            streams[AUX] = run.aux_stream
-        if not streams:  # neither a digital stream nor a probe: the run's first stream
-            streams[AUX] = run.streams[0]
-        by_tag = self._streams(run)
-        maps = {}
-        for key, tag in streams.items():
-            stream = by_tag[tag.split(COMBINED)[0]]  # a combined stream: its parts share rate and block size
-            samples = np.arange(len(times)) * stream.samples_per_block
-            maps[key] = ClockMap(samples.astype(float), times / 1e9, stream.sampling_frequency,
-                                 rate=stream.sampling_frequency)
-        return RunSync(reference=reference or next(iter(streams)), maps=maps)
+def list_stream_channel_ids(run: Run, stream: str) -> list[str] | None:
+    streams = _streams(run)
+    tags = stream.split(COMBINED)
+    if not all(t in streams for t in tags):
+        return None
+    return [c for t in tags for c in streams[t].channel_ids]
 
-    def _aux_sample(self, run: Run, times_ns: np.ndarray) -> np.ndarray:
-        t0 = read_index(run.extra["files"][0]).group_times[0]
-        fs = self.aux_sampling_frequency(run)
-        elapsed = (np.asarray(times_ns, dtype=np.uint64) - t0).astype(np.int64)  # ns since 1601 exceed int64
-        return np.floor(elapsed * fs / 1e9 + 1e-6).astype(np.int64)
 
-    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
-        """Changes of the bits of the digital word (line = bit + 1; ``lines``: only these, which
-        also reads only their bits: unconnected inputs of the USB-ME toggle all the time)."""
-        if run.aux_stream is None or not self._streams(run)[run.aux_stream].is_digital:
-            return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "line": np.zeros(0, np.int64),
-                                 "state": np.zeros(0, np.int64)})
-        bits = range(16) if lines is None else sorted(line - 1 for line in lines if 1 <= line <= 16)
-        mask = sum(1 << bit for bit in bits)
-        parts, offset, previous = [], 0, None
-        for path in run.extra["files"]:
-            samples, words, first = digital_transitions(path, run.aux_stream, mask) if mask else (
-                np.zeros(0, np.int64), np.zeros(0, np.uint16), 0)
-            if previous is not None and first != previous:  # a change at the file boundary
-                samples, words = np.r_[0, samples], np.r_[first, words].astype(np.uint16)
-            before = np.r_[previous if previous is not None else first, words[:-1]].astype(np.int64)
-            changed = before ^ words.astype(np.int64)
-            for bit in bits:
-                hit = np.flatnonzero((changed >> bit) & 1)
-                parts.append(pd.DataFrame({"aux_sample": samples[hit] + offset, "line": bit + 1,
-                                           "state": (words[hit].astype(np.int64) >> bit) & 1}))
-            if len(words):
-                previous = int(words[-1])
-            elif previous is None:
-                previous = first
-            offset += McdRecordingExtractor([path], run.aux_stream).get_num_samples()
-        events = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["aux_sample", "line", "state"])
-        return events.astype(np.int64).sort_values(["aux_sample", "line"], kind="stable", ignore_index=True)
+def _streams(run: Run) -> dict[str, McdStream]:
+    return {s.tag: s for s in read_index(run.extra["files"][0]).streams}
 
-    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
-        word = self.get_recording(run, StreamKind.AUX).get_traces()[:, 0]
-        return ((word.astype(np.int64) >> bit) & 1).astype(bool)
 
-    def read_messages(self, run: Run) -> pd.DataFrame:
-        return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
+def _analog_stream(run: Run) -> str | None:
+    return next((t for t, s in _streams(run).items() if s.kind == "anlg"), None)
 
-    def read_trigger_events(self, run: Run) -> pd.DataFrame:
-        """All trigger events: ``aux_sample``, ``stream`` (number of the trigger stream),
-        ``value``, ``number``, ``trial``, ``stimulus`` (-1 without trial synchronisation)."""
-        events = np.concatenate([read_index(p).events for p in run.extra["files"]])
-        return pd.DataFrame({"aux_sample": self._aux_sample(run, events["time"]), "stream": events["stream"],
-                             "value": events["value"], "number": events["number"], "trial": events["trial"],
-                             "stimulus": events["stimulus"]})
 
-    def read_trial_descriptors(self, run: Run) -> pd.DataFrame:
-        """Trigger events with trial synchronisation (trial and stimulus number from the
-        stimulus PC, as the ``TD01`` records of DAQ files): ``aux_sample``, ``trial_number``,
-        ``stimulus_number``."""
-        events = self.read_trigger_events(run)
-        events = events[events.trial >= 0]
-        return pd.DataFrame({"aux_sample": events.aux_sample.to_numpy(np.int64),
-                             "trial_number": events.trial.to_numpy(np.int64),
-                             "stimulus_number": events.stimulus.to_numpy(np.int64)})
+def auxiliary_analog_recording(run: Run) -> BaseRecording:
+    """The analog inputs (``anlg`` stream), else the digital word."""
+    tag = _analog_stream(run)
+    return _extractor(tuple(run.extra["files"]), tag) if tag else get_stream_recording(run, StreamKind.AUX)
+
+
+def _analog_input(run: Run, index: int) -> tuple[str, int]:
+    """(stream tag, column) of an analog role: column ``index`` of the ``anlg`` stream; without an ``anlg``
+    stream (e.g. Botox 2010: eye position on electrode inputs 252-254) the electrode channel with hardware
+    id ``index``."""
+    tag = _analog_stream(run)
+    if tag is not None:
+        return tag, index
+    for t, s in _streams(run).items():
+        if s.kind == "elec" and index in s.hwids:
+            return t, s.hwids.index(index)
+    raise KeyError(f"Run {run.name} has no analog inputs and no electrode channel with hardware id {index}")
+
+
+def read_auxiliary_analog_channel(run: Run, index: int) -> np.ndarray:
+    tag, column = _analog_input(run, index)
+    return _extractor(tuple(run.extra["files"]), tag).get_traces(channel_ids=None)[:, column]
+
+
+def auxiliary_analog_volts_per_count(run: Run, index: int) -> float:
+    tag, column = _analog_input(run, index)
+    return float(_extractor(tuple(run.extra["files"]), tag).get_channel_gains()[column]) * 1e-6
+
+
+def clock_alignment_from_synchronised_timestamps(run: Run, reference_stream: str | None = None) -> RunSync | None:
+    """All streams of a USB-ME device share its clock; the block times place the files of a run."""
+    from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+
+    indexes = [read_index(p) for p in run.extra["files"]]
+    t0 = indexes[0].group_times[0]
+    times = (np.concatenate([ix.group_times for ix in indexes]) - t0).astype(np.int64)
+    streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
+    if run.aux_stream:
+        streams[AUX] = run.aux_stream
+    if not streams:  # neither a digital stream nor a probe: the run's first stream
+        streams[AUX] = run.streams[0]
+    by_tag = _streams(run)
+    maps = {}
+    for key, tag in streams.items():
+        stream = by_tag[tag.split(COMBINED)[0]]  # a combined stream: its parts share rate and block size
+        samples = np.arange(len(times)) * stream.samples_per_block
+        maps[key] = ClockMap(samples.astype(float), times / 1e9, stream.sampling_frequency,
+                             rate=stream.sampling_frequency)
+    return RunSync(reference=reference_stream or next(iter(streams)), maps=maps)
+
+
+def _aux_sample(run: Run, times_ns: np.ndarray) -> np.ndarray:
+    t0 = read_index(run.extra["files"][0]).group_times[0]
+    fs = auxiliary_sampling_frequency(run)
+    elapsed = (np.asarray(times_ns, dtype=np.uint64) - t0).astype(np.int64)  # ns since 1601 exceed int64
+    return np.floor(elapsed * fs / 1e9 + 1e-6).astype(np.int64)
+
+
+def read_digital_line_edges(run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+    """Changes of the bits of the digital word (line = bit + 1; ``lines``: only these, which
+    also reads only their bits: unconnected inputs of the USB-ME toggle all the time)."""
+    if run.aux_stream is None or not _streams(run)[run.aux_stream].is_digital:
+        return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "line": np.zeros(0, np.int64),
+                             "state": np.zeros(0, np.int64)})
+    bits = range(16) if lines is None else sorted(line - 1 for line in lines if 1 <= line <= 16)
+    mask = sum(1 << bit for bit in bits)
+    parts, offset, previous = [], 0, None
+    for path in run.extra["files"]:
+        samples, words, first = digital_transitions(path, run.aux_stream, mask) if mask else (
+            np.zeros(0, np.int64), np.zeros(0, np.uint16), 0)
+        if previous is not None and first != previous:  # a change at the file boundary
+            samples, words = np.r_[0, samples], np.r_[first, words].astype(np.uint16)
+        before = np.r_[previous if previous is not None else first, words[:-1]].astype(np.int64)
+        changed = before ^ words.astype(np.int64)
+        for bit in bits:
+            hit = np.flatnonzero((changed >> bit) & 1)
+            parts.append(pd.DataFrame({"aux_sample": samples[hit] + offset, "line": bit + 1,
+                                       "state": (words[hit].astype(np.int64) >> bit) & 1}))
+        if len(words):
+            previous = int(words[-1])
+        elif previous is None:
+            previous = first
+        offset += McdRecordingExtractor([path], run.aux_stream).get_num_samples()
+    events = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["aux_sample", "line", "state"])
+    return events.astype(np.int64).sort_values(["aux_sample", "line"], kind="stable", ignore_index=True)
+
+
+def read_auxiliary_digital_line(run: Run, bit: int) -> np.ndarray:
+    word = get_stream_recording(run, StreamKind.AUX).get_traces()[:, 0]
+    return ((word.astype(np.int64) >> bit) & 1).astype(bool)
+
+
+def read_trigger_events(run: Run) -> pd.DataFrame:
+    """All trigger events: ``aux_sample``, ``stream`` (number of the trigger stream),
+    ``value``, ``number``, ``trial``, ``stimulus`` (-1 without trial synchronisation)."""
+    events = np.concatenate([read_index(p).events for p in run.extra["files"]])
+    return pd.DataFrame({"aux_sample": _aux_sample(run, events["time"]), "stream": events["stream"],
+                         "value": events["value"], "number": events["number"], "trial": events["trial"],
+                         "stimulus": events["stimulus"]})
+
+
+def read_trial_descriptor_events(run: Run) -> pd.DataFrame:
+    """Trigger events with trial synchronisation (trial and stimulus number from the
+    stimulus PC, as the ``TD01`` records of DAQ files): ``aux_sample``, ``trial_number``,
+    ``stimulus_number``."""
+    events = read_trigger_events(run)
+    events = events[events.trial >= 0]
+    return pd.DataFrame({"aux_sample": events.aux_sample.to_numpy(np.int64),
+                         "trial_number": events.trial.to_numpy(np.int64),
+                         "stimulus_number": events.stimulus.to_numpy(np.int64)})

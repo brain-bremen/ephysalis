@@ -196,9 +196,12 @@ class SyncEdgeCache:
 
 def sync_sources(run: Run, aux_channels: AuxChannelMap | None = None) -> dict[str, SyncSource]:
     """Sync source of every probe of a run and of its aux stream (key :data:`AUX`)."""
-    sources = {pid: run.format.sync_source(run, pid, aux_channels) for pid in run.probes}
+    from ephysalis.plugins import LocatesSyncPulseChannels, require
+
+    reader = require(run.format, LocatesSyncPulseChannels, f"aligning the clocks of run {run.name} by sync pulses")
+    sources = {pid: reader.locate_sync_pulse_channel(run, pid, aux_channels) for pid in run.probes}
     if run.aux_stream is not None:
-        sources[AUX] = run.format.sync_source(run, None, aux_channels)
+        sources[AUX] = reader.locate_sync_pulse_channel(run, None, aux_channels)
     return sources
 
 
@@ -358,8 +361,11 @@ def synchronize_run(
 ) -> RunSync:
     """Build clock maps for all probes and the aux stream of a run from their sync edges
     (read from ``cache`` if it holds valid edges for the run), or take them from the format
-    if it has synchronised timestamps (:meth:`InputFormat.clock_maps`)."""
-    from_format = run.format.clock_maps(run, reference)
+    if it has synchronised timestamps (:class:`~ephysalis.plugins.HasSynchronisedTimestamps`)."""
+    from ephysalis.plugins import HasSynchronisedTimestamps
+
+    from_format = (run.format.clock_alignment_from_synchronised_timestamps(run, reference)
+                   if isinstance(run.format, HasSynchronisedTimestamps) else None)
     if from_format is not None:
         return from_format
     probe_ids = list(run.probes)

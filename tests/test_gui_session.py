@@ -75,7 +75,7 @@ def test_load_edit_and_save_session_config(app, page, tmp_path):
     run = page._tree.topLevelItem(0)
     assert run.text(0) == "3_rfmappingFine_g0"
     children = [run.child(i).text(1) for i in range(run.childCount())]
-    assert any(c.startswith("imec0") for c in children) and any(c.startswith("stimstage: RF") for c in children)
+    assert any(c.startswith("imec0") for c in children) and any(c.startswith("psychtoolbox_neuropixels_freiburg: RF") for c in children)
     assert page._run_btn.isEnabled()
 
     config = page._editor.config()  # defaults from the recording: no session.toml yet

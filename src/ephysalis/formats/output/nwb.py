@@ -20,7 +20,7 @@ acquisition                 with ``raw``: raw AP (wideband) data per run and pro
                             (``aux_analog_<run>``, volts)
 processing/ecephys/LFP      ``lfp/<run>_<probe>/``, one ElectricalSeries per run and probe
 processing/ecephys/MUA      ``mua/<run>_<probe>/`` (``FilteredEphys``), MUA envelope per run and probe
-processing/events           ``events`` table from ``events/<run>.csv`` (TTL edges, network events);
+processing/events           ``events`` table from ``events/<run>.csv`` (TTL edges, event words);
                             ``markers`` (``trial_start``, ``[[events.markers]]``) and
                             ``trigger_lines`` (role, line, meaning; :mod:`ephysalis.timeline.annotations`)
 intervals/trigger_pulses    pulses of the trigger lines with a role (start, stop, role, line, run)
@@ -53,6 +53,7 @@ from hdmf.data_utils import GenericDataChunkIterator
 
 from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
 from ephysalis.processing.mua import MUA_FILTERING, mua_folder
+from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
 from ephysalis.session.model import Run, Session, StreamKind
 from ephysalis.sorting.spikes import load_run_spikes, sorting_channels
 
@@ -458,8 +459,8 @@ def _add_raw(nwbfile: NWBFile, runs: list[Run], offsets: dict[str, float], syncs
                 nwbfile, f"ElectricalSeries_{run.name}_{probe_id}", recording, probe_id, electrode_rows, start, rate,
                 compression, description=f"raw AP (wideband) data of {probe_id} in run {run.name}",
             ))
-        if run.aux_stream is not None:
-            analog = run.format.aux_analog_recording(run)
+        if run.aux_stream is not None and isinstance(run.format, ReadsAuxiliaryAnalogInputs):
+            analog = run.format.auxiliary_analog_recording(run)
             start, rate = stream_timing(run, AUX, analog.sampling_frequency, offsets[run.name], syncs)
             gains = analog.get_channel_gains()
             uniform = bool(np.allclose(gains, gains[0]))
@@ -490,8 +491,8 @@ def _add_events(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict
     events = pd.concat(parts, ignore_index=True)
     descriptions = {
         "timestamp": "time in s on the session time axis", "run": "run of the event", "source": "ttl or network",
-        "line": "TTL line (1-based), -1 for network events",
-        "state": "TTL level after the edge (1 rising, 0 falling), -1 for network events",
+        "line": "TTL line (1-based), -1 for event words",
+        "state": "TTL level after the edge (1 rising, 0 falling), -1 for event words",
         "word": "network event word (VStim event code), -1 for TTL edges",
         "label": "role of the TTL line or VStim event name",
     }
@@ -501,7 +502,7 @@ def _add_events(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict
         **{c: events[c].fillna(-1).to_numpy(np.int64) for c in ("line", "state", "word")},
     }
     table = DynamicTable(
-        name="events", description="TTL edges of the aux stream and network events (see ephysalis.timeline.events)",
+        name="events", description="TTL edges of the aux stream and event words (see ephysalis.timeline.events)",
         columns=[VectorData(name=c, description=d, data=values[c]) for c, d in descriptions.items()],
     )
     _events_module(nwbfile).add(table)

@@ -29,7 +29,7 @@ pipeline (`ephysalis convert`) was replaced by the session pipeline; its raw dat
 | # | Content | Status |
 |---|---|---|
 | 0 | Fork oecon, rename to ephysalis, plugin registries | done |
-| 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, stimstage conditions | done |
+| 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, conditions of the Freiburg Psychtoolbox setup | done |
 | 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
 | 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephysalis sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
 | 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | done (`ephysalis lfp`, `ephysalis mua`) |

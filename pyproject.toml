@@ -74,16 +74,16 @@ ephysalis-inspect = "ephysalis.gui.inspector_app:main"
 # Plugin registries. Other packages can register additional input formats or
 # metadata plugins under the same entry point groups.
 [project.entry-points."ephysalis.input_formats"]
-spikeglx = "ephysalis.formats.input.spikeglx:SpikeGLXFormat"
-openephys = "ephysalis.formats.input.openephys:OpenEphysFormat"
-daq = "ephysalis.formats.input.legacy.daq.reader:DaqFormat"
-uff = "ephysalis.formats.input.legacy.uff:UffFormat"
-mcd = "ephysalis.formats.input.legacy.mcd:McdFormat"
+spikeglx = "ephysalis.registry:SPIKEGLX"
+openephys = "ephysalis.registry:OPENEPHYS"
+daq = "ephysalis.formats.input.legacy.daq.reader"
+uff = "ephysalis.formats.input.legacy.uff"
+mcd = "ephysalis.formats.input.legacy.mcd"
 
 [project.entry-points."ephysalis.metadata_plugins"]
-stimstage = "ephysalis.metadata.stimstage:StimStagePlugin"
-vstim = "ephysalis.metadata.vstim:VStimPlugin"
-vstim_td01 = "ephysalis.metadata.legacy.vstim_td01:VStimTD01Plugin"
+psychtoolbox_neuropixels_freiburg = "ephysalis.registry:PSYCHTOOLBOX_NEUROPIXELS_FREIBURG"
+vstim = "ephysalis.registry:VSTIM"
+vstim_td01 = "ephysalis.metadata.legacy.vstim_td01"
 
 [tool.pytest.ini_options]
 markers = [

@@ -74,7 +74,7 @@ def test_uff_session_and_p_clock(tmp_path):
     assert run.streams == ["M", "P"] and run.aux_stream == "M" and run.duration_s == 60.0
     aux = run.get_recording(StreamKind.AUX)
     assert list(aux.channel_ids) == [f"M{c}" for c in range(16)] and aux.get_channel_gains()[0] == pytest.approx(4882.8125)
-    events = run.format.read_ttl_events(run)
+    events = run.format.read_digital_line_edges(run)
     assert (events.state == 1).sum() == (np.diff((m[:, 15] > 330).astype(int)) == 1).sum()
 
     channels = ", ".join(f'"P{c}"' for c in range(14))

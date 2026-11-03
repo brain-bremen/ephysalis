@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_session
-from ephysalis.metadata.base import detect_metadata_plugin
+from ephysalis.metadata.base import run_trial_tables
 from conftest import real_session_path
 
 SESSION = real_session_path()
@@ -22,16 +22,15 @@ pytestmark = [
 def _paradigms():
     session = open_session(SESSION)
     for run in session.runs:
-        system = detect_metadata_plugin(run)
-        for paradigm in system.discover(run) if system else []:
-            legacy = paradigm.path / "mergedCombined_Uncurated_DataForProbe0.mat"
+        _, tables = run_trial_tables(run, None, None)
+        for conditions in tables.values():
+            legacy = run.path / conditions.attrs["folder"] / "mergedCombined_Uncurated_DataForProbe0.mat"
             if legacy.exists():
-                yield pytest.param(system, paradigm, legacy, id=run.name)
+                yield pytest.param(conditions, legacy, id=run.name)
 
 
-@pytest.mark.parametrize("system,paradigm,legacy", list(_paradigms()) if SESSION else [])
-def test_conditions_match_matlab(system, paradigm, legacy):
-    conditions = system.load_conditions(paradigm)
+@pytest.mark.parametrize("conditions,legacy", list(_paradigms()) if SESSION else [])
+def test_conditions_match_matlab(conditions, legacy):
     with h5py.File(legacy, "r") as f:
         stims = {k: f["stims"][k][()].ravel() for k in f["stims"]}
     n_legacy = len(stims["sampleIndsStart"])

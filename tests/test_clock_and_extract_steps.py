@@ -33,7 +33,7 @@ def test_steps_write_their_own_outputs(tmp_path):
 
 
 def test_dh5_event_codes(tmp_path):
-    events = pd.DataFrame({"time": [0.1, 0.2, 0.3], "source": ["ttl", "ttl", "network"],
+    events = pd.DataFrame({"time": [0.1, 0.2, 0.3], "source": ["ttl", "ttl", "word"],
                            "line": [3, 3, None], "state": [1, 0, None], "word": [None, None, 7],
                            "name": ["a", "a", "x"]})
     events.to_csv(tmp_path / "events.csv", index=False)

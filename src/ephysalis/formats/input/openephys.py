@@ -34,6 +34,8 @@ experiment, 1 s resolution). They are naive local times, like those of SpikeGLX.
 
 from __future__ import annotations
 
+import sys
+
 from collections.abc import Collection
 
 import re
@@ -43,13 +45,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephysalis.formats.input.base import InputFormat, keep_lines
+from ephysalis.formats.input.base import keep_lines
 from ephysalis.session.model import ProbeInfo, Run, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -311,234 +313,258 @@ def recording_start_time(recording: OERecording) -> datetime | None:
     return None
 
 
-class OpenEphysFormat(InputFormat):
-    name: ClassVar[str] = "openephys"
+# --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
 
-    def can_read(self, session_path: Path) -> bool:
-        return any(session_path.glob("Record Node *")) or session_path.name.startswith(
-            "Record Node"
-        )
+name = 'openephys'
+plugin_api_version = 1
 
-    def open_session(self, session_path: Path) -> Session:
-        if session_path.name.startswith("Record Node"):
-            record_node = session_path
-        else:
-            # Only use the first record node; further nodes typically hold copies of the same data.
-            from open_ephys.analysis.utils import alphanum_key
 
-            record_node = sorted(session_path.glob("Record Node *"), key=lambda p: alphanum_key(p.name))[0]
-        node = str(record_node)
-        runs: list[Run] = []
-        for position, recording in enumerate(_oe_recordings(node)):
-            streams = _node_streams(node, position)
-            probes: dict[str, dict[StreamKind, str]] = defaultdict(dict)
-            aux_streams = []
-            for stream in streams:
-                match = _PROBE_STREAM_RE.search(stream.folder)
-                if match is None:
-                    aux_streams.append(stream.name)
-                else:
-                    probes[match["probe"]][StreamKind.LF if match["band"] == "LFP" else StreamKind.AP] = stream.name
-            # analog-input streams (NI-DAQmx, ADC channels) before other non-probe streams
-            analog = [s.name for s in streams if s.name in aux_streams
-                      and all(re.match(r"(AI|ADC)\d+$", c) for c in s.channel_names)]
-            aux_streams = analog + [s for s in aux_streams if s not in analog]
-            main = next((s for s in streams if s.name in (aux_streams[:1] or [streams[0].name])), None) if streams else None
-            duration = _stored_data(node, position, main.index).n_samples / main.sample_rate if main else None
-            runs.append(
-                Run(
-                    name=f"experiment{recording.experiment_index + 1}_recording{recording.recording_index + 1}",
-                    path=session_path,
-                    index=len(runs),
-                    format=self,
-                    start_time=recording_start_time(recording),
-                    duration_s=duration,
-                    probes={pid: ProbeInfo(probe_id=pid, has_lf=StreamKind.LF in kinds, streams=dict(kinds))
-                            for pid, kinds in sorted(probes.items())},
-                    aux_stream=aux_streams[0] if aux_streams else None,
-                    streams=[s.name for s in streams],
-                    extra={
-                        "position": position,
-                        "oe_format": str(recording.format),
-                        "aux_streams": aux_streams,
-                        "record_node": record_node,
-                    },
-                )
+def can_read_session_folder(session_path: Path) -> bool:
+    return any(session_path.glob("Record Node *")) or session_path.name.startswith(
+        "Record Node"
+    )
+
+
+def open_session(session_path: Path) -> Session:
+    if session_path.name.startswith("Record Node"):
+        record_node = session_path
+    else:
+        # Only use the first record node; further nodes typically hold copies of the same data.
+        from open_ephys.analysis.utils import alphanum_key
+
+        record_node = sorted(session_path.glob("Record Node *"), key=lambda p: alphanum_key(p.name))[0]
+    node = str(record_node)
+    runs: list[Run] = []
+    for position, recording in enumerate(_oe_recordings(node)):
+        streams = _node_streams(node, position)
+        probes: dict[str, dict[StreamKind, str]] = defaultdict(dict)
+        aux_streams = []
+        for stream in streams:
+            match = _PROBE_STREAM_RE.search(stream.folder)
+            if match is None:
+                aux_streams.append(stream.name)
+            else:
+                probes[match["probe"]][StreamKind.LF if match["band"] == "LFP" else StreamKind.AP] = stream.name
+        # analog-input streams (NI-DAQmx, ADC channels) before other non-probe streams
+        analog = [s.name for s in streams if s.name in aux_streams
+                  and all(re.match(r"(AI|ADC)\d+$", c) for c in s.channel_names)]
+        aux_streams = analog + [s for s in aux_streams if s not in analog]
+        main = next((s for s in streams if s.name in (aux_streams[:1] or [streams[0].name])), None) if streams else None
+        duration = _stored_data(node, position, main.index).n_samples / main.sample_rate if main else None
+        runs.append(
+            Run(
+                name=f"experiment{recording.experiment_index + 1}_recording{recording.recording_index + 1}",
+                path=session_path,
+                index=len(runs),
+                format=sys.modules[__name__],
+                start_time=recording_start_time(recording),
+                duration_s=duration,
+                probes={pid: ProbeInfo(probe_id=pid, has_lf=StreamKind.LF in kinds, streams=dict(kinds))
+                        for pid, kinds in sorted(probes.items())},
+                aux_stream=aux_streams[0] if aux_streams else None,
+                streams=[s.name for s in streams],
+                extra={
+                    "position": position,
+                    "oe_format": str(recording.format),
+                    "aux_streams": aux_streams,
+                    "record_node": record_node,
+                },
             )
-        return Session(name=session_path.name, path=session_path, format=self, runs=runs)
+        )
+    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
 
-    # --- helpers ---
 
-    def _node(self, run: Run) -> str:
-        return str(run.extra["record_node"])
+def _node(run: Run) -> str:
+    return str(run.extra["record_node"])
 
-    def _oe_recording(self, run: Run) -> OERecording:
-        return _oe_recordings(self._node(run))[run.extra["position"]]
 
-    def _stream(self, run: Run, stream_name: str) -> OEStream:
-        return next(s for s in _node_streams(self._node(run), run.extra["position"]) if s.name == stream_name)
+def _oe_recording(run: Run) -> OERecording:
+    return _oe_recordings(_node(run))[run.extra["position"]]
 
-    def _data(self, run: Run, stream_name: str) -> _StoredData:
-        return _stored_data(self._node(run), run.extra["position"], self._stream(run, stream_name).index)
 
-    def _aux(self, run: Run) -> OEStream:
-        if run.aux_stream is None:
-            raise KeyError(f"Run {run.name} has no auxiliary stream")
-        return self._stream(run, run.aux_stream)
+def _stream(run: Run, stream_name: str) -> OEStream:
+    return next(s for s in _node_streams(_node(run), run.extra["position"]) if s.name == stream_name)
 
-    def _to_aux_samples(self, run: Run, events: pd.DataFrame) -> np.ndarray:
-        """Aux-stream sample of each event (columns ``sample_number``, ``stream_name``,
-        ``timestamp``): sample numbers of events of the aux stream itself, otherwise the time."""
-        aux = self._aux(run)
-        data = self._data(run, aux.name)
-        first = int(np.asarray(data.sample_numbers[:1])[0]) if data.n_samples else 0
-        samples = events["sample_number"].to_numpy(np.int64) - first
-        if "timestamp" in events and len(events):
-            other = ~events["stream_name"].map(lambda s: _same_stream(str(s), aux.oe_stream)).to_numpy(bool)
-            if other.any():
-                samples[other] = np.searchsorted(np.asarray(data.timestamps), events["timestamp"].to_numpy(float)[other])
-        return samples
 
-    def _events(self, run: Run) -> pd.DataFrame:
-        """TTL events of all processors; Binary in file order (see :meth:`read_network_events`),
-        the other formats sorted by sample number (stable)."""
-        recording = self._oe_recording(run)
-        if hasattr(recording, "sort_events"):
-            recording.sort_events = False
-        events = recording.events
-        if events is None or not len(events):
-            return pd.DataFrame(columns=["line", "sample_number", "timestamp", "processor_id", "stream_name", "state"])
-        return events.astype({"processor_id": np.int64, "line": np.int64, "state": np.int64})
+def _data(run: Run, stream_name: str) -> _StoredData:
+    return _stored_data(_node(run), run.extra["position"], _stream(run, stream_name).index)
 
-    # --- InputFormat ---
 
-    def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
-        from ephysalis.session.config import AuxChannelMap
+def _aux(run: Run) -> OEStream:
+    if run.aux_stream is None:
+        raise KeyError(f"Run {run.name} has no auxiliary stream")
+    return _stream(run, run.aux_stream)
 
-        return AuxChannelMap.vstim_openephys_default()
 
-    def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
-        from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+def _to_aux_samples(run: Run, events: pd.DataFrame) -> np.ndarray:
+    """Aux-stream sample of each event (columns ``sample_number``, ``stream_name``,
+    ``timestamp``): sample numbers of events of the aux stream itself, otherwise the time."""
+    aux = _aux(run)
+    data = _data(run, aux.name)
+    first = int(np.asarray(data.sample_numbers[:1])[0]) if data.n_samples else 0
+    samples = events["sample_number"].to_numpy(np.int64) - first
+    if "timestamp" in events and len(events):
+        other = ~events["stream_name"].map(lambda s: _same_stream(str(s), aux.oe_stream)).to_numpy(bool)
+        if other.any():
+            samples[other] = np.searchsorted(np.asarray(data.timestamps), events["timestamp"].to_numpy(float)[other])
+    return samples
 
-        streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
-        if run.aux_stream:
-            streams[AUX] = run.aux_stream
-        if not streams:
-            return None
-        reference = reference or next(iter(streams))
-        timestamps = {}
-        for key, name in streams.items():
-            timestamps[key] = (self._data(run, name).timestamps, self._stream(run, name).sample_rate)
-        t0 = float(np.asarray(timestamps[reference][0][:1])[0])
-        maps = {}
-        for key, (ts, rate) in timestamps.items():
-            step = max(1, int(rate))  # one point per second, plus the last sample
-            samples = np.unique(np.r_[np.arange(0, len(ts), step), len(ts) - 1])
-            maps[key] = ClockMap(samples.astype(float), np.asarray(ts[samples], dtype=float) - t0, rate)
-        return RunSync(reference=reference, maps=maps)
 
-    def _aux_channel_id(self, run: Run, index: int) -> str:
-        channel_ids = [str(c) for c in self.get_recording(run, StreamKind.AUX).channel_ids]
-        for candidate in (f"AI{index}", f"ADC{index + 1}"):
-            if candidate in channel_ids:
-                return candidate
-        if run.extra.get("oe_format") == "nwb" and index < len(channel_ids):  # NWB has no channel names
-            return channel_ids[index]
-        raise IndexError(f"Run {run.name}: no analog input {index} (AI{index}/ADC{index + 1}) in {channel_ids}")
+def _events(run: Run) -> pd.DataFrame:
+    """TTL events of all processors; Binary in file order (see :meth:`read_network_events`),
+    the other formats sorted by sample number (stable)."""
+    recording = _oe_recording(run)
+    if hasattr(recording, "sort_events"):
+        recording.sort_events = False
+    events = recording.events
+    if events is None or not len(events):
+        return pd.DataFrame(columns=["line", "sample_number", "timestamp", "processor_id", "stream_name", "state"])
+    return events.astype({"processor_id": np.int64, "line": np.int64, "state": np.int64})
 
-    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
-        recording = self.get_recording(run, StreamKind.AUX)
-        return recording.get_traces(channel_ids=[self._aux_channel_id(run, index)], return_in_uV=False)[:, 0]
 
-    def aux_analog_gain_v(self, run: Run, index: int) -> float:
-        recording = self.get_recording(run, StreamKind.AUX)
-        position = [str(c) for c in recording.channel_ids].index(self._aux_channel_id(run, index))
-        return float(recording.get_channel_gains()[position]) * 1e-6  # spikeinterface gains are uV per bit
+def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:
+    from ephysalis.session.config import AuxChannelMap
 
-    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
-        n = self.get_recording(run, StreamKind.AUX).get_num_samples()
-        line = np.zeros(n, dtype=bool)
-        events = self.read_ttl_events(run)
-        mine = events[events["line"] == bit + 1]
-        level = False
-        previous = 0
-        for sample, state in zip(np.clip(mine["aux_sample"].to_numpy(), 0, n), mine["state"].to_numpy()):
-            line[previous:sample] = level
-            level, previous = bool(state), int(sample)
-        line[previous:] = level
-        return line
+    return AuxChannelMap.vstim_openephys_default()
 
-    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
-        aux = self._aux(run)
-        events = self._events(run)
-        mine = events[(events["processor_id"] == aux.processor_id)
-                      & events["stream_name"].map(lambda s: _same_stream(str(s), aux.oe_stream)).astype(bool)]
-        result = pd.DataFrame({"aux_sample": self._to_aux_samples(run, mine), "line": mine["line"].to_numpy(np.int64),
-                               "state": mine["state"].to_numpy(np.int64)})
-        return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
 
-    def read_network_events(self, run: Run) -> pd.DataFrame:
-        """Words of the Network Events plugin: the plugin sets the lines of a word one by one in
-        the same sample, so the word is the line state after the last event of each sample.
-        The state is followed in the order the plugin wrote the events: words sent in quick
-        succession can be written out of time order, and their lines then interleave
-        differently than in time order. Only the Binary format keeps that order (open-ephys-python-tools
-        sorts NWB and legacy events by sample number)."""
-        empty = super().read_network_events(run)
-        if run.aux_stream is None:
+def clock_alignment_from_synchronised_timestamps(run: Run, reference_stream: str | None = None) -> RunSync | None:
+    from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+
+    streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
+    if run.aux_stream:
+        streams[AUX] = run.aux_stream
+    if not streams:
+        return None
+    reference_stream = reference_stream or next(iter(streams))
+    timestamps = {}
+    for key, name in streams.items():
+        timestamps[key] = (_data(run, name).timestamps, _stream(run, name).sample_rate)
+    t0 = float(np.asarray(timestamps[reference_stream][0][:1])[0])
+    maps = {}
+    for key, (ts, rate) in timestamps.items():
+        step = max(1, int(rate))  # one point per second, plus the last sample
+        samples = np.unique(np.r_[np.arange(0, len(ts), step), len(ts) - 1])
+        maps[key] = ClockMap(samples.astype(float), np.asarray(ts[samples], dtype=float) - t0, rate)
+    return RunSync(reference=reference_stream, maps=maps)
+
+
+def _aux_channel_id(run: Run, index: int) -> str:
+    channel_ids = [str(c) for c in get_stream_recording(run, StreamKind.AUX).channel_ids]
+    for candidate in (f"AI{index}", f"ADC{index + 1}"):
+        if candidate in channel_ids:
+            return candidate
+    if run.extra.get("oe_format") == "nwb" and index < len(channel_ids):  # NWB has no channel names
+        return channel_ids[index]
+    raise IndexError(f"Run {run.name}: no analog input {index} (AI{index}/ADC{index + 1}) in {channel_ids}")
+
+
+def read_auxiliary_analog_channel(run: Run, index: int) -> np.ndarray:
+    recording = get_stream_recording(run, StreamKind.AUX)
+    return recording.get_traces(channel_ids=[_aux_channel_id(run, index)], return_in_uV=False)[:, 0]
+
+
+def auxiliary_analog_volts_per_count(run: Run, index: int) -> float:
+    recording = get_stream_recording(run, StreamKind.AUX)
+    position = [str(c) for c in recording.channel_ids].index(_aux_channel_id(run, index))
+    return float(recording.get_channel_gains()[position]) * 1e-6  # spikeinterface gains are uV per bit
+
+
+def read_auxiliary_digital_line(run: Run, bit: int) -> np.ndarray:
+    n = get_stream_recording(run, StreamKind.AUX).get_num_samples()
+    line = np.zeros(n, dtype=bool)
+    events = read_digital_line_edges(run)
+    mine = events[events["line"] == bit + 1]
+    level = False
+    previous = 0
+    for sample, state in zip(np.clip(mine["aux_sample"].to_numpy(), 0, n), mine["state"].to_numpy()):
+        line[previous:sample] = level
+        level, previous = bool(state), int(sample)
+    line[previous:] = level
+    return line
+
+
+def read_digital_line_edges(run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+    aux = _aux(run)
+    events = _events(run)
+    mine = events[(events["processor_id"] == aux.processor_id)
+                  & events["stream_name"].map(lambda s: _same_stream(str(s), aux.oe_stream)).astype(bool)]
+    result = pd.DataFrame({"aux_sample": _to_aux_samples(run, mine), "line": mine["line"].to_numpy(np.int64),
+                           "state": mine["state"].to_numpy(np.int64)})
+    return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
+
+
+def read_event_words(run: Run) -> pd.DataFrame:
+    """Words of the Network Events plugin: the plugin sets the lines of a word one by one in
+    the same sample, so the word is the line state after the last event of each sample.
+    The state is followed in the order the plugin wrote the events: words sent in quick
+    succession can be written out of time order, and their lines then interleave
+    differently than in time order. Only the Binary format keeps that order (open-ephys-python-tools
+    sorts NWB and legacy events by sample number)."""
+    empty = pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "word": np.zeros(0, np.int64)})
+    if run.aux_stream is None:
+        return empty
+    names = _processor_names(_settings_file(_node(run), _oe_recording(run).experiment_index))
+    events = _events(run)
+    events = events[events["processor_id"].map(lambda p: names.get(int(p)) == NETWORK_EVENTS_PROCESSOR).astype(bool)]
+    if not len(events):
+        return empty
+    words = np.empty(len(events), dtype=np.int64)
+    word = 0
+    for k, (line, state) in enumerate(zip(events["line"].tolist(), events["state"].tolist())):
+        bit = 1 << ((line - 1) % 32)
+        word = word | bit if state else word & ~bit
+        words[k] = word
+    numbers = events["sample_number"].to_numpy(np.int64)
+    last = np.r_[numbers[1:] != numbers[:-1], True]  # last event of each sample (run of equal samples)
+    result = pd.DataFrame({"aux_sample": _to_aux_samples(run, events[last]), "word": words[last]})
+    return result.sort_values("aux_sample", kind="stable", ignore_index=True)
+
+
+def read_text_messages(run: Run) -> pd.DataFrame:
+    empty = pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
+    if run.aux_stream is None:
+        return empty
+    recording = _oe_recording(run)
+    if run.extra.get("oe_format") == "nwb":  # open-ephys-python-tools does not read NWB messages yet
+        acquisition = recording.nwb["acquisition"]  # type: ignore[attr-defined]
+        if "messages" not in acquisition:
             return empty
-        names = _processor_names(_settings_file(self._node(run), self._oe_recording(run).experiment_index))
-        events = self._events(run)
-        events = events[events["processor_id"].map(lambda p: names.get(int(p)) == NETWORK_EVENTS_PROCESSOR).astype(bool)]
-        if not len(events):
+        group = acquisition["messages"]
+        messages = pd.DataFrame({"sample_number": group["sync"][()], "timestamp": group["timestamps"][()],
+                                 "message": [bytes(m).decode("utf-8", errors="replace") for m in group["data"][()]]})
+    else:
+        messages = recording.messages
+        if messages is None or not len(messages):
             return empty
-        words = np.empty(len(events), dtype=np.int64)
-        word = 0
-        for k, (line, state) in enumerate(zip(events["line"].tolist(), events["state"].tolist())):
-            bit = 1 << ((line - 1) % 32)
-            word = word | bit if state else word & ~bit
-            words[k] = word
-        numbers = events["sample_number"].to_numpy(np.int64)
-        last = np.r_[numbers[1:] != numbers[:-1], True]  # last event of each sample (run of equal samples)
-        result = pd.DataFrame({"aux_sample": self._to_aux_samples(run, events[last]), "word": words[last]})
-        return result.sort_values("aux_sample", kind="stable", ignore_index=True)
+        if run.extra.get("oe_format") == "open-ephys":  # sample numbers in the "timestamp" column
+            messages = pd.DataFrame({"sample_number": messages["timestamp"].to_numpy(np.int64),
+                                     "message": messages["message"].str.strip().to_numpy()})
+    if "timestamp" in messages:  # on the main clock: place by time
+        data = _data(run, run.aux_stream)
+        samples = np.searchsorted(np.asarray(data.timestamps), messages["timestamp"].to_numpy(float))
+    else:
+        samples = _to_aux_samples(run, messages.assign(stream_name=_aux(run).oe_stream))
+    return pd.DataFrame({"aux_sample": np.asarray(samples, dtype=np.int64), "text": messages["message"].to_numpy()})
 
-    def read_messages(self, run: Run) -> pd.DataFrame:
-        empty = pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
-        if run.aux_stream is None:
-            return empty
-        recording = self._oe_recording(run)
-        if run.extra.get("oe_format") == "nwb":  # open-ephys-python-tools does not read NWB messages yet
-            acquisition = recording.nwb["acquisition"]  # type: ignore[attr-defined]
-            if "messages" not in acquisition:
-                return empty
-            group = acquisition["messages"]
-            messages = pd.DataFrame({"sample_number": group["sync"][()], "timestamp": group["timestamps"][()],
-                                     "message": [bytes(m).decode("utf-8", errors="replace") for m in group["data"][()]]})
-        else:
-            messages = recording.messages
-            if messages is None or not len(messages):
-                return empty
-            if run.extra.get("oe_format") == "open-ephys":  # sample numbers in the "timestamp" column
-                messages = pd.DataFrame({"sample_number": messages["timestamp"].to_numpy(np.int64),
-                                         "message": messages["message"].str.strip().to_numpy()})
-        if "timestamp" in messages:  # on the main clock: place by time
-            data = self._data(run, run.aux_stream)
-            samples = np.searchsorted(np.asarray(data.timestamps), messages["timestamp"].to_numpy(float))
-        else:
-            samples = self._to_aux_samples(run, messages.assign(stream_name=self._aux(run).oe_stream))
-        return pd.DataFrame({"aux_sample": np.asarray(samples, dtype=np.int64), "text": messages["message"].to_numpy()})
 
-    def get_recording(
-        self, run: Run, kind: StreamKind, probe_id: str | None = None
-    ) -> BaseRecording:
-        if kind == StreamKind.AUX:
-            stream_name = self._aux(run).name
-        else:
-            if probe_id is None:
-                raise ValueError(f"probe_id is required for {kind} streams")
-            try:
-                stream_name = run.probes[probe_id].streams[kind]
-            except KeyError:
-                raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
-        return _extractor(self._node(run), run.extra["position"], stream_name)
+def get_stream_recording(run: Run, kind: StreamKind, probe_id: str | None = None
+) -> BaseRecording:
+    if kind == StreamKind.AUX:
+        stream_name = _aux(run).name
+    else:
+        if probe_id is None:
+            raise ValueError(f"probe_id is required for {kind} streams")
+        try:
+            stream_name = run.probes[probe_id].streams[kind]
+        except KeyError:
+            raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
+    return _extractor(_node(run), run.extra["position"], stream_name)
+
+
+def auxiliary_analog_recording(run: Run) -> BaseRecording:
+    return get_stream_recording(run, StreamKind.AUX, None)
+
+
+def auxiliary_sampling_frequency(run: Run) -> float:
+    return get_stream_recording(run, StreamKind.AUX, None).sampling_frequency

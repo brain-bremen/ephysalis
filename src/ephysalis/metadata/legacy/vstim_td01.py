@@ -50,13 +50,13 @@ import warnings
 from datetime import date
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from ephysalis.metadata.runstart import RunStart
-from ephysalis.metadata.base import Paradigm, MetadataPlugin
+from ephysalis.metadata.base import Paradigm
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
@@ -241,9 +241,9 @@ def day_clock_offset(run: Run, start_bit: int) -> float | None:
         if path is None:
             continue
         tdr = _tdr_trials(str(path))
-        fs = other.format.aux_sampling_frequency(other)
+        fs = other.format.auxiliary_sampling_frequency(other)
         c, s = [], []
-        for start, _, number, _ in _records(other, descriptors, _rising(other.format.read_ttl_events(other, {start_bit + 1}), start_bit)):
+        for start, _, number, _ in _records(other, descriptors, _rising(other.format.read_digital_line_edges(other, {start_bit + 1}), start_bit)):
             stamp = stamp_seconds(tdr[number]) if number in tdr else None
             if stamp is not None:
                 c.append(stamp)
@@ -271,8 +271,9 @@ def _rising(ttl: pd.DataFrame, bit: int) -> np.ndarray:
 
 
 def _descriptors(run: Run) -> pd.DataFrame | None:
-    read = getattr(run.format, "read_trial_descriptors", None)
-    return read(run) if read is not None else None
+    from ephysalis.plugins import ReadsTrialDescriptorEvents
+
+    return run.format.read_trial_descriptor_events(run) if isinstance(run.format, ReadsTrialDescriptorEvents) else None
 
 
 def tdr_for_time(run: Run) -> Path | None:
@@ -304,203 +305,225 @@ def stamps_in_window(tdr: dict[int, Any], t0: float, t1: float) -> int:
                and (s := stamp_seconds(t)) is not None and t0 <= s <= t1)
 
 
-class VStimTD01Plugin(MetadataPlugin):
-    name: ClassVar[str] = "vstim_td01"
+# --- the metadata plugin (ephysalis.plugins.MetadataPlugin and capabilities) ---
 
-    def can_handle(self, run: Run) -> bool:
-        descriptors = _descriptors(run)
-        if descriptors is None:
-            return False
-        return len(descriptors) > 0 or tdr_for_time(run) is not None
+name = 'vstim_td01'
+plugin_api_version = 1
 
-    def discover(self, run: Run) -> list[Paradigm]:
-        descriptors = _descriptors(run)
-        if descriptors is None:
+
+def _can_handle(run: Run) -> bool:
+    descriptors = _descriptors(run)
+    if descriptors is None:
+        return False
+    return len(descriptors) > 0 or tdr_for_time(run) is not None
+
+
+def _discover(run: Run) -> list[Paradigm]:
+    descriptors = _descriptors(run)
+    if descriptors is None:
+        return []
+    if not len(descriptors):  # no trial descriptors: trial-start pulses matched to the .tdr by time
+        path = tdr_for_time(run)
+        if path is None:
             return []
-        if not len(descriptors):  # no trial descriptors: trial-start pulses matched to the .tdr by time
-            path = tdr_for_time(run)
-            if path is None:
-                return []
-            header = _read_tdr(str(path)).headers[0]
-            ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
-            return [Paradigm(name=ini or path.stem, run_name=run.name, index_in_run=0, system=self.name, path=path,
-                             metadata={"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None),
-                                       "trial_descriptors": False})]
-        is_frozen = frozen(descriptors)
-        if is_frozen:  # matched by time in load_trials: the day's .tdr
-            day = run.start_time.date() if run.start_time is not None else None
-            path = next((p for p in _candidates(run) if day is None or tdr_date(p) == day), None)
+        header = _read_tdr(str(path)).headers[0]
+        ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
+        return [Paradigm(name=ini or path.stem, run_name=run.name, index_in_run=0, system=name, path=path,
+                         metadata={"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None),
+                                   "trial_descriptors": False})]
+    is_frozen = frozen(descriptors)
+    if is_frozen:  # matched by time in load_trials: the day's .tdr
+        day = run.start_time.date() if run.start_time is not None else None
+        path = next((p for p in _candidates(run) if day is None or tdr_date(p) == day), None)
+    else:
+        path = find_tdr(run, descriptors)
+    name = "trials"
+    metadata: dict[str, Any] = {"tdr": None}
+    if path is not None:
+        header = _read_tdr(str(path)).headers[0]
+        ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
+        name = ini or path.stem
+        metadata = {"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None), "td01_frozen": is_frozen}
+    else:
+        logger.warning("Run %s: no .tdr with its trial numbers found; outcomes from the trigger lines", run.name)
+    return [Paradigm(name=name, run_name=run.name, index_in_run=0, system=name, path=path, metadata=metadata)]
+
+
+def _load_conditions(paradigm: Paradigm) -> pd.DataFrame:
+    """The ``.tdr`` trials (all of the day; :meth:`load_trials` keeps those of the run)."""
+    rows = []
+    if paradigm.path is not None:
+        for k, trial in enumerate(_read_tdr(str(paradigm.path)).get_trials()):
+            rows.append({"trial": k, "condition": int(trial.stimulusNumber), "vstim_trial": int(trial.trialNumber),
+                         "outcome": int(trial.outcome.value), "outcome_name": trial.outcome.name})
+    return pd.DataFrame(rows)
+
+
+def _match_frozen(run: Run, records: list, tdr: dict[int, Any], roles: dict[str, int], fs: float,
+                  first_pulse: Any) -> tuple[str, dict[int, Any]]:
+    """Trial numbers of a run with frozen TD01 records from the day's .tdr by time; returns
+    (description, .tdr trials; empty if not matched) and replaces the numbers in ``records``."""
+    frozen_number = records[0][2] if records else -1
+    offset = day_clock_offset(run, roles.get("trial_start", 0))
+    header = _header_start(run)
+    if not tdr or offset is None or header is None:
+        logger.warning("Run %s: all TD01 records carry trial number %d (not received from VStim), and %s; trials "
+                       "without .tdr parameters", run.name, frozen_number,
+                       "no .tdr of the day" if not tdr else "no other run of the day gives the PC clock")
+        return f"TD01 frozen (all records trial {frozen_number}), not matched", {}
+    pc_s = _seconds_of_day(header) - offset + np.array([r[0] for r in records], float) / fs
+    outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
+    try:
+        numbers, report = match_by_time(pc_s, tdr, outcomes)
+    except ValueError as error:
+        logger.warning("Run %s: TD01 frozen; %s", run.name, error)
+        return f"TD01 frozen (all records trial {frozen_number}), not matched: {error}", {}
+    records[:] = [(start, sample, number if number is not None else old, stimulus)
+                  for (start, sample, old, stimulus), number in zip(records, numbers)]
+    logger.info("Run %s: TD01 frozen, trials matched to the .tdr by time: %s", run.name, report)
+    return (f"TD01 frozen (all records trial {frozen_number}): matched to the .tdr by time ({report['n_matched']}/"
+            f"{report['n_trials']} trials, shift {report['shift_s']:+.2f} s from the day's clock offset "
+            f"{offset:.1f} s, trigger-line outcome agrees in {report['outcome_agreement']})"), tdr
+
+
+def _match_starts(run: Run, records: list, tdr: dict[int, Any], fs: float,
+                  first_pulse: Any) -> tuple[str, dict[int, Any]]:
+    """Trial numbers of a run without trial descriptors: its trial-start pulses matched to the ``.tdr`` stamps
+    by time (run start = recording PC's wall clock, within ±30 s of the VStim PC's). Starts without a
+    ``.tdr`` trial get number -1. Returns (description, .tdr trials; empty if not matched)."""
+    if not tdr or run.start_time is None:
+        logger.warning("Run %s: no trial descriptors and no .tdr; trials without .tdr parameters", run.name)
+        return "no trial descriptors, no .tdr", {}
+    t0 = _seconds_of_day(run.start_time)
+    pc_s = t0 + np.array([r[0] for r in records], float) / fs
+    required = stamps_in_window(tdr, float(pc_s.min()) - 1, float(pc_s.max()) + 1) if len(pc_s) else 0
+    outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
+    try:
+        numbers, report = match_by_time(pc_s, tdr, outcomes, required=required)
+    except ValueError as error:
+        logger.warning("Run %s: no trial descriptors; %s", run.name, error)
+        return f"no trial descriptors, not matched to the .tdr: {error}", {}
+    records[:] = [(start, sample, number if number is not None else -1, stimulus)
+                  for (start, sample, _, stimulus), number in zip(records, numbers)]
+    logger.info("Run %s: no trial descriptors, trial starts matched to the .tdr by time: %s", run.name, report)
+    return (f"trial-start pulses matched to the .tdr by time ({report['n_matched']} of {report['n_trials']} starts, "
+            f"{required} .tdr trials in the run, shift {report['shift_s']:+.2f} s, trigger-line outcome agrees "
+            f"in {report['outcome_agreement']})"), tdr
+
+
+def estimate_run_start_time(run: Run, trial_tables: dict[str, pd.DataFrame]) -> RunStart | None:
+    """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephysalis.metadata.legacy.pcclock`)."""
+    from datetime import datetime, timedelta
+
+    from ephysalis.metadata.legacy.pcclock import fit_method, pc_fit, trial_stamps
+
+    header = _header_start(run)
+    tables = [t for t in trial_tables.values() if not t.empty]
+    if header is None or not tables:
+        return None
+    fit = pc_fit(*trial_stamps(pd.concat(tables, ignore_index=True)))
+    if fit is None:
+        return None
+    midnight = datetime(header.year, header.month, header.day)
+    return RunStart(midnight + timedelta(seconds=fit["offset_s"]), fit_method(fit), fit)
+
+
+def _load_trials(run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None) -> pd.DataFrame:
+    descriptors = _descriptors(run)
+    assert descriptors is not None
+    no_descriptors = not len(descriptors)
+    roles = aux.channels.digital if aux is not None else {}
+    needed = {roles.get("trial_start", 0) + 1} | {bit + 1 for role, bit in roles.items()
+                                                 if role == "trial_end" or role in OUTCOME_ROLES}
+    ttl = run.format.read_digital_line_edges(run, needed)
+    fs = run.format.auxiliary_sampling_frequency(run)
+    starts = _rising(ttl, roles.get("trial_start", 0))
+    ends = _rising(ttl, roles["trial_end"]) if "trial_end" in roles else None
+    outcome_pulses = sorted((s, code) for role, code in OUTCOME_ROLES.items() if role in roles
+                            for s in _rising(ttl, roles[role]))
+    pulse_samples = np.array([s for s, _ in outcome_pulses], dtype=np.int64)
+    tdr = _tdr_trials(str(paradigm.path)) if paradigm.path is not None else {}
+    records = ([(int(s), int(s), -1, -1) for s in starts] if no_descriptors
+               else _records(run, descriptors, starts))
+    if len(records) < len(descriptors):
+        logger.warning("Run %s: %d TD01 records without a trial start edge before them dropped",
+                       run.name, len(descriptors) - len(records))
+
+    def first_pulse(k: int) -> tuple[int, int] | None:
+        following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
+        pulse = int(np.searchsorted(pulse_samples, records[k][0]))
+        return outcome_pulses[pulse] if pulse < len(outcome_pulses) and pulse_samples[pulse] < following else None
+
+    number_source = "TD01"
+    if no_descriptors:
+        number_source, tdr = _match_starts(run, records, tdr, fs, first_pulse)
+        records = [r for r in records if r[2] >= 0 or not tdr]  # starts without a .tdr trial: VStim restarts
+        if tdr:
+            records = [(start, sample, number, int(tdr[number].stimulusNumber))
+                       for start, sample, number, _ in records]
+    elif frozen(descriptors):
+        number_source, tdr = _match_frozen(run, records, tdr, roles, fs, first_pulse)
+        if tdr:
+            records = [(start, sample, number, int(tdr[number].stimulusNumber) if number in tdr else stimulus)
+                       for start, sample, number, stimulus in records]
+    rows = []
+    for k, (start, sample, number, stimulus) in enumerate(records):
+        pulse_k = first_pulse(k)
+        following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
+        trial = tdr.get(number)
+        row: dict[str, Any] = {"trial": k, "condition": stimulus, "vstim_trial": number,
+                               "trial_number_source": number_source}
+        if trial is not None:
+            if int(trial.stimulusNumber) != stimulus:
+                logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
+                               stimulus, int(trial.stimulusNumber))
+            stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephysalis.metadata.legacy.pcclock)
+            row.update(outcome=int(trial.outcome.value), outcome_name=trial.outcome.name, outcome_source="tdr",
+                       pc_clock_time=stamp,
+                       time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),
+                       reward_ms=float(trial.rewardDurationMS) if trial.rewardDurationMS is not None else np.nan)
+        elif pulse_k is not None:
+            row.update(outcome=pulse_k[1], outcome_source="trigger lines")
         else:
-            path = find_tdr(run, descriptors)
-        name = "trials"
-        metadata: dict[str, Any] = {"tdr": None}
-        if path is not None:
-            header = _read_tdr(str(path)).headers[0]
-            ini = Path(str(getattr(header, "iniFile", "") or "").replace("\\", "/")).stem
-            name = ini or path.stem
-            metadata = {"tdr": path.name, "vstim_version": getattr(header, "vstimVersion", None), "td01_frozen": is_frozen}
-        else:
-            logger.warning("Run %s: no .tdr with its trial numbers found; outcomes from the trigger lines", run.name)
-        return [Paradigm(name=name, run_name=run.name, index_in_run=0, system=self.name, path=path, metadata=metadata)]
-
-    def load_conditions(self, paradigm: Paradigm) -> pd.DataFrame:
-        """The ``.tdr`` trials (all of the day; :meth:`load_trials` keeps those of the run)."""
-        rows = []
-        if paradigm.path is not None:
-            for k, trial in enumerate(_read_tdr(str(paradigm.path)).get_trials()):
-                rows.append({"trial": k, "condition": int(trial.stimulusNumber), "vstim_trial": int(trial.trialNumber),
-                             "outcome": int(trial.outcome.value), "outcome_name": trial.outcome.name})
-        return pd.DataFrame(rows)
-
-    @staticmethod
-    def _match_frozen(run: Run, records: list, tdr: dict[int, Any], roles: dict[str, int], fs: float,
-                      first_pulse: Any) -> tuple[str, dict[int, Any]]:
-        """Trial numbers of a run with frozen TD01 records from the day's .tdr by time; returns
-        (description, .tdr trials; empty if not matched) and replaces the numbers in ``records``."""
-        frozen_number = records[0][2] if records else -1
-        offset = day_clock_offset(run, roles.get("trial_start", 0))
-        header = _header_start(run)
-        if not tdr or offset is None or header is None:
-            logger.warning("Run %s: all TD01 records carry trial number %d (not received from VStim), and %s; trials "
-                           "without .tdr parameters", run.name, frozen_number,
-                           "no .tdr of the day" if not tdr else "no other run of the day gives the PC clock")
-            return f"TD01 frozen (all records trial {frozen_number}), not matched", {}
-        pc_s = _seconds_of_day(header) - offset + np.array([r[0] for r in records], float) / fs
-        outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
-        try:
-            numbers, report = match_by_time(pc_s, tdr, outcomes)
-        except ValueError as error:
-            logger.warning("Run %s: TD01 frozen; %s", run.name, error)
-            return f"TD01 frozen (all records trial {frozen_number}), not matched: {error}", {}
-        records[:] = [(start, sample, number if number is not None else old, stimulus)
-                      for (start, sample, old, stimulus), number in zip(records, numbers)]
-        logger.info("Run %s: TD01 frozen, trials matched to the .tdr by time: %s", run.name, report)
-        return (f"TD01 frozen (all records trial {frozen_number}): matched to the .tdr by time ({report['n_matched']}/"
-                f"{report['n_trials']} trials, shift {report['shift_s']:+.2f} s from the day's clock offset "
-                f"{offset:.1f} s, trigger-line outcome agrees in {report['outcome_agreement']})"), tdr
-
-    @staticmethod
-    def _match_starts(run: Run, records: list, tdr: dict[int, Any], fs: float,
-                      first_pulse: Any) -> tuple[str, dict[int, Any]]:
-        """Trial numbers of a run without trial descriptors: its trial-start pulses matched to the ``.tdr`` stamps
-        by time (run start = recording PC's wall clock, within ±30 s of the VStim PC's). Starts without a
-        ``.tdr`` trial get number -1. Returns (description, .tdr trials; empty if not matched)."""
-        if not tdr or run.start_time is None:
-            logger.warning("Run %s: no trial descriptors and no .tdr; trials without .tdr parameters", run.name)
-            return "no trial descriptors, no .tdr", {}
-        t0 = _seconds_of_day(run.start_time)
-        pc_s = t0 + np.array([r[0] for r in records], float) / fs
-        required = stamps_in_window(tdr, float(pc_s.min()) - 1, float(pc_s.max()) + 1) if len(pc_s) else 0
-        outcomes = [p[1] if (p := first_pulse(k)) is not None else None for k in range(len(records))]
-        try:
-            numbers, report = match_by_time(pc_s, tdr, outcomes, required=required)
-        except ValueError as error:
-            logger.warning("Run %s: no trial descriptors; %s", run.name, error)
-            return f"no trial descriptors, not matched to the .tdr: {error}", {}
-        records[:] = [(start, sample, number if number is not None else -1, stimulus)
-                      for (start, sample, _, stimulus), number in zip(records, numbers)]
-        logger.info("Run %s: no trial descriptors, trial starts matched to the .tdr by time: %s", run.name, report)
-        return (f"trial-start pulses matched to the .tdr by time ({report['n_matched']} of {report['n_trials']} starts, "
-                f"{required} .tdr trials in the run, shift {report['shift_s']:+.2f} s, trigger-line outcome agrees "
-                f"in {report['outcome_agreement']})"), tdr
-
-    def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
-        """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephysalis.metadata.legacy.pcclock`)."""
-        from datetime import datetime, timedelta
-
-        from ephysalis.metadata.legacy.pcclock import fit_method, pc_fit, trial_stamps
-
-        header = _header_start(run)
-        tables = [t for t in trials.values() if not t.empty]
-        if header is None or not tables:
-            return None
-        fit = pc_fit(*trial_stamps(pd.concat(tables, ignore_index=True)))
-        if fit is None:
-            return None
-        midnight = datetime(header.year, header.month, header.day)
-        return RunStart(midnight + timedelta(seconds=fit["offset_s"]), fit_method(fit), fit)
-
-    def load_trials(self, run: Run, paradigm: Paradigm, sync: RunSync, aux: AuxSignals | None) -> pd.DataFrame:
-        descriptors = _descriptors(run)
-        assert descriptors is not None
-        no_descriptors = not len(descriptors)
-        roles = aux.channels.digital if aux is not None else {}
-        needed = {roles.get("trial_start", 0) + 1} | {bit + 1 for role, bit in roles.items()
-                                                     if role == "trial_end" or role in OUTCOME_ROLES}
-        ttl = run.format.read_ttl_events(run, needed)
-        fs = run.format.aux_sampling_frequency(run)
-        starts = _rising(ttl, roles.get("trial_start", 0))
-        ends = _rising(ttl, roles["trial_end"]) if "trial_end" in roles else None
-        outcome_pulses = sorted((s, code) for role, code in OUTCOME_ROLES.items() if role in roles
-                                for s in _rising(ttl, roles[role]))
-        pulse_samples = np.array([s for s, _ in outcome_pulses], dtype=np.int64)
-        tdr = _tdr_trials(str(paradigm.path)) if paradigm.path is not None else {}
-        records = ([(int(s), int(s), -1, -1) for s in starts] if no_descriptors
-                   else _records(run, descriptors, starts))
-        if len(records) < len(descriptors):
-            logger.warning("Run %s: %d TD01 records without a trial start edge before them dropped",
-                           run.name, len(descriptors) - len(records))
-
-        def first_pulse(k: int) -> tuple[int, int] | None:
-            following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
-            pulse = int(np.searchsorted(pulse_samples, records[k][0]))
-            return outcome_pulses[pulse] if pulse < len(outcome_pulses) and pulse_samples[pulse] < following else None
-
-        number_source = "TD01"
-        if no_descriptors:
-            number_source, tdr = self._match_starts(run, records, tdr, fs, first_pulse)
-            records = [r for r in records if r[2] >= 0 or not tdr]  # starts without a .tdr trial: VStim restarts
-            if tdr:
-                records = [(start, sample, number, int(tdr[number].stimulusNumber))
-                           for start, sample, number, _ in records]
-        elif frozen(descriptors):
-            number_source, tdr = self._match_frozen(run, records, tdr, roles, fs, first_pulse)
-            if tdr:
-                records = [(start, sample, number, int(tdr[number].stimulusNumber) if number in tdr else stimulus)
-                           for start, sample, number, stimulus in records]
-        rows = []
-        for k, (start, sample, number, stimulus) in enumerate(records):
-            pulse_k = first_pulse(k)
-            following = records[k + 1][0] if k + 1 < len(records) else np.iinfo(np.int64).max
-            trial = tdr.get(number)
-            row: dict[str, Any] = {"trial": k, "condition": stimulus, "vstim_trial": number,
-                                   "trial_number_source": number_source}
-            if trial is not None:
-                if int(trial.stimulusNumber) != stimulus:
-                    logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
-                                   stimulus, int(trial.stimulusNumber))
-                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephysalis.metadata.legacy.pcclock)
-                row.update(outcome=int(trial.outcome.value), outcome_name=trial.outcome.name, outcome_source="tdr",
-                           pc_clock_time=stamp,
-                           time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),
-                           reward_ms=float(trial.rewardDurationMS) if trial.rewardDurationMS is not None else np.nan)
-            elif pulse_k is not None:
-                row.update(outcome=pulse_k[1], outcome_source="trigger lines")
-            else:
-                row.update(outcome=OUTCOME_UNDETERMINED, outcome_source="none")
-            end, end_source = start, "start"
-            if ends is not None:
-                after = ends[ends > sample]
-                if after.size and after[0] < following:
-                    end, end_source = int(after[0]), "trial_end line"
-            elif trial is not None and (end_ms := tdr_trial_end_ms(trial)) is not None:
-                end, end_source = start + int(round(end_ms * fs / 1000)), "tdr"
-            elif pulse_k is not None:
-                end = int(pulse_k[0] + round(TRIAL_END_AFTER_OUTCOME_PULSE_MS * fs / 1000))
-                end_source = "outcome pulse + 335 ms"
-            row.update(start_sample=start, stop_sample=end, stop_source=end_source)
-            rows.append(row)
-        trials = pd.DataFrame(rows)
-        if trials.empty:
-            return trials
-        if "outcome_name" not in trials:
-            trials["outcome_name"] = ""
-        from vstim.tdr import TrialOutcome
-
-        names = {o.value: o.name for o in TrialOutcome}
-        trials["outcome_name"] = [n if isinstance(n, str) and n else names.get(int(o), "Undetermined")
-                                  for n, o in zip(trials.outcome_name, trials.outcome)]
-        trials.insert(1, "start_time", sync.to_reference_time(AUX, trials.pop("start_sample").to_numpy(float)))
-        trials.insert(2, "stop_time", sync.to_reference_time(AUX, trials.pop("stop_sample").to_numpy(float)))
-        trials["tdr"] = paradigm.path.name if paradigm.path is not None else ""
+            row.update(outcome=OUTCOME_UNDETERMINED, outcome_source="none")
+        end, end_source = start, "start"
+        if ends is not None:
+            after = ends[ends > sample]
+            if after.size and after[0] < following:
+                end, end_source = int(after[0]), "trial_end line"
+        elif trial is not None and (end_ms := tdr_trial_end_ms(trial)) is not None:
+            end, end_source = start + int(round(end_ms * fs / 1000)), "tdr"
+        elif pulse_k is not None:
+            end = int(pulse_k[0] + round(TRIAL_END_AFTER_OUTCOME_PULSE_MS * fs / 1000))
+            end_source = "outcome pulse + 335 ms"
+        row.update(start_sample=start, stop_sample=end, stop_source=end_source)
+        rows.append(row)
+    trials = pd.DataFrame(rows)
+    if trials.empty:
         return trials
+    if "outcome_name" not in trials:
+        trials["outcome_name"] = ""
+    from vstim.tdr import TrialOutcome
+
+    names = {o.value: o.name for o in TrialOutcome}
+    trials["outcome_name"] = [n if isinstance(n, str) and n else names.get(int(o), "Undetermined")
+                              for n, o in zip(trials.outcome_name, trials.outcome)]
+    trials.insert(1, "start_time", sync.to_reference_time(AUX, trials.pop("start_sample").to_numpy(float)))
+    trials.insert(2, "stop_time", sync.to_reference_time(AUX, trials.pop("stop_sample").to_numpy(float)))
+    trials["tdr"] = paradigm.path.name if paradigm.path is not None else ""
+    return trials
+
+
+def extract_trial_tables(run: Run, clock_alignment: RunSync | None, auxiliary_signals: AuxSignals | None
+                         ) -> dict[str, pd.DataFrame] | None:
+    """One table per paradigm of the run (with times on the reference clock if ``clock_alignment``
+    is given), the paradigm's details in the table's ``attrs``; None if the run is not from this setup."""
+    if not _can_handle(run):
+        return None
+    tables = {}
+    for paradigm in _discover(run):
+        table = (_load_conditions(paradigm) if clock_alignment is None
+                 else _load_trials(run, paradigm, clock_alignment, auxiliary_signals))
+        table.attrs.update({k: v for k, v in paradigm.metadata.items() if k not in table.attrs})
+        tables[paradigm.name] = table
+    return tables

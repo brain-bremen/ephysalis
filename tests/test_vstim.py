@@ -9,7 +9,7 @@ from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.output.dh5 import EYE_CONT_IDS
 from ephysalis.formats.input.base import open_session
-from ephysalis.metadata.base import detect_metadata_plugin
+from ephysalis.metadata.base import run_trial_tables
 from ephysalis.timeline.steps import extract_run_timing
 
 
@@ -23,14 +23,14 @@ def timing():
 
 
 def test_vstim_is_detected():
-    system = detect_metadata_plugin(open_session(DATA_FOLDER).run(RUN))
-    assert system is not None and system.name == "vstim"
+    plugin, tables = run_trial_tables(open_session(DATA_FOLDER).run(RUN), None, None)
+    assert plugin is not None and plugin.name == "vstim" and list(tables) == ["Test"]
 
 
 def test_trials_from_tdr_and_trigger_line(timing):
-    assert [p.name for p in timing.paradigms] == ["Test"]
-    assert timing.paradigms[0].metadata["vstim_version"] == "2.49"
+    assert list(timing.trials) == ["Test"]
     trials = timing.trials["Test"]
+    assert trials.attrs["vstim_version"] == "2.49"
     assert len(trials) == 13 and set(trials.start_source) == {"trigger"}
     assert list(trials.condition[:4]) == [3, 0, 1, 0]
     assert trials.outcome_name[2] == "Late" and trials.outcome_name[12] == "Cancelled"

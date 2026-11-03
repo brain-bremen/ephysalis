@@ -1,5 +1,5 @@
 """Session metadata of the lab's MATLAB Neuropixels pipeline, as config suggestions of the
-``stimstage`` metadata plugin (``ephysalis init``).
+``psychtoolbox_neuropixels_freiburg`` metadata plugin (``ephysalis init``).
 
 Sources (all optional):
 

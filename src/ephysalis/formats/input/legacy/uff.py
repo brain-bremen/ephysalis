@@ -27,17 +27,18 @@ from __future__ import annotations
 from collections.abc import Collection
 
 import logging
+import sys
 import struct
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephysalis.formats.input.base import InputFormat, keep_lines
+from ephysalis.formats.input.base import keep_lines
 from ephysalis.session.model import Run, Session, StreamKind
 
 logger = logging.getLogger(__name__)
@@ -257,101 +258,115 @@ def block_files(folder: Path) -> dict[str, tuple[Path, Path]]:
     return dict(sorted(blocks.items()))
 
 
-class UffFormat(InputFormat):
-    name: ClassVar[str] = "uff"
+# --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
 
-    def can_read(self, session_path: Path) -> bool:
-        return any(p.is_file() and p.suffix.upper() in (".UFF", "") and p.name[:1].upper() == "M" and is_uff(p)
-                   for p in session_path.iterdir())
+name = 'uff'
+plugin_api_version = 1
 
-    def open_session(self, session_path: Path) -> Session:
-        found = []
-        for stem, (m_path, p_path) in block_files(session_path).items():
-            try:
-                m_file, p_file = _open(m_path), _open(p_path)
-            except (ValueError, struct.error) as error:
-                logger.warning("block %s: not read (%s)", stem, error)
-                continue
-            found.append((datetime.fromtimestamp(m_path.stat().st_mtime) - _duration(m_file), stem, m_path, p_path,
-                          m_file, p_file))
-        runs: list[Run] = []
-        for start, stem, m_path, p_path, m_file, p_file in sorted(found, key=lambda item: item[:2]):
-            runs.append(Run(
-                name=stem, path=session_path, index=len(runs), format=self, start_time=start,
-                duration_s=m_file.n_samples / SAMPLING_FREQUENCY, aux_stream="M", streams=["M", "P"],
-                extra={"files": {"M": str(m_path), "P": str(p_path)}, "aux_streams": ["M"],
-                       "start_time_source": "modification time of the M file minus its duration",
-                       "truncated_bytes": {"M": m_file.truncated_bytes, "P": p_file.truncated_bytes}},
-            ))
-        return Session(name=session_path.name, path=session_path, format=self, runs=runs)
 
-    def default_aux_channels(self, run: Run | None = None):  # type: ignore[no-untyped-def]
-        from ephysalis.session.config import AuxChannelMap
+def can_read_session_folder(session_path: Path) -> bool:
+    return any(p.is_file() and p.suffix.upper() in (".UFF", "") and p.name[:1].upper() == "M" and is_uff(p)
+               for p in session_path.iterdir())
 
-        return AuxChannelMap(analog={"eye_x": 13, "eye_y": 14}, digital={"event": 0})
 
-    def get_recording(self, run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
-        if kind == StreamKind.AUX:
-            stream = "M"
-        else:
-            if probe_id is None:
-                raise ValueError(f"probe_id is required for {kind} streams")
-            try:
-                stream = run.probes[probe_id].streams[kind]
-            except KeyError:
-                raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
-        return _extractor(run.extra["files"][stream], stream)
+def open_session(session_path: Path) -> Session:
+    found = []
+    for stem, (m_path, p_path) in block_files(session_path).items():
+        try:
+            m_file, p_file = _open(m_path), _open(p_path)
+        except (ValueError, struct.error) as error:
+            logger.warning("block %s: not read (%s)", stem, error)
+            continue
+        found.append((datetime.fromtimestamp(m_path.stat().st_mtime) - _duration(m_file), stem, m_path, p_path,
+                      m_file, p_file))
+    runs: list[Run] = []
+    for start, stem, m_path, p_path, m_file, p_file in sorted(found, key=lambda item: item[:2]):
+        runs.append(Run(
+            name=stem, path=session_path, index=len(runs), format=sys.modules[__name__], start_time=start,
+            duration_s=m_file.n_samples / SAMPLING_FREQUENCY, aux_stream="M", streams=["M", "P"],
+            extra={"files": {"M": str(m_path), "P": str(p_path)}, "aux_streams": ["M"],
+                   "start_time_source": "modification time of the M file minus its duration",
+                   "truncated_bytes": {"M": m_file.truncated_bytes, "P": p_file.truncated_bytes}},
+        ))
+    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
 
-    def aux_analog_recording(self, run: Run) -> BaseRecording:
-        """The M channels that belong to no probe (eye position, event pulses)."""
-        recording = self.get_recording(run, StreamKind.AUX)
-        used = {c for info in run.probes.values() if info.streams.get(StreamKind.AP) == "M"
-                for c in (info.channel_ids or recording.channel_ids)}
-        return recording.select_channels([c for c in recording.channel_ids if c not in used])
 
-    def _pulses(self, run: Run, stream: str) -> np.ndarray:
-        file = _open(run.extra["files"][stream])
-        return pulse_onsets(file.traces(0, file.n_samples, [file.channels.index(PULSE_CHANNEL)])[:, 0])
+def default_auxiliary_channel_roles(run: Run | None = None):  # type: ignore[no-untyped-def]
+    from ephysalis.session.config import AuxChannelMap
 
-    def clock_maps(self, run: Run, reference: str | None = None):  # type: ignore[no-untyped-def]
-        from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+    return AuxChannelMap(analog={"eye_x": 13, "eye_y": 14}, digital={"event": 0})
 
-        pm, pp = pair_pulses(self._pulses(run, "M"), self._pulses(run, "P"))
-        maps = {AUX: ClockMap.identity(SAMPLING_FREQUENCY)}
-        for probe_id, info in run.probes.items():
-            stream = info.streams.get(StreamKind.AP)
-            if stream == "M":
-                maps[probe_id] = ClockMap.identity(SAMPLING_FREQUENCY)
-            elif stream == "P":
-                if len(pm) < 2:
-                    raise ValueError(f"run {run.name}: fewer than 2 event pulses on both M15 and P15")
-                p_points, m_points, rate = p_clock_fit(pm, pp)
-                maps[probe_id] = ClockMap(p_points, m_points / SAMPLING_FREQUENCY, SAMPLING_FREQUENCY,
-                                          rate=rate * SAMPLING_FREQUENCY)
-        return RunSync(reference=reference or AUX, maps=maps)
 
-    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
-        file = _open(run.extra["files"]["M"])
-        return file.traces(0, file.n_samples, [file.channels.index(index)])[:, 0]
+def get_stream_recording(run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
+    if kind == StreamKind.AUX:
+        stream = "M"
+    else:
+        if probe_id is None:
+            raise ValueError(f"probe_id is required for {kind} streams")
+        try:
+            stream = run.probes[probe_id].streams[kind]
+        except KeyError:
+            raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
+    return _extractor(run.extra["files"][stream], stream)
 
-    def aux_analog_gain_v(self, run: Run, index: int) -> float:
-        return _open(run.extra["files"]["M"]).adc_scale_mv * 1e-3
 
-    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
-        """The event pulses on M15 as line 1."""
-        y = self.read_aux_analog(run, PULSE_CHANNEL)
-        on, off = pulse_onsets(y), pulse_offsets(y)
-        events = pd.DataFrame({"aux_sample": np.r_[on, off].astype(np.int64), "line": 1,
-                               "state": np.r_[np.ones(len(on)), np.zeros(len(off))].astype(np.int64)})
-        return keep_lines(events.sort_values(["aux_sample", "state"], kind="stable", ignore_index=True), lines)
+def auxiliary_sampling_frequency(run: Run) -> float:
+    return get_stream_recording(run, StreamKind.AUX, None).sampling_frequency
 
-    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
-        if bit != 0:
-            return np.zeros(_open(run.extra["files"]["M"]).n_samples, dtype=bool)
-        return self.read_aux_analog(run, PULSE_CHANNEL) > PULSE_THRESHOLD
 
-    def read_messages(self, run: Run) -> pd.DataFrame:
-        return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
+def auxiliary_analog_recording(run: Run) -> BaseRecording:
+    """The M channels that belong to no probe (eye position, event pulses)."""
+    recording = get_stream_recording(run, StreamKind.AUX)
+    used = {c for info in run.probes.values() if info.streams.get(StreamKind.AP) == "M"
+            for c in (info.channel_ids or recording.channel_ids)}
+    return recording.select_channels([c for c in recording.channel_ids if c not in used])
+
+
+def _pulses(run: Run, stream: str) -> np.ndarray:
+    file = _open(run.extra["files"][stream])
+    return pulse_onsets(file.traces(0, file.n_samples, [file.channels.index(PULSE_CHANNEL)])[:, 0])
+
+
+def clock_alignment_from_synchronised_timestamps(run: Run, reference_stream: str | None = None):  # type: ignore[no-untyped-def]
+    from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+
+    pm, pp = pair_pulses(_pulses(run, "M"), _pulses(run, "P"))
+    maps = {AUX: ClockMap.identity(SAMPLING_FREQUENCY)}
+    for probe_id, info in run.probes.items():
+        stream = info.streams.get(StreamKind.AP)
+        if stream == "M":
+            maps[probe_id] = ClockMap.identity(SAMPLING_FREQUENCY)
+        elif stream == "P":
+            if len(pm) < 2:
+                raise ValueError(f"run {run.name}: fewer than 2 event pulses on both M15 and P15")
+            p_points, m_points, rate = p_clock_fit(pm, pp)
+            maps[probe_id] = ClockMap(p_points, m_points / SAMPLING_FREQUENCY, SAMPLING_FREQUENCY,
+                                      rate=rate * SAMPLING_FREQUENCY)
+    return RunSync(reference=reference_stream or AUX, maps=maps)
+
+
+def read_auxiliary_analog_channel(run: Run, index: int) -> np.ndarray:
+    file = _open(run.extra["files"]["M"])
+    return file.traces(0, file.n_samples, [file.channels.index(index)])[:, 0]
+
+
+def auxiliary_analog_volts_per_count(run: Run, index: int) -> float:
+    return _open(run.extra["files"]["M"]).adc_scale_mv * 1e-3
+
+
+def read_digital_line_edges(run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+    """The event pulses on M15 as line 1."""
+    y = read_auxiliary_analog_channel(run, PULSE_CHANNEL)
+    on, off = pulse_onsets(y), pulse_offsets(y)
+    events = pd.DataFrame({"aux_sample": np.r_[on, off].astype(np.int64), "line": 1,
+                           "state": np.r_[np.ones(len(on)), np.zeros(len(off))].astype(np.int64)})
+    return keep_lines(events.sort_values(["aux_sample", "state"], kind="stable", ignore_index=True), lines)
+
+
+def read_auxiliary_digital_line(run: Run, bit: int) -> np.ndarray:
+    if bit != 0:
+        return np.zeros(_open(run.extra["files"]["M"]).n_samples, dtype=bool)
+    return read_auxiliary_analog_channel(run, PULSE_CHANNEL) > PULSE_THRESHOLD
 
 
 def _duration(file: UffFile):  # type: ignore[no-untyped-def]

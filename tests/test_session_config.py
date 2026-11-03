@@ -11,7 +11,7 @@ from ephysalis.session.config import (
 )
 from ephysalis.formats.input.base import open_session
 from ephysalis.cli.main import main
-from ephysalis.metadata.stimstage_pipeline import apply_pipeline_metadata
+from ephysalis.metadata.psychtoolbox_neuropixels_freiburg.pipeline import apply_pipeline_metadata
 
 RUNS = [("3_rfmapping_g0", "2025-01-09T13:27:45"), ("5_DoseResponse_g0", "2025-01-09T13:58:53")]
 
@@ -84,7 +84,7 @@ def test_excel_migration(make_spikeglx_session, tmp_path):
     assert any("differs from serial number" in w for w in warnings)
     assert any("7_Missing_g0" in w for w in warnings)
 
-    # ephysalis init: the stimstage plugin's suggestions with the workbook given as --metadata
+    # ephysalis init: the psychtoolbox_neuropixels_freiburg plugin's suggestions with the workbook given as --metadata
     assert main(["init", str(session_path), "--metadata", str(excel), "-o", str(tmp_path / "s.toml")]) == 0
     written = load_session_config(tmp_path / "s.toml")
     assert written.probes["imec0"].area == "V1" and not written.run_config("5_DoseResponse_g0").include

@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_session
-from ephysalis.metadata.base import detect_metadata_plugin
-from ephysalis.metadata.stimstage import get_stim_from_index
-from conftest import write_stimstage_paradigm
+from ephysalis.metadata.base import run_trial_tables
+from ephysalis.metadata.psychtoolbox_neuropixels_freiburg.stimulus import get_stim_from_index
+from conftest import write_stimulus_stage_paradigm
 
 STIM_FUNC = {"function_handle": {"function": "stimulusStageTest", "type": "simple"}}
 
@@ -44,18 +44,16 @@ def test_discover_and_load_conditions(make_spikeglx_session):
         {"xc": 0, "laserAmpl": np.array([1, 3]), "stimFunc": "stimulusStageRF"},
     ]
     order = [1, 6, 7, 8, 2, np.nan, np.nan]  # aborted: trailing NaNs
-    write_stimstage_paradigm(run_dir, "1_stimulusStageRF", params, order)
+    write_stimulus_stage_paradigm(run_dir, "1_stimulusStageRF", params, order)
 
     run = open_session(session_path).runs[0]
-    system = detect_metadata_plugin(run)
-    assert system is not None and system.name == "stimstage"
+    plugin, tables = run_trial_tables(run, None, None)  # without clock alignment: no times
+    assert plugin is not None and plugin.name == "psychtoolbox_neuropixels_freiburg"
+    assert list(tables) == ["RF"]
+    conditions = tables["RF"]
+    assert conditions.attrs["stimulusCount"] == 5
+    assert conditions.attrs["screenInfo"]["FrameRate"] == 60.0
 
-    (paradigm,) = system.discover(run)
-    assert paradigm.name == "RF"
-    assert paradigm.metadata["stimulusCount"] == 5
-    assert paradigm.metadata["screenInfo"]["FrameRate"] == 60.0
-
-    conditions = system.load_conditions(paradigm)
     assert list(conditions["trial"]) == [0, 1, 2, 3, 4]
     assert list(conditions["condition"]) == [1, 6, 7, 8, 2]
     assert list(conditions["param_set"]) == [0, 0, 1, 1, 0]
@@ -67,4 +65,4 @@ def test_discover_and_load_conditions(make_spikeglx_session):
 
 def test_runs_without_stimulus_folder(make_spikeglx_session):
     run = open_session(make_spikeglx_session()).runs[0]
-    assert detect_metadata_plugin(run) is None
+    assert run_trial_tables(run, None, None) == (None, {})

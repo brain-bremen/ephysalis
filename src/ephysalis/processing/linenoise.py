@@ -121,8 +121,11 @@ def reference_on_lfp(run: Run, probe_id: str, n_samples: int, index: int, sync: 
     probe_rate = run.get_recording(StreamKind.AP, probe_id).sampling_frequency
     lfp_probe_samples = np.arange(n_samples) * probe_rate / RATE_HZ
     aux_samples = sync.to_samples(AUX, sync.to_reference_time(probe_id, lfp_probe_samples))
-    aux_rate = run.format.aux_sampling_frequency(run)
-    raw = run.format.read_aux_analog(run, index).astype(np.float64)
+    from ephysalis.plugins import ReadsAuxiliaryAnalogInputs, require
+
+    analog_inputs = require(run.format, ReadsAuxiliaryAnalogInputs, "the recorded mains reference")
+    aux_rate = analog_inputs.auxiliary_sampling_frequency(run)
+    raw = analog_inputs.read_auxiliary_analog_channel(run, index).astype(np.float64)
     if aux_rate != RATE_HZ:  # the LFP's anti-alias resampling (ephysalis.processing.lfp)
         import spikeinterface.core as si
         import spikeinterface.preprocessing as spre

@@ -49,6 +49,7 @@ from collections.abc import Collection
 
 import hashlib
 import logging
+import sys
 import os
 import re
 import struct
@@ -56,13 +57,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from ephysalis.formats.input.base import InputFormat, keep_lines
+from ephysalis.formats.input.base import keep_lines
 from ephysalis.session.model import Run, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -795,168 +796,183 @@ def _daq_files(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".daq")
 
 
-class DaqFormat(InputFormat):
-    name: ClassVar[str] = "daq"
+# --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
 
-    def calibrate(self, session: Session, config: SessionConfig, work_dir: Path) -> dict | None:
-        from ephysalis.formats.input.legacy.daq.calibration import compute_calibration, write_calibration
+name = 'daq'
+plugin_api_version = 1
 
-        if config.calibration.run is None:
-            return None
-        calibration = compute_calibration(session, config)
-        write_calibration(calibration, work_dir)
-        return calibration
 
-    def apply_calibration(self, session: Session, config: SessionConfig | None, config_dir: Path | None,
-                          work_dir: Path) -> None:
-        from ephysalis.formats.input.legacy.daq.calibration import apply_calibration, load_calibration
+def compute_channel_gain_calibration(session: Session, config: SessionConfig, work_dir: Path) -> dict | None:
+    from ephysalis.formats.input.legacy.daq.calibration import compute_calibration, write_calibration
 
-        apply_calibration(session, load_calibration(config, config_dir, work_dir))
+    if config.calibration.run is None:
+        return None
+    calibration = compute_calibration(session, config)
+    write_calibration(calibration, work_dir)
+    return calibration
 
-    def can_read(self, session_path: Path) -> bool:
-        return any(p.suffix.lower() == ".daq" for p in session_path.iterdir() if p.is_file())
 
-    def open_session(self, session_path: Path) -> Session:
-        found = []
-        for path in _daq_files(session_path):
-            try:
-                file = daq_file(str(path))
-            except (DaqFormatError, struct.error) as error:
-                logger.warning("%s: not read (%s)", path.name, error)
-                continue
-            found.append((file.index.header.start or datetime.max, path.name, path, file))
-        runs: list[Run] = []
-        for start, _, path, file in sorted(found, key=lambda item: item[:2]):
-            index = file.index
-            first_t0 = file.regions[0][2]
-            for region, (_, n, t0) in enumerate(file.regions):
-                main = file.streams[0]
-                runs.append(Run(
-                    name=path.stem if len(file.regions) == 1 else f"{path.stem}_part{region + 1}",
-                    path=session_path,
-                    index=len(runs),
-                    format=self,
-                    start_time=(start + timedelta(microseconds=(t0 - first_t0) / 1000)) if start != datetime.max else None,
-                    duration_s=file.part(region, main.name).n_samples * main.period_ns / 1e9,
-                    aux_stream=main.name,
-                    streams=[s.name for s in file.streams],
-                    clock_start_s=t0 / 1e9,  # the DAQ clock (time axis of a file per run)
-                    extra={
-                        "file": str(path),
-                        "region": region,
-                        "file_version": ".".join(map(str, index.header.file_version)),
-                        "boards": list(index.header.boards),
-                        "aux_streams": [main.name],
-                        "start_ns": t0,
-                        "board_fit": file.fit,
-                        "damaged": list(index.damaged),
-                        "truncated_bytes": index.truncated_bytes,
-                        "spike_ntrodes": [nt.id for nt in index.header.ntrodes if nt.spike],
-                    },
-                ))
-        return Session(name=session_path.name, path=session_path, format=self, runs=runs)
+def apply_channel_gain_calibration(session: Session, config: SessionConfig | None, config_dir: Path | None,
+                      work_dir: Path) -> None:
+    from ephysalis.formats.input.legacy.daq.calibration import apply_calibration, load_calibration
 
-    # --- helpers ---
+    apply_calibration(session, load_calibration(config, config_dir, work_dir))
 
-    def _file(self, run: Run) -> DaqFile:
-        return daq_file(run.extra["file"])
 
-    def _aux_sample(self, run: Run, times_ns: np.ndarray) -> np.ndarray:
-        """Samples of the aux stream (first board) at times of the first board's clock."""
-        file = self._file(run)
-        main = file.streams[0]
-        first = file.part(run.extra["region"], main.name).first_samples[0]
-        return file.index.pieces[main.ntrodes[0]].sample_at(times_ns) - first
+def can_read_session_folder(session_path: Path) -> bool:
+    return any(p.suffix.lower() == ".daq" for p in session_path.iterdir() if p.is_file())
 
-    def _events_in_run(self, run: Run) -> tuple[np.ndarray, np.ndarray]:
-        """Event times on the first board's clock (ns) and lines (±) inside the run."""
-        file = self._file(run)
-        events = file.index.events
-        times = events[:, 0].astype(float)
-        lines = events[:, 1]
-        if file.fit is not None:
-            copied = np.abs(lines) > COPY_OFFSET
-            times[copied] = file.to_main_time(1, times[copied])
-        t0, t1 = file.run_window(run.extra["region"])
-        inside = (times >= t0) & (times < t1)
-        return times[inside], lines[inside]
 
-    # --- InputFormat ---
+def open_session(session_path: Path) -> Session:
+    found = []
+    for path in _daq_files(session_path):
+        try:
+            file = daq_file(str(path))
+        except (DaqFormatError, struct.error) as error:
+            logger.warning("%s: not read (%s)", path.name, error)
+            continue
+        found.append((file.index.header.start or datetime.max, path.name, path, file))
+    runs: list[Run] = []
+    for start, _, path, file in sorted(found, key=lambda item: item[:2]):
+        index = file.index
+        first_t0 = file.regions[0][2]
+        for region, (_, n, t0) in enumerate(file.regions):
+            main = file.streams[0]
+            runs.append(Run(
+                name=path.stem if len(file.regions) == 1 else f"{path.stem}_part{region + 1}",
+                path=session_path,
+                index=len(runs),
+                format=sys.modules[__name__],
+                start_time=(start + timedelta(microseconds=(t0 - first_t0) / 1000)) if start != datetime.max else None,
+                duration_s=file.part(region, main.name).n_samples * main.period_ns / 1e9,
+                aux_stream=main.name,
+                streams=[s.name for s in file.streams],
+                clock_start_s=t0 / 1e9,  # the DAQ clock (time axis of a file per run)
+                extra={
+                    "file": str(path),
+                    "region": region,
+                    "file_version": ".".join(map(str, index.header.file_version)),
+                    "boards": list(index.header.boards),
+                    "aux_streams": [main.name],
+                    "start_ns": t0,
+                    "board_fit": file.fit,
+                    "damaged": list(index.damaged),
+                    "truncated_bytes": index.truncated_bytes,
+                    "spike_ntrodes": [nt.id for nt in index.header.ntrodes if nt.spike],
+                },
+            ))
+    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
 
-    def default_aux_channels(self, run: Run | None = None) -> AuxChannelMap:
-        from ephysalis.session.config import AuxChannelMap
 
-        return AuxChannelMap(analog={}, digital={})  # the roles of the lines differ between setups
+def _file(run: Run) -> DaqFile:
+    return daq_file(run.extra["file"])
 
-    def get_recording(self, run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
-        if kind == StreamKind.AUX:
-            stream_name = run.aux_stream
-        else:
-            if probe_id is None:
-                raise ValueError(f"probe_id is required for {kind} streams")
-            try:
-                stream_name = run.probes[probe_id].streams[kind]
-            except KeyError:
-                raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
-        if stream_name is None:
-            raise KeyError(f"Run {run.name} has no auxiliary stream")
-        return _extractor(run.extra["file"], _version(run.extra["file"]), run.extra["region"], stream_name)
 
-    def aux_analog_recording(self, run: Run) -> BaseRecording:
-        """The aux stream's channels that belong to no probe."""
-        recording = self.get_recording(run, StreamKind.AUX)
-        used = {c for info in run.probes.values() if info.streams.get(StreamKind.AP) == run.aux_stream
-                for c in (info.channel_ids or recording.channel_ids)}
-        return recording.select_channels([c for c in recording.channel_ids if c not in used])
+def _aux_sample(run: Run, times_ns: np.ndarray) -> np.ndarray:
+    """Samples of the aux stream (first board) at times of the first board's clock."""
+    file = _file(run)
+    main = file.streams[0]
+    first = file.part(run.extra["region"], main.name).first_samples[0]
+    return file.index.pieces[main.ntrodes[0]].sample_at(times_ns) - first
 
-    def clock_maps(self, run: Run, reference: str | None = None) -> RunSync | None:
-        from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
 
-        file = self._file(run)
-        region = run.extra["region"]
-        streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
-        streams[AUX] = file.streams[0].name
-        t0 = file.run_window(region)[0]
-        maps = {}
-        for key, name in streams.items():
-            samples, times = file.piece_times(region, name)
-            maps[key] = ClockMap(samples, (times - t0) / 1e9, 1e9 / file.stream(name).period_ns)
-        return RunSync(reference=reference or next(iter(streams)), maps=maps)
+def _events_in_run(run: Run) -> tuple[np.ndarray, np.ndarray]:
+    """Event times on the first board's clock (ns) and lines (±) inside the run."""
+    file = _file(run)
+    events = file.index.events
+    times = events[:, 0].astype(float)
+    lines = events[:, 1]
+    if file.fit is not None:
+        copied = np.abs(lines) > COPY_OFFSET
+        times[copied] = file.to_main_time(1, times[copied])
+    t0, t1 = file.run_window(run.extra["region"])
+    inside = (times >= t0) & (times < t1)
+    return times[inside], lines[inside]
 
-    def read_aux_analog(self, run: Run, index: int) -> np.ndarray:
-        recording = self.get_recording(run, StreamKind.AUX)
-        return recording.get_traces(channel_ids=[f"AI{index}"], return_in_uV=False)[:, 0]
 
-    def aux_analog_gain_v(self, run: Run, index: int) -> float:
-        return self._file(run).index.header.channels[index].volts_per_count
+def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:
+    from ephysalis.session.config import AuxChannelMap
 
-    def read_ttl_events(self, run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
-        times, signed = self._events_in_run(run)
-        result = pd.DataFrame({"aux_sample": np.floor(self._aux_sample(run, times) + 1e-6).astype(np.int64),
-                               "line": np.abs(signed).astype(np.int64), "state": (signed > 0).astype(np.int64)})
-        return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
+    return AuxChannelMap(analog={}, digital={})  # the roles of the lines differ between setups
 
-    def read_aux_digital(self, run: Run, bit: int) -> np.ndarray:
-        n = self.get_recording(run, StreamKind.AUX).get_num_samples()
-        line = np.zeros(n, dtype=bool)
-        events = self.read_ttl_events(run)
-        mine = events[events["line"] == bit + 1]
-        level, previous = False, 0
-        for sample, state in zip(np.clip(mine["aux_sample"].to_numpy(), 0, n), mine["state"].to_numpy()):
-            line[previous:sample] = level
-            level, previous = bool(state), int(sample)
-        line[previous:] = level
-        return line
 
-    def read_messages(self, run: Run) -> pd.DataFrame:
-        return pd.DataFrame({"aux_sample": np.zeros(0, np.int64), "text": np.zeros(0, str)})
+def get_stream_recording(run: Run, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
+    if kind == StreamKind.AUX:
+        stream_name = run.aux_stream
+    else:
+        if probe_id is None:
+            raise ValueError(f"probe_id is required for {kind} streams")
+        try:
+            stream_name = run.probes[probe_id].streams[kind]
+        except KeyError:
+            raise KeyError(f"Run {run.name} has no {kind} stream for {probe_id}") from None
+    if stream_name is None:
+        raise KeyError(f"Run {run.name} has no auxiliary stream")
+    return _extractor(run.extra["file"], _version(run.extra["file"]), run.extra["region"], stream_name)
 
-    def read_trial_descriptors(self, run: Run) -> pd.DataFrame:
-        """``TD01`` records of the run (written by the stimulus PC): ``aux_sample``,
-        ``trial_number``, ``stimulus_number``."""
-        file = self._file(run)
-        trials = file.index.trials
-        t0, t1 = file.run_window(run.extra["region"])
-        inside = (trials[:, 0] >= t0) & (trials[:, 0] < t1)
-        return pd.DataFrame({"aux_sample": np.floor(self._aux_sample(run, trials[inside, 0]) + 1e-6).astype(np.int64),
-                             "trial_number": trials[inside, 1], "stimulus_number": trials[inside, 2]})
+
+def auxiliary_sampling_frequency(run: Run) -> float:
+    return get_stream_recording(run, StreamKind.AUX, None).sampling_frequency
+
+
+def auxiliary_analog_recording(run: Run) -> BaseRecording:
+    """The aux stream's channels that belong to no probe."""
+    recording = get_stream_recording(run, StreamKind.AUX)
+    used = {c for info in run.probes.values() if info.streams.get(StreamKind.AP) == run.aux_stream
+            for c in (info.channel_ids or recording.channel_ids)}
+    return recording.select_channels([c for c in recording.channel_ids if c not in used])
+
+
+def clock_alignment_from_synchronised_timestamps(run: Run, reference_stream: str | None = None) -> RunSync | None:
+    from ephysalis.timeline.clocks import AUX, ClockMap, RunSync
+
+    file = _file(run)
+    region = run.extra["region"]
+    streams = {pid: info.streams[StreamKind.AP] for pid, info in run.probes.items() if StreamKind.AP in info.streams}
+    streams[AUX] = file.streams[0].name
+    t0 = file.run_window(region)[0]
+    maps = {}
+    for key, name in streams.items():
+        samples, times = file.piece_times(region, name)
+        maps[key] = ClockMap(samples, (times - t0) / 1e9, 1e9 / file.stream(name).period_ns)
+    return RunSync(reference=reference_stream or next(iter(streams)), maps=maps)
+
+
+def read_auxiliary_analog_channel(run: Run, index: int) -> np.ndarray:
+    recording = get_stream_recording(run, StreamKind.AUX)
+    return recording.get_traces(channel_ids=[f"AI{index}"], return_in_uV=False)[:, 0]
+
+
+def auxiliary_analog_volts_per_count(run: Run, index: int) -> float:
+    return _file(run).index.header.channels[index].volts_per_count
+
+
+def read_digital_line_edges(run: Run, lines: Collection[int] | None = None) -> pd.DataFrame:
+    times, signed = _events_in_run(run)
+    result = pd.DataFrame({"aux_sample": np.floor(_aux_sample(run, times) + 1e-6).astype(np.int64),
+                           "line": np.abs(signed).astype(np.int64), "state": (signed > 0).astype(np.int64)})
+    return keep_lines(result.sort_values(["aux_sample", "line"], kind="stable", ignore_index=True), lines)
+
+
+def read_auxiliary_digital_line(run: Run, bit: int) -> np.ndarray:
+    n = get_stream_recording(run, StreamKind.AUX).get_num_samples()
+    line = np.zeros(n, dtype=bool)
+    events = read_digital_line_edges(run)
+    mine = events[events["line"] == bit + 1]
+    level, previous = False, 0
+    for sample, state in zip(np.clip(mine["aux_sample"].to_numpy(), 0, n), mine["state"].to_numpy()):
+        line[previous:sample] = level
+        level, previous = bool(state), int(sample)
+    line[previous:] = level
+    return line
+
+
+def read_trial_descriptor_events(run: Run) -> pd.DataFrame:
+    """``TD01`` records of the run (written by the stimulus PC): ``aux_sample``,
+    ``trial_number``, ``stimulus_number``."""
+    file = _file(run)
+    trials = file.index.trials
+    t0, t1 = file.run_window(run.extra["region"])
+    inside = (trials[:, 0] >= t0) & (trials[:, 0] < t1)
+    return pd.DataFrame({"aux_sample": np.floor(_aux_sample(run, trials[inside, 0]) + 1e-6).astype(np.int64),
+                         "trial_number": trials[inside, 1], "stimulus_number": trials[inside, 2]})

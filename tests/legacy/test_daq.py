@@ -14,7 +14,7 @@ import pytest
 from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.input.base import open_session
-from ephysalis.formats.input.legacy.daq.reader import DaqFormat, board_fit, daq_file, read_index
+from ephysalis.formats.input.legacy.daq.reader import board_fit, daq_file, read_index
 from ephysalis.session.model import StreamKind
 from ephysalis.timeline.clocks import AUX
 
@@ -66,7 +66,7 @@ def test_v2_runs_samples_and_events(tmp_path):
     events = [(t0 + 100_000_000, 1, 1), (t0 + 150_000_000, -1, 0), (t0 + 200_000_000, 4, 8), (t_b + 20_000_000, -4, 0)]
     write_v2(tmp_path / "rec_a.daq", [(t0, a), (t_b, b)], events=events, trials=[(t0 + 100_000_000, 7, 3)])
     session = open_session(tmp_path)
-    assert isinstance(session.format, DaqFormat)
+    assert session.format.name == "daq"
     assert [r.name for r in session.runs] == ["rec_a_part1", "rec_a_part2"]
     first, second = session.runs
     assert (second.start_time - first.start_time).total_seconds() == pytest.approx(3.0)
@@ -77,14 +77,14 @@ def test_v2_runs_samples_and_events(tmp_path):
     np.testing.assert_array_equal(second.get_recording(StreamKind.AUX).get_traces(start_frame=10, end_frame=20,
                                                                                    channel_ids=["AI3"])[:, 0], b[10:20, 3])
     np.testing.assert_allclose(recording.get_channel_gains(), 20 / 65536 * 1e6)
-    ttl = first.format.read_ttl_events(first)
+    ttl = first.format.read_digital_line_edges(first)
     assert ttl.to_dict("list") == {"aux_sample": [100, 150, 200], "line": [1, 1, 4], "state": [1, 0, 1]}
-    assert second.format.read_ttl_events(second).to_dict("list") == {"aux_sample": [20], "line": [4], "state": [0]}
-    np.testing.assert_array_equal(np.flatnonzero(np.diff(first.format.read_aux_digital(first, 0).astype(int))) + 1,
+    assert second.format.read_digital_line_edges(second).to_dict("list") == {"aux_sample": [20], "line": [4], "state": [0]}
+    np.testing.assert_array_equal(np.flatnonzero(np.diff(first.format.read_auxiliary_digital_line(first, 0).astype(int))) + 1,
                                   [100, 150])
-    assert first.format.read_trial_descriptors(first).to_dict("list") == {
+    assert first.format.read_trial_descriptor_events(first).to_dict("list") == {
         "aux_sample": [100], "trial_number": [7], "stimulus_number": [3]}
-    assert first.format.aux_analog_gain_v(first, 2) == pytest.approx(20 / 65536)
+    assert first.format.auxiliary_analog_volts_per_count(first, 2) == pytest.approx(20 / 65536)
 
 
 def test_v1_truncated_fcr1_size_and_zero_tail(tmp_path):
@@ -156,7 +156,7 @@ def test_v3_boards_and_clock_maps(tmp_path):
         probe_id="v1", streams={StreamKind.AP: "MC-128 - Board 1"})
     v1 = run.get_recording(StreamKind.AP, "v1")
     np.testing.assert_allclose(v1.get_channel_gains(), 8 / 65536 * 1e6)
-    sync = run.format.clock_maps(run, AUX)
+    sync = run.format.clock_alignment_from_synchronised_timestamps(run, AUX)
     k = np.array([0, 1234, v1.get_num_samples() - 1])
     board2_ns = 1_199_960_000 + k * 1_000_000  # nominal board-2 times of these samples
     start_ns = 1_199_960_000  # the run starts with board 1
@@ -164,11 +164,11 @@ def test_v3_boards_and_clock_maps(tmp_path):
     np.testing.assert_allclose(sync.to_reference_time("v1", k), expected_s, atol=1e-9)
     np.testing.assert_allclose(sync.to_reference_time(AUX, [0, 1000]), [0.0, 1.0])
     # copies of line 1 on board 2 land on the board-1 edges
-    ttl = run.format.read_ttl_events(run)
+    ttl = run.format.read_digital_line_edges(run)
     line1, line17 = ttl[ttl.line == 1], ttl[ttl.line == 17]
     assert len(line1) == len(line17) > 10
     np.testing.assert_allclose(line17.aux_sample.to_numpy(), line1.aux_sample.to_numpy(), atol=1)
-    assert run.format.read_trial_descriptors(run).trial_number.tolist() == [12]
+    assert run.format.read_trial_descriptor_events(run).trial_number.tolist() == [12]
 
 
 def test_v3_damaged_bytes_cut_end_and_pause(tmp_path):

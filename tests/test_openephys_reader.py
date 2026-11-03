@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_session
-from ephysalis.formats.input.openephys import OpenEphysFormat
 from ephysalis.session.model import StreamKind
 from conftest import DATA_FOLDER, skip_if_no_data
 
@@ -10,7 +9,7 @@ from conftest import DATA_FOLDER, skip_if_no_data
 @skip_if_no_data
 def test_open_ephys_session_discovery():
     session = open_session(DATA_FOLDER)
-    assert isinstance(session.format, OpenEphysFormat)
+    assert session.format.name == "openephys"
     assert [r.name for r in session.runs] == ["experiment1_recording1"]
     run = session.runs[0]
     assert run.probes == {}

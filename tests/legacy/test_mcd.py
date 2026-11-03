@@ -113,9 +113,9 @@ def test_mcd_reader(tmp_path):
     np.testing.assert_array_equal(rec.get_traces(start_frame=1234, end_frame=7777), elec[1234:7777])
     assert list(rec.channel_ids) == ["01A", "02A", "03A", "04A"]
     assert rec.get_channel_gains()[0] == pytest.approx(0.125)  # µV per count
-    ttl = run.format.read_ttl_events(run)
+    ttl = run.format.read_digital_line_edges(run)
     assert ttl.values.tolist() == [[1000, 1, 1], [1300, 1, 0], [5000, 4, 1]]
-    td = run.format.read_trial_descriptors(run)
+    td = run.format.read_trial_descriptor_events(run)
     assert td.values.tolist() == [[1010, 114, 531], [6005, 115, 515]]
 
 
@@ -142,8 +142,8 @@ def test_split_recording_and_pipeline(tmp_path):
     assert [r.name for r in s.runs] == ["20101118_task", "20101118_task0002"] and run.duration_s == 2.0
     rec = run.get_recording(StreamKind.AUX)
     assert rec.get_num_samples() == 50_000
-    np.testing.assert_array_equal(run.format.get_recording(run, StreamKind.AUX).get_traces()[:, 0], digi)
-    assert run.format.read_trial_descriptors(run).values.tolist() == [[2005, 7, 3], [27_005, 8, 4]]
+    np.testing.assert_array_equal(run.format.get_stream_recording(run, StreamKind.AUX).get_traces()[:, 0], digi)
+    assert run.format.read_trial_descriptor_events(run).values.tolist() == [[2005, 7, 3], [27_005, 8, 4]]
     write_tdr(session / "2010_11_18.tdr", [(7, 3, 1, 1.0), (8, 4, 7, 1.0)], day="18.11.2010")
     (tmp_path / "session.toml").write_text(
         'schema_version = 5\nsession_id = "20101118"\nsubject_id = "iris"\n'
@@ -178,7 +178,7 @@ def test_probe_left_out_of_runs_without_its_channels(tmp_path, caplog):
         '[probes.v4]\nstream = "elec0001"\nchannels = ["01A", "03A"]\nreference_channels = ["02A"]\n')
     s = configure_probes(open_session(session), load_session_config(tmp_path / "session.toml"))
     dotmap, task = s.runs
-    assert dotmap.format.stream_channel_ids(dotmap, "elec0001") == ["01A", "02A"]
+    assert dotmap.format.list_stream_channel_ids(dotmap, "elec0001") == ["01A", "02A"]
     assert "v4" not in dotmap.probes and "v4" in task.probes
     assert "channels ['03A'] not recorded" in caplog.text
     assert task.get_recording(StreamKind.AP, "v4").get_num_channels() == 2

@@ -37,7 +37,7 @@ def oe_dh5(tmp_path_factory):
 def test_events_as_legacy_ev02(oe_dh5):
     work, path = oe_dh5
     events = load_run_events(work / "events" / f"{OE_RUN}.csv")
-    assert set(events.source) == {"ttl", "network"}
+    assert set(events.source) == {"ttl", "word"}
     with h5py.File(path, "r") as new, h5py.File(LEGACY_DH5_PATH, "r") as legacy:
         ev, old = new["EV02"][:], legacy["EV02"][:]
         network = ev[ev["event"] >= 1000]  # the old converter found no TTL lines (it looked for a PXIe-6341)

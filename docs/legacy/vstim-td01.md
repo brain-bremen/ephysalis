@@ -104,8 +104,9 @@ session file and becomes the BIDS `acq_time`, and the method text goes into `sca
 ## API
 
 ```{eval-rst}
-.. autoclass:: ephysalis.metadata.legacy.vstim_td01.VStimTD01Plugin
-   :members: load_trials, run_start
+.. autofunction:: ephysalis.metadata.legacy.vstim_td01.extract_trial_tables
+
+.. autofunction:: ephysalis.metadata.legacy.vstim_td01.estimate_run_start_time
 
 .. autofunction:: ephysalis.metadata.legacy.vstim_td01.find_tdr
 

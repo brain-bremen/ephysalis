@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ephysalis.plugins import ReadsAuxiliaryAnalogInputs, ReadsDigitalLineEdges, require
+
+
 if TYPE_CHECKING:
     from ephysalis.session.model import Run
     from ephysalis.session.config import AuxChannelMap
@@ -177,17 +180,19 @@ class AuxSignals:
             raise KeyError(f"Run {run.name} has no auxiliary stream")
         self.run = run
         self.channels = channels
-        self.sampling_frequency = run.format.aux_sampling_frequency(run)
+        self.analog_inputs = require(run.format, ReadsAuxiliaryAnalogInputs, "the auxiliary signals")
+        self.sampling_frequency = self.analog_inputs.auxiliary_sampling_frequency(run)
 
     def analog(self, role: str) -> np.ndarray:
         """Raw ADC counts (int16) of an analog role."""
-        return self.run.format.read_aux_analog(self.run, self.channels.analog[role])
+        return self.analog_inputs.read_auxiliary_analog_channel(self.run, self.channels.analog[role])
 
     def analog_volts(self, role: str) -> np.ndarray:
-        return self.analog(role) * self.run.format.aux_analog_gain_v(self.run, self.channels.analog[role])
+        return self.analog(role) * self.analog_inputs.auxiliary_analog_volts_per_count(self.run, self.channels.analog[role])
 
     def digital(self, role: str) -> np.ndarray:
-        return self.run.format.read_aux_digital(self.run, self.channels.digital[role])
+        lines = require(self.run.format, ReadsDigitalLineEdges, f"the digital line {role!r}")
+        return lines.read_auxiliary_digital_line(self.run, self.channels.digital[role])
 
     def has(self, role: str) -> bool:
         return role in self.channels.analog or role in self.channels.digital

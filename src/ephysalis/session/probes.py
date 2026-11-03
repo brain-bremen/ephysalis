@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
+from ephysalis.plugins import ListsStreamChannelIds
 from ephysalis.session.model import ProbeInfo, Session, StreamKind
 
 if TYPE_CHECKING:
@@ -67,7 +68,8 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
             if stream is None:
                 continue
             wanted = [*(probe_config.channels or []), *(probe_config.reference_channels or [])]
-            recorded = run.format.stream_channel_ids(run, stream) if wanted and run.format is not None else None
+            recorded = (run.format.list_stream_channel_ids(run, stream)
+                        if wanted and isinstance(run.format, ListsStreamChannelIds) else None)
             if recorded is not None and (missing := [c for c in wanted if c not in set(recorded)]):
                 logger.warning("probe %s left out of run %s: channels %s not recorded in stream %s",
                                probe_id, run.name, missing, stream)

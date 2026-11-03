@@ -229,8 +229,13 @@ To compare with the library, note how it names a channel entity:
 ## Reader API
 
 ```{eval-rst}
-.. autoclass:: ephysalis.formats.input.legacy.mcd.McdFormat
-   :members: read_ttl_events, read_trigger_events, read_trial_descriptors, clock_maps
+.. autofunction:: ephysalis.formats.input.legacy.mcd.read_digital_line_edges
+
+.. autofunction:: ephysalis.formats.input.legacy.mcd.read_trigger_events
+
+.. autofunction:: ephysalis.formats.input.legacy.mcd.read_trial_descriptor_events
+
+.. autofunction:: ephysalis.formats.input.legacy.mcd.clock_alignment_from_synchronised_timestamps
 
 .. autoclass:: ephysalis.formats.input.legacy.mcd.McdRecordingExtractor
 
