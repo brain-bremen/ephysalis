@@ -1,4 +1,4 @@
-"""The legacy readers and stimulus systems (ephysalis.formats.input.legacy, ephysalis.stimulus.legacy)
+"""The legacy readers and metadata plugins (ephysalis.formats.input.legacy, ephysalis.metadata.legacy)
 can be removed without touching the rest: nothing outside them and tests/legacy imports them, and no
 test outside tests/legacy uses their files."""
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 SRC = Path(__file__).parents[1] / "src" / "ephysalis"
 TESTS = Path(__file__).parent
-LEGACY = ("ephysalis.formats.input.legacy", "ephysalis.stimulus.legacy")
+LEGACY = ("ephysalis.formats.input.legacy", "ephysalis.metadata.legacy")
 
 
 def _imports(path: Path) -> set[str]:

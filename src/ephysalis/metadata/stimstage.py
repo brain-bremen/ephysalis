@@ -1,4 +1,6 @@
-"""MATLAB/Psychtoolbox "stimulusStage" system (lab stimulus code in ``X:\\Codes\\ExperimentCode``).
+"""MATLAB/Psychtoolbox "stimulusStage" setup (lab stimulus code in ``X:\\Codes\\ExperimentCode``)
+with SpikeGLX Neuropixels recordings: trials from the stimulus files, and config suggestions
+from the lab's MATLAB pipeline (:mod:`ephysalis.metadata.stimstage_pipeline`).
 
 Each run folder contains one ``<k>_stimulusStage<Name>`` folder per paradigm with
 
@@ -23,10 +25,12 @@ import pandas as pd
 
 from ephysalis.formats.matfile import read_mat, read_mat_path
 from ephysalis.session.model import Run
-from ephysalis.stimulus.base import Paradigm, StimulusSystem
+from ephysalis.metadata.base import Paradigm, MetadataPlugin
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
+    from ephysalis.session.config import SessionConfig
+    from ephysalis.session.model import Session
     from ephysalis.timeline.auxsignals import AuxSignals
     from ephysalis.timeline.clocks import RunSync
 
@@ -110,7 +114,7 @@ def load_stimulus_order(paradigm_dir: Path) -> np.ndarray:
     return order.astype(int)
 
 
-class StimStageSystem(StimulusSystem):
+class StimStagePlugin(MetadataPlugin):
     name: ClassVar[str] = "stimstage"
 
     @staticmethod
@@ -124,6 +128,14 @@ class StimStageSystem(StimulusSystem):
 
     def can_handle(self, run: Run) -> bool:
         return bool(self._paradigm_dirs(run))
+
+    def suggest_config(self, session: Session, config: SessionConfig, source: Path | None = None) -> list[str]:
+        """Probes, bad channels and run selection of the MATLAB pipeline: the session's sheet of
+        the lab workbook ``source`` (``CR_Experiments25.xlsx``; sheet = session folder name) and
+        ``Depths.txt``, ``BrokenChannelsProbe<N>_0Index.txt``, ``folders2Combine.txt``."""
+        from ephysalis.metadata.stimstage_pipeline import apply_pipeline_metadata
+
+        return apply_pipeline_metadata(config, session, source)
 
     def discover(self, run: Run) -> list[Paradigm]:
         paradigms = []

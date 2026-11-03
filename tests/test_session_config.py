@@ -10,7 +10,8 @@ from ephysalis.session.config import (
     save_session_config,
 )
 from ephysalis.formats.input.base import open_session
-from ephysalis.session.migrate import migrate_session
+from ephysalis.cli.main import main
+from ephysalis.metadata.stimstage_pipeline import apply_pipeline_metadata
 
 RUNS = [("3_rfmapping_g0", "2025-01-09T13:27:45"), ("5_DoseResponse_g0", "2025-01-09T13:58:53")]
 
@@ -70,8 +71,8 @@ def test_excel_migration(make_spikeglx_session, tmp_path):
     excel = tmp_path / "experiments.xlsx"
     _workbook(excel, session.name, serial=12345)
 
-    result = migrate_session(session, excel)
-    config: SessionConfig = result.config
+    config: SessionConfig = default_session_config(session)
+    warnings = apply_pipeline_metadata(config, session, excel)
 
     assert config.run_config("3_rfmapping_g0").include
     assert config.run_config("3_rfmapping_g0").notes == "centered on 3,7"
@@ -80,8 +81,13 @@ def test_excel_migration(make_spikeglx_session, tmp_path):
     assert (probe.area, probe.insertion_depth_um, probe.shank_depth_um) == ("V1", 2000, 1794)
     assert probe.serial_number == meta_serial
     assert probe.bad_channels == [5, 12]
-    assert any("differs from serial number" in w for w in result.warnings)
-    assert any("7_Missing_g0" in w for w in result.warnings)
+    assert any("differs from serial number" in w for w in warnings)
+    assert any("7_Missing_g0" in w for w in warnings)
+
+    # ephysalis init: the stimstage plugin's suggestions with the workbook given as --metadata
+    assert main(["init", str(session_path), "--metadata", str(excel), "-o", str(tmp_path / "s.toml")]) == 0
+    written = load_session_config(tmp_path / "s.toml")
+    assert written.probes["imec0"].area == "V1" and not written.run_config("5_DoseResponse_g0").include
 
 
 def test_schema_migration(tmp_path):
@@ -89,13 +95,15 @@ def test_schema_migration(tmp_path):
     from ephysalis.session.config import SCHEMA_VERSION
 
     path = tmp_path / "session.toml"
-    path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n')
+    path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n'
+                    'stimulus_system = "vstim"\n')
     config = load_session_config(path)
-    assert config.schema_version == SCHEMA_VERSION == 7 and config.runs[0].name == "r"
+    assert config.schema_version == SCHEMA_VERSION == 8 and config.runs[0].name == "r"
+    assert config.runs[0].metadata_plugin == "vstim"  # renamed in schema 8
     assert config.events.exclude_roles == ["sync", "wheel"]
     assert config.calibration.run is None and not config.line_noise.enabled
     save_session_config(config, path)
-    assert "schema_version = 7" in path.read_text()
+    assert "schema_version = 8" in path.read_text()
 
     migrations = {1: lambda d: {k: v for k, v in d.items() if k != "a"} | {"b": d["a"]}, 2: lambda d: {**d, "b": d["b"] * 2}}
     assert migrate({"schema_version": 1, "a": 3}, 3, migrations) == {"schema_version": 3, "b": 6}

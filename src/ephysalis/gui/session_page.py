@@ -84,7 +84,7 @@ class _OverviewLoader(QThread):
         try:
             from ephysalis.formats.input.base import open_session
             from ephysalis.session.probes import configure_probes
-            from ephysalis.stimulus.base import detect_stimulus_system, get_stimulus_system
+            from ephysalis.metadata.base import detect_metadata_plugin, get_metadata_plugin
 
             session = open_session(self._session_path)
             overview = SessionOverview(session.name, session.format.name, default_config=default_session_config(session))
@@ -93,8 +93,8 @@ class _OverviewLoader(QThread):
             for run in session.runs:
                 run_config = self._config.run_config(run.name) if self._config else None
                 try:
-                    system = (get_stimulus_system(run_config.stimulus_system)
-                              if run_config and run_config.stimulus_system else detect_stimulus_system(run))
+                    system = (get_metadata_plugin(run_config.metadata_plugin)
+                              if run_config and run_config.metadata_plugin else detect_metadata_plugin(run))
                     paradigms = [f"{system.name}: {p.name}" for p in system.discover(run)] if system else []
                 except Exception as exc:  # a broken stimulus folder must not hide the session
                     paradigms = [f"error: {exc}"]
@@ -117,18 +117,18 @@ class _OverviewLoader(QThread):
 # ---------------------------------------------------------------------------
 
 class _RunsTable(QTableWidget):
-    """Runs of the session: include, stimulus system, notes."""
+    """Runs of the session: include, metadata plugin, notes."""
 
     def __init__(self, parent=None):
         super().__init__(0, 4, parent)
-        self.setHorizontalHeaderLabels(["Run", "Include", "Stimulus system", "Notes"])
+        self.setHorizontalHeaderLabels(["Run", "Include", "Metadata plugin", "Notes"])
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def set_runs(self, runs: list[RunConfig]) -> None:
-        from ephysalis.plugins import STIMULUS_SYSTEM_GROUP, available
+        from ephysalis.plugins import METADATA_PLUGIN_GROUP, available
 
-        systems = available(STIMULUS_SYSTEM_GROUP)
+        systems = available(METADATA_PLUGIN_GROUP)
         self.setRowCount(0)
         for run in runs:
             row = self.rowCount()
@@ -141,8 +141,8 @@ class _RunsTable(QTableWidget):
             self.setCellWidget(row, 1, include)
             combo = QComboBox()
             combo.addItems([_AUTO, *systems])
-            if run.stimulus_system:
-                combo.setCurrentText(run.stimulus_system)
+            if run.metadata_plugin:
+                combo.setCurrentText(run.metadata_plugin)
             self.setCellWidget(row, 2, combo)
             self.setItem(row, 3, QTableWidgetItem(run.notes))
 
@@ -154,7 +154,7 @@ class _RunsTable(QTableWidget):
             result.append(RunConfig(
                 name=cast(QTableWidgetItem, self.item(row, 0)).text(),
                 include=cast(QCheckBox, self.cellWidget(row, 1)).isChecked(),
-                stimulus_system=None if system == _AUTO else system,
+                metadata_plugin=None if system == _AUTO else system,
                 notes=notes.text() if notes is not None else "",
             ))
         return result

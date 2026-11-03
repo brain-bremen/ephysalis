@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_session
-from ephysalis.stimulus.base import detect_stimulus_system
+from ephysalis.metadata.base import detect_metadata_plugin
 from conftest import real_session_path
 
 SESSION = real_session_path()
@@ -22,7 +22,7 @@ pytestmark = [
 def _paradigms():
     session = open_session(SESSION)
     for run in session.runs:
-        system = detect_stimulus_system(run)
+        system = detect_metadata_plugin(run)
         for paradigm in system.discover(run) if system else []:
             legacy = paradigm.path / "mergedCombined_Uncurated_DataForProbe0.mat"
             if legacy.exists():

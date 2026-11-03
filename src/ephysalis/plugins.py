@@ -1,4 +1,4 @@
-"""Entry-point based plugin registry for input formats and stimulus systems.
+"""Entry-point based plugin registry for input formats and metadata plugins.
 
 A plugin that fails to import (e.g. an entry point left over from a removed reader, or a
 missing optional dependency) is skipped with a warning, so the other plugins keep working."""
@@ -11,7 +11,7 @@ from importlib.metadata import entry_points
 from typing import Any
 
 INPUT_FORMAT_GROUP = "ephysalis.input_formats"
-STIMULUS_SYSTEM_GROUP = "ephysalis.stimulus_systems"
+METADATA_PLUGIN_GROUP = "ephysalis.metadata_plugins"
 
 
 logger = logging.getLogger(__name__)

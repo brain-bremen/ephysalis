@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from ephysalis.session.schema import Migration, migrate
 from ephysalis.session.model import Session
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
@@ -42,14 +42,22 @@ MIGRATIONS: dict[int, Migration] = {
     4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
     5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
     6: lambda data: data,  # 7 added probes.reference_channels (default none: no re-reference)
+    7: lambda data: _rename_run_key(data, "stimulus_system", "metadata_plugin"),  # 8: stimulus systems -> metadata plugins
 }
+
+
+def _rename_run_key(data: dict, old: str, new: str) -> dict:
+    for run in data.get("runs", []):
+        if old in run:
+            run[new] = run.pop(old)
+    return data
 
 
 class RunConfig(BaseModel):
     name: str
     include: bool = True
-    stimulus_system: str | None = Field(
-        default=None, description="Stimulus system plugin; auto-detected if not set"
+    metadata_plugin: str | None = Field(
+        default=None, description="Metadata plugin; auto-detected if not set"
     )
     task: str | None = Field(default=None, description="Task of the run (BIDS task entity), instead of the session's")
     notes: str = ""

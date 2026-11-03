@@ -31,7 +31,7 @@ Frozen ``TD01`` (all records of a run carry the same trial number: the DAQ progr
 receive the numbers, Fritz 2005-04-28 runs a-d): the trials are matched to the day's ``.tdr``
 by time (port of ``trial_recovery.match_by_time``). The trial starts are put on the PC clock
 with the DAQ header time minus the day's DAQ-computer clock offset (median over the session's
-other runs of that day with trial stamps, :mod:`ephysalis.stimulus.legacy.pcclock`); the residual shift (within
+other runs of that day with trial stamps, :mod:`ephysalis.metadata.legacy.pcclock`); the residual shift (within
 30 s) is the one under which most starts fall into the 1 s window of a ``.tdr`` stamp
 (``tAbsTrialStart``, NotStarted trials excluded), and each start takes, in order, the trial
 whose window it is in. Accepted if one-to-one and increasing for >= 95 % of the trials, with the
@@ -39,8 +39,8 @@ trigger-line outcomes agreeing with the ``.tdr`` in >= 95 % of them; trial and s
 then come from the ``.tdr`` (column ``trial_number_source``). Otherwise the trials keep the
 frozen numbers and get their outcome from the trigger lines.
 
-Run start (:meth:`VStimTD01System.run_start`): on the VStim PC's clock, fitted to the ``.tdr``
-trial stamps (``pc_clock_time``; :mod:`ephysalis.stimulus.legacy.pcclock`).
+Run start (:meth:`VStimTD01Plugin.run_start`): on the VStim PC's clock, fitted to the ``.tdr``
+trial stamps (``pc_clock_time``; :mod:`ephysalis.metadata.legacy.pcclock`).
 """
 
 from __future__ import annotations
@@ -55,8 +55,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 import pandas as pd
 
-from ephysalis.stimulus.runstart import RunStart
-from ephysalis.stimulus.base import Paradigm, StimulusSystem
+from ephysalis.metadata.runstart import RunStart
+from ephysalis.metadata.base import Paradigm, MetadataPlugin
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
@@ -225,7 +225,7 @@ def _records(run: Run, descriptors: pd.DataFrame, starts: np.ndarray) -> list[tu
 def day_clock_offset(run: Run, start_bit: int) -> float | None:
     """Median DAQ header time minus PC time of the first sample over the other runs of the
     session recorded on the run's day that have trial stamps (s), or None."""
-    from ephysalis.stimulus.legacy.pcclock import pc_fit
+    from ephysalis.metadata.legacy.pcclock import pc_fit
 
     header = _header_start(run)
     if header is None:
@@ -304,7 +304,7 @@ def stamps_in_window(tdr: dict[int, Any], t0: float, t1: float) -> int:
                and (s := stamp_seconds(t)) is not None and t0 <= s <= t1)
 
 
-class VStimTD01System(StimulusSystem):
+class VStimTD01Plugin(MetadataPlugin):
     name: ClassVar[str] = "vstim_td01"
 
     def can_handle(self, run: Run) -> bool:
@@ -405,10 +405,10 @@ class VStimTD01System(StimulusSystem):
                 f"in {report['outcome_agreement']})"), tdr
 
     def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
-        """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephysalis.stimulus.legacy.pcclock`)."""
+        """Start on the VStim PC's clock from the ``.tdr`` trial stamps (:mod:`ephysalis.metadata.legacy.pcclock`)."""
         from datetime import datetime, timedelta
 
-        from ephysalis.stimulus.legacy.pcclock import fit_method, pc_fit, trial_stamps
+        from ephysalis.metadata.legacy.pcclock import fit_method, pc_fit, trial_stamps
 
         header = _header_start(run)
         tables = [t for t in trials.values() if not t.empty]
@@ -469,7 +469,7 @@ class VStimTD01System(StimulusSystem):
                 if int(trial.stimulusNumber) != stimulus:
                     logger.warning("Run %s: trial %d has stimulus %d in TD01 but %d in the .tdr", run.name, number,
                                    stimulus, int(trial.stimulusNumber))
-                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephysalis.stimulus.legacy.pcclock)
+                stamp = str(trial.tAbsTrialStart or "")  # PC time of day (ephysalis.metadata.legacy.pcclock)
                 row.update(outcome=int(trial.outcome.value), outcome_name=trial.outcome.name, outcome_source="tdr",
                            pc_clock_time=stamp,
                            time_sequence=int(trial.timeSequence), reaction_time_ms=float(trial.reactionTimeMS),

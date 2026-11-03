@@ -26,7 +26,7 @@ from ephysalis.session.config import (
 from ephysalis.formats.input.base import open_session
 from ephysalis.session.probes import configure_probes
 from ephysalis.timeline.clocks import RunSync, SyncEdgeCache
-from ephysalis.stimulus.base import detect_stimulus_system, get_stimulus_system
+from ephysalis.metadata.base import detect_metadata_plugin, get_metadata_plugin
 
 logger = logging.getLogger(__name__)
 SESSION_PLACEHOLDER = "{session}"
@@ -103,9 +103,9 @@ def _inspect(args: argparse.Namespace) -> int:
             print(f"      other streams: {', '.join(others)}")
 
         system = (
-            get_stimulus_system(run_config.stimulus_system)
-            if run_config and run_config.stimulus_system
-            else detect_stimulus_system(run)
+            get_metadata_plugin(run_config.metadata_plugin)
+            if run_config and run_config.metadata_plugin
+            else detect_metadata_plugin(run)
         )
         if system is None:
             print("      stimulus: none found")
@@ -156,13 +156,12 @@ def _init(args: argparse.Namespace) -> int:
         print(f"{output} exists, use --force to overwrite", file=sys.stderr)
         return 1
 
-    if args.excel or (session.path / "Depths.txt").exists():
-        from ephysalis.session.migrate import migrate_session
+    from ephysalis.metadata.base import all_metadata_plugins
 
-        result = migrate_session(session, Path(args.excel) if args.excel else None, args.sheet)
-        config, warnings = result.config, result.warnings
-    else:
-        config, warnings = default_session_config(session), []
+    config, warnings = default_session_config(session), []  # what the recording says
+    source = Path(args.metadata) if args.metadata else None
+    for plugin in all_metadata_plugins():  # what the setup's files say
+        warnings += plugin.suggest_config(session, config, source)
 
     for warning in warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -268,9 +267,9 @@ def _sort(args: argparse.Namespace) -> int:
 def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path,
                calibration: bool = True) -> None:
     """Probes from session.toml, the calibration of the input format (``[calibration]``, ``ephysalis
-    calibrate``) and the better run start times from the stimulus system (``ephysalis extract-trials``,
-    :mod:`ephysalis.stimulus.runstart`)."""
-    from ephysalis.stimulus.runstart import apply_run_starts
+    calibrate``) and the better run start times from the metadata plugin (``ephysalis extract-trials``,
+    :mod:`ephysalis.metadata.runstart`)."""
+    from ephysalis.metadata.runstart import apply_run_starts
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
@@ -391,7 +390,7 @@ def _extract_step(args: argparse.Namespace, step: str, extract: Callable[[Run, R
 
 
 def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
-    from ephysalis.stimulus.runstart import write_run_start
+    from ephysalis.metadata.runstart import write_run_start
     from ephysalis.timeline.steps import extract_run_trials
 
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
@@ -652,7 +651,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=per_session(_sort))
 
     for name, func, help_text, outputs in (
-        ("extract-trials", _extract_trials, "Write the trial tables of all paradigms of the stimulus system and the "
+        ("extract-trials", _extract_trials, "Write the trial tables of all paradigms of the metadata plugin and the "
          "run start times from its clock (on the reference clock)", "trials/, run_start/"),
         ("extract-events", _extract_events, "Write the edges of the digital lines and the network events of every run "
          "(on the reference clock)", "events/"),
@@ -758,8 +757,8 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("init", help=f"Create {SESSION_CONFIG_FILENAME} for a session")
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")
     p.add_argument("--format", help="Input format (default: auto-detect)")
-    p.add_argument("--excel", help="Legacy lab Excel workbook to migrate run/probe info from")
-    p.add_argument("--sheet", help="Sheet name in the workbook (default: session folder name)")
+    p.add_argument("--metadata", help="Metadata file outside the session folder for the metadata plugins, e.g. the lab "
+                   "workbook of the stimstage setup (its sheet is the session folder name)")
     p.add_argument("-o", "--output", help=f"Output path (default: <session>/{SESSION_CONFIG_FILENAME})")
     p.add_argument("--force", action="store_true", help="Overwrite an existing config")
     p.set_defaults(func=per_session(_init))

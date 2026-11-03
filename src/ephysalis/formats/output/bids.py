@@ -28,7 +28,7 @@ With ``task`` (``session.toml`` ``task``, per run or per session) the files get 
 ``task-<label>`` entity, with one file per run (``export --per-run``) the ``run-<n>`` entity
 (``n``: position of the run among the included runs).
 ``acq_time`` is the start of the first run of the file (after ``ephysalis extract-trials`` the better
-start time a stimulus system gives, :mod:`ephysalis.stimulus.runstart`).
+start time a metadata plugin gives, :mod:`ephysalis.metadata.runstart`).
 
 Labels are the subject and session
 ids with everything but letters and digits removed; the session label also drops the subject
@@ -394,7 +394,7 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
                  "runs": ", ".join(runs), "start_time_method": method}, "filename")
     _write_json({
         "acq_time": {"Description": "start of the first run of the file (its first sample): the recording's start "
-                     "time, or a better one from the stimulus system (start_time_method; ephysalis.stimulus.runstart)"},
+                     "time, or a better one from the metadata plugin (start_time_method; ephysalis.metadata.runstart)"},
         "runs": {"Description": "runs of the recording in the file (session.toml run names)"},
         "start_time_method": {"Description": "how acq_time was obtained (n/a: the recording's start time)"},
     }, session_dir / f"sub-{subject}_ses-{session}_scans.json")

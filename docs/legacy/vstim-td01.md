@@ -104,12 +104,12 @@ session file and becomes the BIDS `acq_time`, and the method text goes into `sca
 ## API
 
 ```{eval-rst}
-.. autoclass:: ephysalis.stimulus.legacy.vstim_td01.VStimTD01System
+.. autoclass:: ephysalis.metadata.legacy.vstim_td01.VStimTD01Plugin
    :members: load_trials, run_start
 
-.. autofunction:: ephysalis.stimulus.legacy.vstim_td01.find_tdr
+.. autofunction:: ephysalis.metadata.legacy.vstim_td01.find_tdr
 
-.. autofunction:: ephysalis.stimulus.legacy.vstim_td01.match_by_time
+.. autofunction:: ephysalis.metadata.legacy.vstim_td01.match_by_time
 
-.. autofunction:: ephysalis.stimulus.legacy.pcclock.pc_fit
+.. autofunction:: ephysalis.metadata.legacy.pcclock.pc_fit
 ```

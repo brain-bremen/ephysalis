@@ -47,7 +47,7 @@ def test_apply_probe_with_reference_channels():
 def test_schema_7_reference_channels_and_migration():
     config = session_config_from_dict({"schema_version": 6, "session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"]}}})
-    assert config.schema_version == SCHEMA_VERSION == 7 and config.probes["v4"].reference_channels is None
+    assert config.schema_version == SCHEMA_VERSION == 8 and config.probes["v4"].reference_channels is None
     config = session_config_from_dict({"schema_version": 7, "session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"],
                                                          "reference_channels": ["14C"]}}})

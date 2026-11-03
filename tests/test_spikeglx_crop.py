@@ -10,7 +10,7 @@ from ephysalis.timeline.auxsignals import AuxSignals, wheel_speed
 from ephysalis.formats.input.base import open_session
 from ephysalis.session.model import StreamKind
 from ephysalis.session.config import AuxChannelMap, default_session_config
-from ephysalis.stimulus.base import detect_stimulus_system
+from ephysalis.metadata.base import detect_metadata_plugin
 from ephysalis.timeline.clocks import AUX
 from ephysalis.timeline.steps import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
@@ -68,7 +68,7 @@ def test_default_aux_roles_match_recording(run):
 
 
 def test_conditions_and_legacy_reference(run):
-    system = detect_stimulus_system(run)
+    system = detect_metadata_plugin(run)
     (paradigm,) = system.discover(run)
     assert paradigm.metadata["stimulusCount"] == 6707
     conditions = system.load_conditions(paradigm)

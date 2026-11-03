@@ -66,7 +66,7 @@ class Run:
     # time of the first sample on the acquisition clock (s), the time axis of a file per run
     # (``export --per-run``); 0 for formats whose clock starts with the recording
     clock_start_s: float = 0.0
-    # start time as recorded, when ``start_time`` was replaced by a better one (ephysalis.stimulus.runstart)
+    # start time as recorded, when ``start_time`` was replaced by a better one (ephysalis.metadata.runstart)
     recorded_start_time: datetime | None = None
     start_time_method: str = ""  # how ``start_time`` was obtained, if not from the recording
     extra: dict = field(default_factory=dict)  # format-specific details, used only by the format

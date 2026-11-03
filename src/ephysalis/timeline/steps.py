@@ -4,7 +4,7 @@
     clock of every stream on the run's reference clock (:func:`align_run_clocks`), from the
     sync-pulse edges (cached in ``<work>/sync``); report ``<work>/clocks/<run>.json``
 ``ephysalis extract-trials``
-    trial tables of all paradigms of the stimulus system and the run start time from its clock
+    trial tables of all paradigms of the metadata plugin and the run start time from its clock
     (:func:`extract_run_trials`; ``trials/``, ``run_start/``)
 ``ephysalis extract-events``
     edges of the digital lines and network events (:mod:`ephysalis.timeline.events`; ``events/``)
@@ -31,13 +31,13 @@ import pandas as pd
 from ephysalis.timeline.auxsignals import AuxSignals, bin_means_on_reference, wheel_speed
 from ephysalis.session.model import Run, StreamKind
 from ephysalis.timeline.events import run_events
-from ephysalis.stimulus.runstart import RunStart
+from ephysalis.metadata.runstart import RunStart
 from ephysalis.session.config import AuxChannelMap, EventsConfig, SessionConfig
-from ephysalis.stimulus.base import Paradigm, detect_stimulus_system, get_stimulus_system
+from ephysalis.metadata.base import Paradigm, detect_metadata_plugin, get_metadata_plugin
 from ephysalis.timeline.clocks import AUX, RunSync, SyncEdgeCache, synchronize_run
 
 if TYPE_CHECKING:
-    from ephysalis.stimulus.base import StimulusSystem
+    from ephysalis.metadata.base import MetadataPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class RunTiming:
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
     eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
     events: pd.DataFrame | None = None  # see ephysalis.timeline.events
-    run_start: RunStart | None = None  # better start time from the stimulus system (ephysalis.stimulus.runstart)
+    run_start: RunStart | None = None  # better start time from the metadata plugin (ephysalis.metadata.runstart)
 
     def trial_samples(self, paradigm: str, stream: str, column: str = "start_time") -> np.ndarray:
         """Trial times of a paradigm as fractional sample indices of another stream."""
@@ -110,12 +110,12 @@ def write_clock_report(work_dir: Path, run_name: str, sync: RunSync) -> Path:
     return path
 
 
-def run_stimulus_system(run: Run, config: SessionConfig | None = None) -> StimulusSystem | None:
+def run_metadata_plugin(run: Run, config: SessionConfig | None = None) -> MetadataPlugin | None:
     run_config = config.run_config(run.name) if config is not None else None
     return (
-        get_stimulus_system(run_config.stimulus_system)
-        if run_config is not None and run_config.stimulus_system
-        else detect_stimulus_system(run)
+        get_metadata_plugin(run_config.metadata_plugin)
+        if run_config is not None and run_config.metadata_plugin
+        else detect_metadata_plugin(run)
     )
 
 
@@ -125,10 +125,10 @@ def _aux(run: Run, config: SessionConfig | None) -> AuxSignals | None:
 
 def extract_run_trials(run: Run, sync: RunSync, config: SessionConfig | None = None
                        ) -> tuple[list[Paradigm], dict[str, pd.DataFrame], RunStart | None]:
-    """``(paradigms, trials per paradigm, run start)`` from the run's stimulus system."""
-    system = run_stimulus_system(run, config)
+    """``(paradigms, trials per paradigm, run start)`` from the run's metadata plugin."""
+    system = run_metadata_plugin(run, config)
     if system is None:
-        logger.info("Run %s: no stimulus system found", run.name)
+        logger.info("Run %s: no metadata plugin found", run.name)
         return [], {}, None
     aux = _aux(run, config)
     paradigms = system.discover(run)

@@ -1,6 +1,6 @@
 # Historic recording formats
 
-The packages `ephysalis.formats.input.legacy` and `ephysalis.stimulus.legacy` read the lab's historic recordings. They will be removed once those
+The packages `ephysalis.formats.input.legacy` and `ephysalis.metadata.legacy` read the lab's historic recordings. They will be removed once those
 datasets are converted. These pages describe the file formats in enough detail to write another
 reader without ephysalis.
 
@@ -9,7 +9,7 @@ reader without ephysalis.
 | {doc}`daq` | `.daq` | 1999–2006 | Fritz, Mini (epidural and intracortical arrays, ADC64/MC-128 cards) | `ephysalis.formats.input.legacy.daq.reader` |
 | {doc}`uff` | `M*.UFF` + `P*.UFF` | 1999 | Eddi (Tallon-Baudry et al. 2004) | `ephysalis.formats.input.legacy.uff` |
 | {doc}`mcd` | `.mcd` | 2010–2011 | Iris (USB-ME256) | `ephysalis.formats.input.legacy.mcd` |
-| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephysalis.stimulus.legacy.vstim_td01` |
+| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephysalis.metadata.legacy.vstim_td01` |
 
 None of these formats is documented by its authors:
 - the DAQ format was reconstructed from Michael Borisov's DAQ → HDF5 converter;

@@ -13,7 +13,7 @@ import pandas as pd
 # (step, label, description) in pipeline order
 STEPS = [
     ("align-clocks", "Clock alignment", "every stream on the reference clock, from the sync-pulse edges (reads the AP files)"),
-    ("extract-trials", "Trials", "trial tables of all paradigms of the stimulus system, run start times"),
+    ("extract-trials", "Trials", "trial tables of all paradigms of the metadata plugin, run start times"),
     ("extract-events", "Events", "edges of the digital lines and network events"),
     ("extract-behavior", "Behaviour", "eye position and running speed at 1 kHz"),
     ("calibrate", "Calibration", "channel gains from the calibration-sine run ([calibration] in session.toml)"),

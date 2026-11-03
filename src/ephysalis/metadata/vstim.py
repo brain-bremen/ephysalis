@@ -6,9 +6,9 @@ VStim writes one TDR file (trial data record) per recording and sends messages t
 line 1 (``trial_start`` role) goes up at the start of every trial.
 
 - Paradigm: one per run, named after the stimulus definition (``.ini``) in the TDR header.
-- Conditions (:meth:`VStimSystem.load_conditions`): one row per TDR trial; ``condition`` is
+- Conditions (:meth:`VStimPlugin.load_conditions`): one row per TDR trial; ``condition`` is
   VStim's trial type (stimulus number), plus outcome, time sequence, reaction and reward time.
-- Trial times (:meth:`VStimSystem.load_trials`): start = rising edge of the trial start line
+- Trial times (:meth:`VStimPlugin.load_trials`): start = rising edge of the trial start line
   that precedes the trial's ``TRIAL_START`` message (the message comes over the network,
   ~0.1-0.5 s later); stop = start + the trial duration in the TDR. Without the line, the
   message times are used (network latency, warned).
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ephysalis.session.model import Run
-from ephysalis.stimulus.base import Paradigm, StimulusSystem
+from ephysalis.metadata.base import Paradigm, MetadataPlugin
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ def read_tdr(path: Path) -> Any:
         return _read(path)
 
 
-class VStimSystem(StimulusSystem):
+class VStimPlugin(MetadataPlugin):
     name: ClassVar[str] = "vstim"
 
     def can_handle(self, run: Run) -> bool:

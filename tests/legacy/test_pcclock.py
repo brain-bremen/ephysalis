@@ -1,4 +1,4 @@
-"""Run start on the stimulus PC's clock from the .tdr trial stamps (ephysalis.stimulus.legacy.pcclock); BIDS task
+"""Run start on the stimulus PC's clock from the .tdr trial stamps (ephysalis.metadata.legacy.pcclock); BIDS task
 entity and scans.tsv."""
 
 from datetime import datetime
@@ -9,7 +9,7 @@ import pytest
 
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.stimulus.legacy.pcclock import PRIOR_PPM, pc_fit
+from ephysalis.metadata.legacy.pcclock import PRIOR_PPM, pc_fit
 from test_vstim_td01 import MS, T0, _session, write_tdr
 
 

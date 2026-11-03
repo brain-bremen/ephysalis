@@ -259,7 +259,7 @@ def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config:
 def _add_epochs_and_trials(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
     methods = {"start_time_method": [run.start_time_method for run in runs]}
     if any(methods["start_time_method"]):
-        nwbfile.add_epoch_column("start_time_method", "how the run's start time was obtained (ephysalis.stimulus.runstart); "
+        nwbfile.add_epoch_column("start_time_method", "how the run's start time was obtained (ephysalis.metadata.runstart); "
                                  "empty: the recording's start time")
     else:
         methods = {}
@@ -271,7 +271,7 @@ def _add_epochs_and_trials(nwbfile: NWBFile, work_dir: Path, runs: list[Run], of
         return
     columns = [c for c in trials.columns if c not in ("start_time", "stop_time")]
     for column in columns:
-        nwbfile.add_trial_column(column, {"run": "run name", "paradigm": "paradigm of the stimulus system",
+        nwbfile.add_trial_column(column, {"run": "run name", "paradigm": "paradigm of the metadata plugin",
                                           "trial": "trial index within the run and paradigm"}.get(
                                               column, "stimulus parameter (NaN if the paradigm does not have it)"))
     for values in trials.to_dict("records"):  # not itertuples: it renames columns that are not identifiers

@@ -1,7 +1,7 @@
 """Start of a DAQ run on the VStim PC's clock from the trial stamps of the ``.tdr``
 (``tAbsTrialStart``, time of day in whole seconds, floor): port of ``clocksync.pc_fit`` of the
-Fritz/Mini BIDS conversions. Used by :meth:`ephysalis.stimulus.legacy.vstim_td01.VStimTD01System.run_start`
-(stored and applied by :mod:`ephysalis.stimulus.runstart`).
+Fritz/Mini BIDS conversions. Used by :meth:`ephysalis.metadata.legacy.vstim_td01.VStimTD01Plugin.run_start`
+(stored and applied by :mod:`ephysalis.metadata.runstart`).
 
 The DAQ header gives the start of a DAQ file to 1 s on the DAQ computer's clock, which ran a
 constant few minutes ahead of the VStim PC on a day (2004-07-22 335 s, 2005-01-06 398 s,

@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_session
-from ephysalis.stimulus.base import detect_stimulus_system
-from ephysalis.stimulus.stimstage import get_stim_from_index
+from ephysalis.metadata.base import detect_metadata_plugin
+from ephysalis.metadata.stimstage import get_stim_from_index
 from conftest import write_stimstage_paradigm
 
 STIM_FUNC = {"function_handle": {"function": "stimulusStageTest", "type": "simple"}}
@@ -47,7 +47,7 @@ def test_discover_and_load_conditions(make_spikeglx_session):
     write_stimstage_paradigm(run_dir, "1_stimulusStageRF", params, order)
 
     run = open_session(session_path).runs[0]
-    system = detect_stimulus_system(run)
+    system = detect_metadata_plugin(run)
     assert system is not None and system.name == "stimstage"
 
     (paradigm,) = system.discover(run)
@@ -67,4 +67,4 @@ def test_discover_and_load_conditions(make_spikeglx_session):
 
 def test_runs_without_stimulus_folder(make_spikeglx_session):
     run = open_session(make_spikeglx_session()).runs[0]
-    assert detect_stimulus_system(run) is None
+    assert detect_metadata_plugin(run) is None

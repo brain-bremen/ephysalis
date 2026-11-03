@@ -1,4 +1,5 @@
-"""Migration of legacy MATLAB-pipeline session metadata into a :class:`SessionConfig`.
+"""Session metadata of the lab's MATLAB Neuropixels pipeline, as config suggestions of the
+``stimstage`` metadata plugin (``ephysalis init``).
 
 Sources (all optional):
 
@@ -15,25 +16,18 @@ take precedence; disagreements are reported as warnings.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from ephysalis.session.config import ProbeConfig, SessionConfig, default_session_config
+from ephysalis.session.config import ProbeConfig, SessionConfig
 from ephysalis.session.model import Session
 
 _RUN_CELL_RE = re.compile(r"^\d+_.+_g\d+$")
 _BLACK_RGB = {"FF000000", "00000000"}
 _BLACK_THEME = 1  # theme colour "Text 1"
 _BLACK_INDEXED = {8, 64}  # palette black, system foreground
-
-
-@dataclass
-class MigrationResult:
-    config: SessionConfig
-    warnings: list[str] = field(default_factory=list)
 
 
 def _is_black(cell: Any) -> bool:
@@ -181,13 +175,12 @@ def apply_legacy_text_files(
     return warnings
 
 
-def migrate_session(
-    session: Session, excel: Path | None = None, sheet: str | None = None
-) -> MigrationResult:
-    config = default_session_config(session)
+def apply_pipeline_metadata(config: SessionConfig, session: Session, workbook: Path | None = None) -> list[str]:
+    """Add the session's sheet of ``workbook`` (if given) and the pipeline's text files to
+    ``config``; returns warnings."""
     warnings = []
-    if excel is not None:
-        warnings += apply_excel_sheet(config, session, excel, sheet)
+    if workbook is not None:
+        warnings += apply_excel_sheet(config, session, workbook)
     # as in the MATLAB pipeline, folders2Combine.txt is only used without an Excel sheet
-    warnings += apply_legacy_text_files(config, session, use_folders_file=excel is None)
-    return MigrationResult(config=config, warnings=warnings)
+    warnings += apply_legacy_text_files(config, session, use_folders_file=workbook is None)
+    return warnings

@@ -9,7 +9,7 @@ from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.output.dh5 import EYE_CONT_IDS
 from ephysalis.formats.input.base import open_session
-from ephysalis.stimulus.base import detect_stimulus_system
+from ephysalis.metadata.base import detect_metadata_plugin
 from ephysalis.timeline.steps import extract_run_timing
 
 
@@ -23,7 +23,7 @@ def timing():
 
 
 def test_vstim_is_detected():
-    system = detect_stimulus_system(open_session(DATA_FOLDER).run(RUN))
+    system = detect_metadata_plugin(open_session(DATA_FOLDER).run(RUN))
     assert system is not None and system.name == "vstim"
 
 
