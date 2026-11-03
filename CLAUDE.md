@@ -19,7 +19,7 @@ uv run ephysalis extract-trials|extract-events|extract-behavior <session> --work
 uv run ephysalis calibrate|lfp|quality|csd|mua <session> --work-dir <dir>
 uv run ephysalis sort <session> --work-dir <dir> --scratch-dir <fast local disk>   # needs `uv sync --extra sorting`
 uv run ephysalis export <session> --work-dir <dir> [--output-format nwb|dh5] [--per-run] [--raw] [--bids <root>]
-uv run ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--session <path>] [--run]
+uv run ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--recording-session <path>] [--run]
 
 # A dataset (dataset.toml: defaults, per-session overrides, steps and their options)
 uv run ephysalis run dataset.toml [--recording-sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
