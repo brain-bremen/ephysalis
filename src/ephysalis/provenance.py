@@ -177,14 +177,18 @@ def step_records(work_dir: Path) -> dict[str, list[dict[str, Any]]]:
     folder = provenance_dir(work_dir)
     if not folder.is_dir():
         return {}
-    return {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(folder.glob("*.json"))}
+    from ephysalis.filesystem import glob_in_work_folder
+
+    return {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in glob_in_work_folder(folder, "*.json")}
 
 
 def processing_record(work_dir: Path, export: dict[str, Any]) -> dict[str, Any]:
     """Processing record of an output file: the steps' records, the sorter settings of every
     probe and the export's own record ``export`` (see :func:`step_record`)."""
     sorting = {}
-    for segments in sorted((work_dir / "sorting").glob("*/segments.json")):
+    from ephysalis.filesystem import glob_in_work_folder
+
+    for segments in glob_in_work_folder(work_dir / "sorting", "*/segments.json"):
         info = json.loads(segments.read_text(encoding="utf-8"))
         sorting[segments.parent.name] = {k: info.get(k) for k in ("sorter", "sorter_params", "channel_ids")}
     return {

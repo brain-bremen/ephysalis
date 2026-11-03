@@ -247,8 +247,13 @@ _NAME_MEMBER = {InputFormat: "input_format_name", MetadataPlugin: "metadata_plug
 # --- loading and checking ------------------------------------------------------------------
 
 def _members(protocol: type) -> list[str]:
-    return sorted(typing.get_protocol_members(protocol)) if hasattr(typing, "get_protocol_members") \
-        else sorted(protocol.__protocol_attrs__)  # type: ignore[attr-defined]
+    """Members of a Protocol: ``typing.get_protocol_members`` (Python 3.13), ``__protocol_attrs__`` (3.12) or
+    ``typing._get_protocol_attrs`` (3.11)."""
+    if hasattr(typing, "get_protocol_members"):
+        return sorted(typing.get_protocol_members(protocol))
+    if hasattr(protocol, "__protocol_attrs__"):
+        return sorted(protocol.__protocol_attrs__)  # type: ignore[attr-defined]
+    return sorted(typing._get_protocol_attrs(protocol))  # type: ignore[attr-defined]
 
 
 def _parameters(function: Any) -> list[str]:

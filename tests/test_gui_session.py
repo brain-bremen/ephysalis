@@ -24,6 +24,18 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """Message boxes fail the test with their text (offscreen, a modal dialog would wait forever)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    def fail(parent, title, text, *args, **kwargs):
+        raise AssertionError(f"message box {title!r}: {text}")
+
+    for kind in ("critical", "warning", "information", "question"):
+        monkeypatch.setattr(QMessageBox, kind, fail)
+
+
 @pytest.fixture
 def page(app, tmp_path, monkeypatch):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)

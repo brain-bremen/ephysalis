@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from ephysalis.filesystem import remove_folder
+from ephysalis.filesystem import copy_folder, remove_folder
 from ephysalis.recording_session.model import RecordingSession, StreamKind
 
 if TYPE_CHECKING:
@@ -182,6 +182,31 @@ def unit_table(analyzer: Any) -> pd.DataFrame:
     return table
 
 
+def _compute_analyzer_locally_and_copy(sorting: Any, recording: Any, analyzer_dir: Path, job: dict[str, Any]) -> Any:
+    """The sorting analyzer with :data:`ANALYZER_EXTENSIONS`, computed in a folder on the local disk and copied to
+    ``analyzer_dir``: spikeinterface deletes, rewrites and lists extension folders while computing, which fails on
+    NFS shares with stale directory listings (:mod:`ephysalis.filesystem`)."""
+    import tempfile
+
+    import spikeinterface.core as si
+
+    with tempfile.TemporaryDirectory(prefix="ephysalis-analyzer-") as local:
+        local_dir = Path(local) / "analyzer"
+        analyzer = si.create_sorting_analyzer(sorting, recording, format="binary_folder", folder=local_dir,
+                                              sparse=True, job_kwargs=job)
+        for extension_name, extension_parameters in ANALYZER_EXTENSIONS.items():
+            analyzer.compute(extension_name, **extension_parameters,
+                             **(job if extension_name in ("noise_levels", "waveforms") else {}))
+        del analyzer
+        gc.collect()
+        remove_folder(analyzer_dir)
+        copy_folder(local_dir, analyzer_dir)
+    for extension_name in ANALYZER_EXTENSIONS:  # every extension arrived with its data
+        if not (analyzer_dir / "extensions" / extension_name / "info.json").exists():
+            raise RuntimeError(f"{analyzer_dir}: extension {extension_name} incomplete after the copy")
+    return si.load_sorting_analyzer(analyzer_dir)
+
+
 def sort_probe(
     recording_session: RecordingSession,
     probe_id: str,
@@ -265,14 +290,7 @@ def sort_probe(
 
     analyzer_dir = out / "analyzer"
     filtered = bandpass_filter(local, freq_min=ANALYZER_BAND_HZ[0], freq_max=ANALYZER_BAND_HZ[1])
-    # computed in memory and saved at the end: computing an extension deletes its folder while other extensions
-    # may hold its files open, which fails on NFS (the open files stay as .nfs* entries)
-    analyzer = si.create_sorting_analyzer(sorting, filtered, format="memory", sparse=True, job_kwargs=job)
-    for extension_name, extension_parameters in ANALYZER_EXTENSIONS.items():
-        analyzer.compute(extension_name, **extension_parameters,
-                         **(job if extension_name in ("noise_levels", "waveforms") else {}))
-    remove_folder(analyzer_dir)
-    analyzer = analyzer.save_as(format="binary_folder", folder=analyzer_dir)
+    analyzer = _compute_analyzer_locally_and_copy(sorting, filtered, analyzer_dir, job)
     units = unit_table(analyzer)
     units.to_csv(out / "units.csv")
 

@@ -41,6 +41,8 @@ class PipelineOptions:
     export_raw: bool = False
 
 
+from ephysalis.filesystem import glob_in_work_folder
+
 def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
     """``[(step, argv)]`` in pipeline order; ``argv`` runs ``ephysalis`` in this Python."""
     common = ["--work-dir", str(options.work_dir)]
@@ -75,36 +77,36 @@ def work_dir_summary(work_dir: Path, recording_session_name: str) -> list[tuple[
     rows: list[tuple[str, str]] = []
     if not work_dir.exists():
         return rows
-    sync = sorted((work_dir / "sync").glob("*.npz"))
+    sync = glob_in_work_folder(work_dir / "sync", "*.npz")
     if sync:
         rows.append(("sync", f"sync edges of {len(sync)} runs"))
-    clocks = sorted((work_dir / "clocks").glob("*.json"))
+    clocks = glob_in_work_folder(work_dir / "clocks", "*.json")
     if clocks:
         rows.append(("clocks", f"clock alignment of {len(clocks)} runs"))
-    for csv in sorted((work_dir / "trials").glob("*.csv")):
+    for csv in glob_in_work_folder(work_dir / "trials", "*.csv"):
         trials = pd.read_csv(csv)
         rows.append((f"trials/{csv.name}", f"{len(trials)} trials"))
     for kind, unit in (("running_speed", "running speed"), ("eye", "eye position")):
-        files = sorted((work_dir / kind).glob("*.npy"))
+        files = glob_in_work_folder(work_dir / kind, "*.npy")
         if files:
             rows.append((kind, f"{unit} of {len(files)} runs"))
     if (work_dir / "calibration.json").exists():
         rows.append(("calibration.json", "channel gains from the calibration run"))
-    quality = sorted((work_dir / "quality").glob("*.json"))
+    quality = glob_in_work_folder(work_dir / "quality", "*.json")
     if quality:
         rows.append(("quality", f"channel selection of {len(quality)} run × probe recordings"))
     for kind in ("lfp", "csd", "mua"):
-        folders = sorted(p for p in (work_dir / kind).glob("*") if (p / "binary.json").exists())
+        folders = sorted(p for p in glob_in_work_folder(work_dir / kind, "*") if (p / "binary.json").exists())
         if folders:
             rows.append((kind, f"{len(folders)} run × probe recordings"))
-    events = sorted((work_dir / "events").glob("*.csv"))
+    events = glob_in_work_folder(work_dir / "events", "*.csv")
     if events:
         rows.append(("events", f"{sum(len(pd.read_csv(p)) for p in events):,} events in {len(events)} runs"))
-    for units_csv in sorted((work_dir / "sorting").glob("*/units.csv")):
+    for units_csv in glob_in_work_folder(work_dir / "sorting", "*/units.csv"):
         units = pd.read_csv(units_csv)
         good = f", {int((units.KSLabel == 'good').sum())} good" if "KSLabel" in units else ""
         rows.append((f"sorting/{units_csv.parent.name}", f"{len(units)} units{good}"))
-    spikes = sorted((work_dir / "spikes").glob("*.npz"))
+    spikes = glob_in_work_folder(work_dir / "spikes", "*.npz")
     if spikes:
         n = sum(int(np.load(p)["time"].size) for p in spikes)
         rows.append(("spikes", f"{n:,} spikes in {len(spikes)} run × probe tables"))

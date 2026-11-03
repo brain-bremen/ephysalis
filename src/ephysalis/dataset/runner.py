@@ -47,7 +47,7 @@ from ephysalis.dataset.config import (
     DatasetRecordingSession,
     step_argv,
 )
-from ephysalis.filesystem import remove_folder
+from ephysalis.filesystem import glob_in_work_folder, remove_folder
 from ephysalis.recording_session.config import save_recording_session_config
 
 logger = logging.getLogger(__name__)
@@ -273,7 +273,7 @@ class Runner:
         scratch = sort_scratch_dir(self.dataset, dataset_recording_session)
         for probe in probes:
             self._delete_tree(dataset_recording_session, dataset_recording_session.work_dir / "sorting" / probe)
-            for old in scratch.glob(f"{dataset_recording_session.recording_session_path.name}_{probe}*"):
+            for old in glob_in_work_folder(scratch, f"{dataset_recording_session.recording_session_path.name}_{probe}*"):
                 self._delete_tree(dataset_recording_session, old)
 
     def _delete_tree(self, dataset_recording_session: DatasetRecordingSession, folder: Path) -> None:
