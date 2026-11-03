@@ -8,7 +8,7 @@ import pytest
 from ephysalis.timeline.annotations import event_code_names, line_pulses, markers
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.session.config import EventsConfig, MarkerConfig, TriggerLineConfig
+from ephysalis.recording_session.config import EventsConfig, MarkerConfig, TriggerLineConfig
 from synthetic import write_openephys
 
 MS = 1_000_000  # ns
@@ -57,7 +57,7 @@ def test_dh5_nwb_bids_annotations(tmp_path):
     ttl = []
     for s in starts:
         ttl += [(s, 1, 1), (s + 300, 1, 0), (s + 400, 3, 1), (s + 2000, 3, 0), (s + 500, 15, 0), (s + 2500, 15, 1)]
-    session = write_openephys(tmp_path / "ses", [{"data": np.zeros((10_000, 2)), "ttl": ttl}])
+    recording_session = write_openephys(tmp_path / "ses", [{"data": np.zeros((10_000, 2)), "ttl": ttl}])
     (tmp_path / "session.toml").write_text("""schema_version = 5
 session_id = "s"
 subject_id = "m"
@@ -80,8 +80,8 @@ role = "interval2"
 offset_ms = 650
 """)
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert extract_all([str(session), *common]) == 0
-    assert main(["export", str(session), *common, "--output-format", "dh5", "--per-run", "-o",
+    assert extract_all([str(recording_session), *common]) == 0
+    assert main(["export", str(recording_session), *common, "--output-format", "dh5", "--per-run", "-o",
                  str(tmp_path / "out.dh5")]) == 0
     with h5py.File(next(tmp_path.glob("out_*.dh5"))) as f:  # on the run's clock: 0 = first sample
         lever = f["Intervals"]["lever_pressed"][()]
@@ -94,7 +94,7 @@ offset_ms = 650
         legend = dict(zip(f["EV02"].attrs["EventNames"].astype(str), f["EV02"].attrs["EventCodes"]))
         assert legend["lever_pressed_on"] == -15 and legend["interval0_on"] == 1
     bids = tmp_path / "bids"
-    assert main(["export", str(session), *common, "--per-run", "--bids", str(bids)]) == 0
+    assert main(["export", str(recording_session), *common, "--per-run", "--bids", str(bids)]) == 0
     from pynwb import NWBHDF5IO
 
     nwb_path = next(bids.rglob("*_ecephys.nwb"))

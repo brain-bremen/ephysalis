@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-from ephysalis.formats.input.base import open_session
-from ephysalis.session.model import StreamKind
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.recording_session.model import StreamKind
 from conftest import DATA_FOLDER, skip_if_no_data
 
 
 @skip_if_no_data
-def test_open_ephys_session_discovery():
-    session = open_session(DATA_FOLDER)
-    assert session.format.input_format_name == "openephys"
-    assert [r.name for r in session.runs] == ["experiment1_recording1"]
-    run = session.runs[0]
+def test_open_ephys_recording_session_discovery():
+    recording_session = open_recording_session(DATA_FOLDER)
+    assert recording_session.format.input_format_name == "openephys"
+    assert [r.name for r in recording_session.runs] == ["experiment1_recording1"]
+    run = recording_session.runs[0]
     assert run.probes == {}
     assert run.aux_stream == "Record Node 101#NI-DAQmx-110.USB-6343"
 
@@ -30,7 +30,7 @@ def test_open_ephys_session_discovery():
 def test_open_ephys_clock_maps_from_timestamps():
     from ephysalis.timeline.clocks import AUX, synchronize_run
 
-    run = open_session(DATA_FOLDER).runs[0]
+    run = open_recording_session(DATA_FOLDER).runs[0]
     sync = synchronize_run(run)  # no probes and no sync pulses needed: Open Ephys timestamps
     assert sync.reference == AUX
     clock = sync.maps[AUX]
@@ -40,22 +40,22 @@ def test_open_ephys_clock_maps_from_timestamps():
 
 
 @skip_if_no_data
-def test_probe_defined_in_session_config(tmp_path):
+def test_probe_defined_in_recording_session_config(tmp_path):
     """A non-Neuropixels probe on a stream the reader does not detect (here the two NI-DAQ inputs)."""
     import probeinterface
 
-    from ephysalis.session.probes import configure_probes
-    from ephysalis.session.config import ProbeConfig, ProbeGeometry, SessionConfig
+    from ephysalis.recording_session.probes import configure_probes
+    from ephysalis.recording_session.config import ProbeConfig, ProbeGeometry, RecordingSessionConfig
     from ephysalis.timeline.clocks import synchronize_run
 
     probe = probeinterface.generate_linear_probe(num_elec=2, ypitch=50)
     probeinterface.write_probeinterface(tmp_path / "probe.json", probe)
-    config = SessionConfig(session_id="s", subject_id="m")
+    config = RecordingSessionConfig(session_id="s", subject_id="m")
     config.probes["probe0"] = ProbeConfig(stream="NI-DAQmx-110.USB-6343", channels=["AI2", "AI0"],
                                           geometry=ProbeGeometry(file="probe.json"))
-    session = configure_probes(open_session(DATA_FOLDER), config, tmp_path)
-    assert session.probe_ids == ["probe0"]
-    run = session.runs[0]
+    recording_session = configure_probes(open_recording_session(DATA_FOLDER), config, tmp_path)
+    assert recording_session.probe_ids == ["probe0"]
+    run = recording_session.runs[0]
     recording = run.get_recording(StreamKind.AP, "probe0")
     assert list(recording.channel_ids) == ["AI2", "AI0"]
     np.testing.assert_array_equal(recording.get_channel_locations()[:, 1], [0, 50])

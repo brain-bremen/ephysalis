@@ -22,7 +22,7 @@ uv run ephysalis export <session> --work-dir <dir> [--output-format nwb|dh5] [--
 uv run ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--session <path>] [--run]
 
 # A dataset (dataset.toml: defaults, per-session overrides, steps and their options)
-uv run ephysalis run dataset.toml [--sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
+uv run ephysalis run dataset.toml [--recording-sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
 uv run ephysalis status dataset.toml
 uv run ephysalis pause dataset.toml        # running steps finish, then the runners stop; `run` resumes
 ```
@@ -40,7 +40,7 @@ Nothing in the core may know about them.
 DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
 
 - `plugins.py` — the plugin interface (`PLUGIN_API_VERSION`): runtime-checkable Protocols. Input formats
-  (`ephysalis.input_formats` entry points) have a required core (`can_read_session_folder`, `open_session`,
+  (`ephysalis.input_formats` entry points) have a required core (`can_read_recording_session_folder`, `open_recording_session`,
   `get_stream_recording`, `default_auxiliary_channel_roles`) and optional capabilities (`ReadsDigitalLineEdges`,
   `ReadsAuxiliaryAnalogInputs`, `LocatesSyncPulseChannels`, `HasSynchronisedTimestamps`, `ReadsEventWords`,
   `ReadsTextMessages`, `ReadsTrialDescriptorEvents`, `ListsStreamChannelIds`, `ComputesChannelGainCalibration`).
@@ -49,18 +49,19 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `EstimatesRunStartTime`, `AddsSessionConfigFromMetadataFiles`, `NamesEventWords`. Plugins are usually modules of
   functions; loading checks them (`plugin_problems`) and skips misfits with a warning; `require` before using a
   capability. `registry.py` gives typed entry point targets, so pyright checks a module against the Protocols.
-  Use long, explicit names for everything (functions, fields, variables): `paradigm_name`, `metadata_plugin_name`,
-  `_find_paradigms_in_run`, never a bare `name`, `system`, `path` or `_discover`.
-- `session/` — `model.py` (format-independent Session → Run → ProbeInfo/streams, `StreamKind`; `Run.extra` is
-  private to the format), `config.py` (`SessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 8 + `MIGRATIONS`),
+  Use long, explicit names for everything (functions, fields, variables): `experimental_protocol_name`, `metadata_plugin_name`,
+  `_find_experimental_protocols_in_run`, `recording_session`, never a bare `name`, `system`, `path`, `session`
+  or `_discover`. Never write into or delete in the recording session folders (source data).
+- `recording_session/` — `model.py` (format-independent RecordingSession → Run → ProbeInfo/streams, `StreamKind`;
+  `Run.extra` is private to the format), `config.py` (`RecordingSessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 8 + `MIGRATIONS`),
   `schema.py` (`migrate`; raise the version and add a migration whenever a config format changes), `probes.py`
   (probes defined in `session.toml`, geometry files relative to the config).
 - `formats/input/` — `spikeglx.py`, `openephys.py` (Binary, NWB, legacy Open Ephys via open-ephys-python-tools, own
-  lazy extractor for `.continuous`), `base.py` (`open_session`). `formats/output/` — `nwb.py`, `dh5.py` (CONT
+  lazy extractor for `.continuous`), `base.py` (`open_recording_session`). `formats/output/` — `nwb.py`, `dh5.py` (CONT
   ranges from `dhspec`, SPIKE blocks need dh5io with SPIKE writing), `bids.py` (BEP032 `ecephys`; validate with
   `bids-validator-deno --schema https://bids-specification.readthedocs.io/en/bep032/schema.json`). `matfile.py`.
 - `metadata/` — `base.py` (`run_trial_tables`: the run's `metadata_plugin` or the first plugin that recognises it;
-  `Paradigm`), `runstart.py` (better run start times, `<work>/run_start/`, applied in `_configure`).
+  `ExperimentalProtocol`: one experimental protocol of a run, with or without stimulation, one trial table), `runstart.py` (better run start times, `<work>/run_start/`, applied in `_configure`).
 - `timeline/` — `clocks.py` (sync edges → `ClockMap` per stream on the reference clock, `RunSync`, `SyncEdgeCache`
   in `<work>/sync`), `steps.py` (the align-clocks and extract steps), `events.py` (digital line edges and event
   words per run, `events/<run>.csv`; DH5 codes made at export), `annotations.py`, `auxsignals.py` (photodiode,
@@ -72,11 +73,12 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `kilosort_checkpoints.py`.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
-- `dataset/` — `config.py` (`dataset.toml`: defaults < session file < inline overrides, `STEP_INPUTS` = the step
+- `dataset/` — `config.py` (`dataset.toml`: `[[recording_sessions]]`, defaults < recording session file < inline
+  overrides, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
   graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
   stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
   `state_dir`).
-- `cli/` — `main.py`, `session_commands.py` (the steps; `per_session` for several sessions), `dataset_commands.py`
+- `cli/` — `main.py`, `recording_session_commands.py` (the steps; `per_recording_session` for several), `dataset_commands.py`
   (`run`, `status`, `pause`). GUI (`gui/`, PySide6) runs each step as `python -m ephysalis.cli.main <step>`.
 
 ### Tests

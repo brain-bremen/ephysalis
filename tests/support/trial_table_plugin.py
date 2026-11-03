@@ -1,4 +1,4 @@
-"""Metadata plugin of the core tests: trials of a run from ``trial_table_<paradigm>.csv`` in the run
+"""Metadata plugin of the core tests: trials of a run from ``trial_table_<experimental protocol>.csv`` in the run
 folder (trial times as samples of the auxiliary stream), so that the core tests of trials, events
 and exports do not depend on a lab's plugin. Registered by ``tests/conftest.py``."""
 

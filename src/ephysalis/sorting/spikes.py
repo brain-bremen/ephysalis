@@ -35,12 +35,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from ephysalis.session.model import Session, StreamKind
+from ephysalis.recording_session.model import RecordingSession, StreamKind
 
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording, BaseSorting
 
-    from ephysalis.session.config import ProbeConfig, SessionConfig
+    from ephysalis.recording_session.config import ProbeConfig, RecordingSessionConfig
     from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class RunSegment:
 
 
 def sorter_settings(
-    config: SessionConfig | None, probe_id: str, sorter: str | None = None, params: dict[str, Any] | None = None
+    config: RecordingSessionConfig | None, probe_id: str, sorter: str | None = None, params: dict[str, Any] | None = None
 ) -> tuple[str, dict[str, Any]]:
     """Sorter and parameters of a probe: ``sorter``/``params`` (command line) over the probe's
     ``sorting`` over the session's ``[sorting]`` over the defaults."""
@@ -113,7 +113,7 @@ def sorting_channels(recording: BaseRecording, probe_config: ProbeConfig | None)
 
 
 def concatenate_runs(
-    session: Session, probe_id: str, run_names: list[str], probe_config: ProbeConfig | None = None
+    recording_session: RecordingSession, probe_id: str, run_names: list[str], probe_config: ProbeConfig | None = None
 ) -> tuple[BaseRecording, list[RunSegment]]:
     """AP streams of the given runs, restricted to the sorting channels, concatenated."""
     from spikeinterface.core import concatenate_recordings
@@ -121,7 +121,7 @@ def concatenate_runs(
     recordings, segments, start = [], [], 0
     channel_ids = None
     for name in run_names:
-        recording = session.run(name).get_recording(StreamKind.AP, probe_id)
+        recording = recording_session.run(name).get_recording(StreamKind.AP, probe_id)
         if channel_ids is None:
             channel_ids = sorting_channels(recording, probe_config)
         recordings.append(recording.select_channels(channel_ids))
@@ -183,11 +183,11 @@ def unit_table(analyzer: Any) -> pd.DataFrame:
 
 
 def sort_probe(
-    session: Session,
+    recording_session: RecordingSession,
     probe_id: str,
     work_dir: Path,
     scratch_dir: Path,
-    config: SessionConfig | None = None,
+    config: RecordingSessionConfig | None = None,
     syncs: dict[str, RunSync] | None = None,
     sorter_params: dict[str, Any] | None = None,
     n_jobs: int = 4,
@@ -207,11 +207,11 @@ def sort_probe(
     from spikeinterface.sorters import run_sorter
 
     run_names = [
-        r.name for r in session.runs
+        r.name for r in recording_session.runs
         if probe_id in r.probes and (config is None or (rc := config.run_config(r.name)) is None or rc.include)
     ]
     probe_config = config.probes.get(probe_id) if config else None
-    recording, segments = concatenate_runs(session, probe_id, run_names, probe_config)
+    recording, segments = concatenate_runs(recording_session, probe_id, run_names, probe_config)
     sorter, params = sorter_settings(config, probe_id, sorter, sorter_params)
     params = adapt_sorter_params(sorter, params, recording.get_num_channels())
     out = work_dir / "sorting" / probe_id
@@ -228,8 +228,8 @@ def sort_probe(
         recording.get_total_duration(),
     )
 
-    binary_dir = scratch_dir / f"{session.name}_{probe_id}"
-    checkpoint_dir = scratch_dir / f"{session.name}_{probe_id}_{sorter}_checkpoints"
+    binary_dir = scratch_dir / f"{recording_session.name}_{probe_id}"
+    checkpoint_dir = scratch_dir / f"{recording_session.name}_{probe_id}_{sorter}_checkpoints"
     job = {"n_jobs": n_jobs, "chunk_duration": "1s", "progress_bar": True}
     if (binary_dir / "binary.json").exists() or (binary_dir / "si_folder.json").exists():
         local = si.load(binary_dir)

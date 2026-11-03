@@ -43,8 +43,8 @@ if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
     from ephysalis.metadata.runstart import RunStart
-    from ephysalis.session.config import AuxChannelMap, SessionConfig
-    from ephysalis.session.model import Run, Session, StreamKind
+    from ephysalis.recording_session.config import AuxChannelMap, RecordingSessionConfig
+    from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
     from ephysalis.timeline.auxsignals import AuxSignals
     from ephysalis.timeline.clocks import RunSync, SyncSource
 
@@ -64,11 +64,11 @@ class InputFormat(Protocol):
     input_format_name: str  # the name it is registered under (entry point), e.g. "spikeglx"
     plugin_api_version: int
 
-    def can_read_session_folder(self, session_path: Path) -> bool:
+    def can_read_recording_session_folder(self, recording_session_path: Path) -> bool:
         """Cheap check whether ``session_path`` looks like a session of this format."""
         ...
 
-    def open_session(self, session_path: Path) -> Session:
+    def open_recording_session(self, recording_session_path: Path) -> RecordingSession:
         """All runs, probes and streams of a session (metadata only, no samples read)."""
         ...
 
@@ -168,13 +168,13 @@ class ReadsTrialDescriptorEvents(Protocol):
 
 @runtime_checkable
 class ComputesChannelGainCalibration(Protocol):
-    def compute_channel_gain_calibration(self, session: Session, config: SessionConfig, work_dir: Path
+    def compute_channel_gain_calibration(self, recording_session: RecordingSession, config: RecordingSessionConfig, work_dir: Path
                                          ) -> dict[str, Any] | None:
         """Gain of every probe channel (µV per ADC count) from the session's calibration
         recording (``[calibration]``), written to the work dir; None if there is none."""
         ...
 
-    def apply_channel_gain_calibration(self, session: Session, config: SessionConfig | None,
+    def apply_channel_gain_calibration(self, recording_session: RecordingSession, config: RecordingSessionConfig | None,
                                        config_dir: Path | None, work_dir: Path) -> None:
         """Put the computed gains on the probe channels of all runs (every step that uses gains)."""
         ...
@@ -203,7 +203,7 @@ class MetadataPlugin(Protocol):
 class ExtractsTrialTables(Protocol):
     def extract_trial_tables(self, run: Run, clock_alignment: RunSync | None,
                              auxiliary_signals: AuxSignals | None) -> dict[str, pd.DataFrame] | None:
-        """One table per paradigm presented in the run, in presentation order: one row per trial
+        """One table per experimental protocol presented in the run, in presentation order: one row per trial
         (``trial``, ``condition``, optionally ``trial_number``, the stimulus software's own trial
         number, and the stimulus parameters) and, with ``clock_alignment``, ``start_time`` /
         ``stop_time`` in s on the reference clock. None: not a run of this setup."""
@@ -219,8 +219,8 @@ class EstimatesRunStartTime(Protocol):
 
 
 @runtime_checkable
-class AddsSessionConfigFromMetadataFiles(Protocol):
-    def add_session_config_from_metadata_files(self, session: Session, config: SessionConfig,
+class AddsRecordingSessionConfigFromMetadataFiles(Protocol):
+    def add_recording_session_config_from_metadata_files(self, recording_session: RecordingSession, config: RecordingSessionConfig,
                                                metadata_file: Path | None) -> list[str]:
         """Add what the setup's files say about the session (probe areas and depths, bad channels,
         which runs to include, notes) to ``config``, once (``ephysalis init``); returns warnings.
@@ -236,7 +236,7 @@ class NamesEventWords(Protocol):
 
 
 METADATA_PLUGIN_CAPABILITIES: tuple[type, ...] = (
-    ExtractsTrialTables, EstimatesRunStartTime, AddsSessionConfigFromMetadataFiles, NamesEventWords,
+    ExtractsTrialTables, EstimatesRunStartTime, AddsRecordingSessionConfigFromMetadataFiles, NamesEventWords,
 )
 
 _GROUPS = {INPUT_FORMAT_GROUP: (InputFormat, INPUT_FORMAT_CAPABILITIES),

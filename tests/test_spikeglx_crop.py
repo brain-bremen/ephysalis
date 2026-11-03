@@ -7,26 +7,26 @@ import pytest
 from scipy.signal import find_peaks, resample_poly
 
 from ephysalis.timeline.auxsignals import AuxSignals, wheel_speed
-from ephysalis.formats.input.base import open_session
-from ephysalis.session.model import StreamKind
-from ephysalis.session.config import AuxChannelMap, default_session_config
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.recording_session.model import StreamKind
+from ephysalis.recording_session.config import AuxChannelMap, default_recording_session_config
 from ephysalis.timeline.clocks import AUX
 from ephysalis.timeline.steps import extract_run_timing
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 
 RUN = "3_rfmappingFine_g0"
 
 
 @pytest.fixture(scope="module")
 def run():
-    return open_session(SPIKEGLX_CROP_SESSION).run(RUN)
+    return open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION).run(RUN)
 
 
 def _aux_signals(run):
     return AuxSignals(run, AuxChannelMap.legacy_default(run.extra["aux"]["n_analog"]))
 
 
-def test_session_structure(run):
+def test_recording_session_structure(run):
     assert run.duration_s == pytest.approx(5.0, abs=1e-3)
     assert sorted(run.probes) == ["imec0", "imec1"]
     for probe in run.probes.values():
@@ -91,8 +91,8 @@ def test_contains_spikes(run, probe_id):
 
 
 def test_default_config(run):
-    session = open_session(SPIKEGLX_CROP_SESSION)
-    config = default_session_config(session)
+    recording_session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    config = default_recording_session_config(recording_session)
     assert config.subject_id == "SOMxCD1_172"
     assert config.probes["imec0"].serial_number == "23167804621"
 
@@ -169,7 +169,7 @@ def test_sync_edge_cache(run, tmp_path, monkeypatch):
 def test_cli_align_clocks(tmp_path, capsys):
     from ephysalis.cli.main import main
 
-    assert main(["align-clocks", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path),
+    assert main(["align-clocks", str(SPIKEGLX_CROP_RECORDING_SESSION), "--cache-dir", str(tmp_path),
                  "--work-dir", str(tmp_path / "work")]) == 0
     assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
     assert (tmp_path / f"{RUN}.npz").exists() and (tmp_path / "work" / "clocks" / f"{RUN}.json").exists()
@@ -179,9 +179,9 @@ def test_cli_extract_and_lfp(tmp_path, capsys):
     from conftest import extract_all
     from ephysalis.cli.main import main
 
-    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
+    assert extract_all([str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(tmp_path)]) == 0
     assert "RF: 23 trials" in capsys.readouterr().out
     assert (tmp_path / "trials" / f"{RUN}_RF.csv").exists()
     assert np.load(tmp_path / "running_speed" / f"{RUN}.npy").shape == (5000,)
-    assert main(["lfp", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path), "--n-jobs", "1"]) == 0
+    assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(tmp_path), "--n-jobs", "1"]) == 0
     assert "imec1: LFP 8 channels, 5 s" in capsys.readouterr().out

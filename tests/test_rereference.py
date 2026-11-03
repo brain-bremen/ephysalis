@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from spikeinterface.core import NumpyRecording
 
-from ephysalis.session.probes import apply_probe, rereference
-from ephysalis.session.model import ProbeInfo, StreamKind
-from ephysalis.session.config import SCHEMA_VERSION, session_config_from_dict
+from ephysalis.recording_session.probes import apply_probe, rereference
+from ephysalis.recording_session.model import ProbeInfo, StreamKind
+from ephysalis.recording_session.config import SCHEMA_VERSION, recording_session_config_from_dict
 
 
 def recording():
@@ -45,10 +45,10 @@ def test_apply_probe_with_reference_channels():
 
 
 def test_schema_7_reference_channels_and_migration():
-    config = session_config_from_dict({"schema_version": 6, "session_id": "s", "subject_id": "m",
+    config = recording_session_config_from_dict({"schema_version": 6, "session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"]}}})
     assert config.schema_version == SCHEMA_VERSION == 8 and config.probes["v4"].reference_channels is None
-    config = session_config_from_dict({"schema_version": 7, "session_id": "s", "subject_id": "m",
+    config = recording_session_config_from_dict({"schema_version": 7, "session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"],
                                                          "reference_channels": ["14C"]}}})
     assert config.probes["v4"].reference_channels == ["14C"]

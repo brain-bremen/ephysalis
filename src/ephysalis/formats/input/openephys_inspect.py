@@ -50,7 +50,7 @@ class RecordingInfo:
 
 
 @dataclass
-class SessionInfo:
+class RecordingSessionInfo:
     path: Path
     total_size_bytes: int
     recordings: list[RecordingInfo] = field(default_factory=list)
@@ -178,54 +178,54 @@ def _find_recordings(node_dir: str) -> list[tuple[int, int, str]]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def validate_session_path(session_path: Path) -> None:
+def validate_recording_session_path(recording_session_path: Path) -> None:
     """Raise ValueError if *session_path* does not look like an Open Ephys session.
 
     Accepts either a full session folder (contains settings.xml) or a single
     experiment folder (contains recording* subdirectories).
     """
-    if not session_path.exists():
-        raise ValueError(f"Path does not exist: {session_path}")
-    if not session_path.is_dir():
-        raise ValueError(f"Not a directory: {session_path}")
-    if bool(glob.glob(str(session_path / "Record Node *"))):
+    if not recording_session_path.exists():
+        raise ValueError(f"Path does not exist: {recording_session_path}")
+    if not recording_session_path.is_dir():
+        raise ValueError(f"Not a directory: {recording_session_path}")
+    if bool(glob.glob(str(recording_session_path / "Record Node *"))):
         return  # full session folder
 
-    if bool(glob.glob(str(session_path / "recording*"))):
+    if bool(glob.glob(str(recording_session_path / "recording*"))):
         # Could be an experiment folder — valid only if an ancestor contains a Record Node folder
-        for parent in session_path.parents:
+        for parent in recording_session_path.parents:
             if bool(glob.glob(str(parent / "Record Node *"))):
                 return
         raise ValueError(
-            f"'{session_path.name}' looks like an experiment folder but no Open Ephys "
+            f"'{recording_session_path.name}' looks like an experiment folder but no Open Ephys "
             "session (Record Node folder) was found in any parent directory."
         )
 
     raise ValueError(
-        f"'{session_path.name}' does not appear to be an Open Ephys session folder.\n"
+        f"'{recording_session_path.name}' does not appear to be an Open Ephys session folder.\n"
         "Expected 'Record Node' subdirectories (full session) "
         "or recording* subdirectories inside a session (single experiment)."
     )
 
 
-def inspect_session(session_path: Path) -> SessionInfo:
+def inspect_recording_session(recording_session_path: Path) -> RecordingSessionInfo:
     """Return a :class:`SessionInfo` for the given Open Ephys session folder.
 
     This function only reads metadata (JSON + file sizes) — it does not
     memory-map or load any signal data.
     """
-    size = _folder_size(session_path)
+    size = _folder_size(recording_session_path)
     recordings: list[RecordingInfo] = []
 
-    node_dirs = sorted(glob.glob(str(session_path / "Record Node *")))
+    node_dirs = sorted(glob.glob(str(recording_session_path / "Record Node *")))
     if not node_dirs:
-        node_dirs = [str(session_path)]
+        node_dirs = [str(recording_session_path)]
 
     for node_dir in node_dirs:
         for exp_idx, rec_idx, rec_dir in _find_recordings(node_dir):
             recordings.append(_inspect_recording(rec_dir, exp_idx, rec_idx))
 
-    return SessionInfo(path=session_path, total_size_bytes=size, recordings=recordings)
+    return RecordingSessionInfo(path=recording_session_path, total_size_bytes=size, recordings=recordings)
 
 
 def _fmt_size(n: int) -> str:
@@ -249,7 +249,7 @@ def _fmt_rate(hz: float) -> str:
     return f"{hz / 1000:.1f} kHz" if hz >= 1000 else f"{hz:.0f} Hz"
 
 
-def format_session_info(info: SessionInfo) -> str:
+def format_recording_session_info(info: RecordingSessionInfo) -> str:
     """Return a human-readable summary string of *info*."""
     lines: list[str] = []
     lines.append(f"Session : {info.path.name}")

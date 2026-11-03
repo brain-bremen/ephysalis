@@ -6,12 +6,12 @@ import pytest
 import spikeinterface.core as si
 from pynwb import NWBHDF5IO
 
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.formats.input.base import open_session
-from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephysalis.session.config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_recording_session_nwb
+from ephysalis.recording_session.config import ProbeConfig, SubjectConfig, default_recording_session_config
 from ephysalis.sorting.spikes import save_run_spikes
 from ephysalis.timeline.clocks import synchronize_run
 from ephysalis.timeline.steps import aux_channel_map
@@ -22,8 +22,8 @@ RUN = "3_rfmappingFine_g0"
 @pytest.fixture(scope="module")
 def work_dir(tmp_path_factory):
     work = tmp_path_factory.mktemp("work")
-    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
-    assert main(["lfp", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work), "--n-jobs", "1"]) == 0
+    assert extract_all([str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work)]) == 0
+    assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work), "--n-jobs", "1"]) == 0
     # sorting outputs of imec0: units 3 (peak channel AP84) and 7 (AP89)
     (work / "sorting" / "imec0").mkdir(parents=True)
     pd.DataFrame({"unit_id": [3, 7], "KSLabel": ["good", "mua"], "peak_channel": ["imec0.ap#AP84", "imec0.ap#AP89"],
@@ -36,13 +36,13 @@ def work_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def nwbfile(work_dir):
-    session = open_session(SPIKEGLX_CROP_SESSION)
-    config = default_session_config(session)
+    recording_session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    config = default_recording_session_config(recording_session)
     config.subject = SubjectConfig(species="Mus musculus", sex="F", age="P90D")
     config.probes["imec0"] = ProbeConfig(area="V1", insertion_depth_um=850, bad_channels=[1])
-    run = session.run(RUN)
+    run = recording_session.run(RUN)
     syncs = {RUN: synchronize_run(run, aux_channel_map(run, config))}
-    path = write_session_nwb(session, work_dir, work_dir / "session.nwb", config, syncs)
+    path = write_recording_session_nwb(recording_session, work_dir, work_dir / "session.nwb", config, syncs)
     io = NWBHDF5IO(str(path), "r")
     yield io.read()
     io.close()
@@ -66,11 +66,11 @@ def test_electrodes(nwbfile):
     assert set(imec0.location) == {"V1"}
 
 
-def test_trials_on_session_time_axis(nwbfile, work_dir):
+def test_trials_on_recording_session_time_axis(nwbfile, work_dir):
     trials = nwbfile.trials.to_dataframe()
     csv = pd.read_csv(work_dir / "trials" / f"{RUN}_RF.csv")
     assert len(trials) == 23
-    assert set(trials.paradigm) == {"RF"} and set(trials.run) == {RUN}
+    assert set(trials.experimental_protocol) == {"RF"} and set(trials.run) == {RUN}
     np.testing.assert_allclose(trials.start_time, csv.start_time + SESSION_START_MARGIN_S)
     np.testing.assert_array_equal(trials.xc, csv.xc)
 

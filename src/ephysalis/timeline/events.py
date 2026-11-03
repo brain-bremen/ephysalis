@@ -36,8 +36,8 @@ from ephysalis.plugins import NamesEventWords, ReadsDigitalLineEdges, ReadsEvent
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import AuxChannelMap, EventsConfig
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import AuxChannelMap, EventsConfig
     from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)

@@ -31,8 +31,8 @@ import numpy as np
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import ChannelQualityConfig
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import ChannelQualityConfig
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def load_quality(work_dir: Path, run_name: str, probe_id: str) -> dict[str, dict
     return {r["channel"]: r for r in json.loads(path.read_text(encoding="utf-8"))["channels"]}
 
 
-def session_status(work_dir: Path, runs: list[Run], probe_id: str) -> dict[str, tuple[str, str]]:
+def recording_session_status(work_dir: Path, runs: list[Run], probe_id: str) -> dict[str, tuple[str, str]]:
     """Channel id -> (status, description) over the runs of a file: bad if bad in any assessed
     run (description: the reasons per run); empty if no run was assessed."""
     per_run = {run.name: q for run in runs if (q := load_quality(work_dir, run.name, probe_id)) is not None}

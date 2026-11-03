@@ -39,10 +39,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import signal
 
-from ephysalis.session.model import Run, StreamKind
+from ephysalis.recording_session.model import Run, StreamKind
 
 if TYPE_CHECKING:
-    from ephysalis.session.config import LineNoiseConfig, SessionConfig
+    from ephysalis.recording_session.config import LineNoiseConfig, RecordingSessionConfig
     from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ def _lfp_traces(folder: Path) -> np.memmap:
     return np.memmap(path, dtype=dtype, mode="r+", shape=(n_samples, n_channels), offset=meta.get("file_offset", 0))
 
 
-def clean_lfp(run: Run, probe_id: str, folder: Path, config: SessionConfig, sync: RunSync) -> dict[str, Any]:
+def clean_lfp(run: Run, probe_id: str, folder: Path, config: RecordingSessionConfig, sync: RunSync) -> dict[str, Any]:
     """Remove the mains from the LFP of one probe in one run, in place (``folder``: its LFP
     folder); writes and returns the status (``line_noise.json``)."""
     line_noise: LineNoiseConfig = config.line_noise

@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
-from ephysalis.gui.session_page import SessionPipelinePage
+from ephysalis.gui.recording_session_page import RecordingSessionPipelinePage
 from ephysalis.version import get_version_from_pyproject
 
 
@@ -14,7 +14,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"ephysalis {get_version_from_pyproject()}")
         self.setMinimumSize(1000, 760)
-        self._page = SessionPipelinePage()
+        self._page = RecordingSessionPipelinePage()
         self.setCentralWidget(self._page)
 
     def closeEvent(self, event: QCloseEvent) -> None:

@@ -4,7 +4,7 @@
 
 An Open Ephys session folder contains ``Record Node <id>`` folders (or is one). Each recording
 of the first record node (further nodes typically hold copies of the same data) becomes one
-:class:`~ephysalis.session.model.Run` ``experiment<N>_recording<M>``. open-ephys-python-tools detects
+:class:`~ephysalis.recording_session.model.Run` ``experiment<N>_recording<M>``. open-ephys-python-tools detects
 the format and the recordings and reads stream metadata, TTL events and messages. Samples are
 read lazily by :class:`OpenEphysRecordingExtractor`: from the package's memory maps (Binary)
 and HDF5 datasets (NWB); in the legacy format, whose loader copies whole channels into memory,
@@ -52,13 +52,13 @@ import pandas as pd
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
 from ephysalis.formats.input.base import keep_lines
-from ephysalis.session.model import ProbeInfo, Run, Session, StreamKind
+from ephysalis.recording_session.model import ProbeInfo, Run, RecordingSession, StreamKind
 
 if TYPE_CHECKING:
     from ephysalis.plugins import InputFormat
     from open_ephys.analysis.recording import Recording as OERecording
 
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.config import AuxChannelMap
     from ephysalis.timeline.clocks import RunSync
 
 _PROBE_STREAM_RE = re.compile(r"(?P<probe>Probe[A-Z]+)(?:-(?P<band>AP|LFP))?$")
@@ -326,20 +326,20 @@ input_format_name = 'openephys'
 plugin_api_version = 2
 
 
-def can_read_session_folder(session_path: Path) -> bool:
-    return any(session_path.glob("Record Node *")) or session_path.name.startswith(
+def can_read_recording_session_folder(recording_session_path: Path) -> bool:
+    return any(recording_session_path.glob("Record Node *")) or recording_session_path.name.startswith(
         "Record Node"
     )
 
 
-def open_session(session_path: Path) -> Session:
-    if session_path.name.startswith("Record Node"):
-        record_node = session_path
+def open_recording_session(recording_session_path: Path) -> RecordingSession:
+    if recording_session_path.name.startswith("Record Node"):
+        record_node = recording_session_path
     else:
         # Only use the first record node; further nodes typically hold copies of the same data.
         from open_ephys.analysis.utils import alphanum_key
 
-        record_node = sorted(session_path.glob("Record Node *"), key=lambda p: alphanum_key(p.name))[0]
+        record_node = sorted(recording_session_path.glob("Record Node *"), key=lambda p: alphanum_key(p.name))[0]
     node = str(record_node)
     runs: list[Run] = []
     for position, recording in enumerate(_oe_recordings(node)):
@@ -361,7 +361,7 @@ def open_session(session_path: Path) -> Session:
         runs.append(
             Run(
                 name=f"experiment{recording.experiment_index + 1}_recording{recording.recording_index + 1}",
-                path=session_path,
+                path=recording_session_path,
                 index=len(runs),
                 format=_this_format(),
                 start_time=recording_start_time(recording),
@@ -378,7 +378,7 @@ def open_session(session_path: Path) -> Session:
                 },
             )
         )
-    return Session(name=session_path.name, path=session_path, format=_this_format(), runs=runs)
+    return RecordingSession(name=recording_session_path.name, path=recording_session_path, format=_this_format(), runs=runs)
 
 
 def _node(run: Run) -> str:
@@ -430,7 +430,7 @@ def _events(run: Run) -> pd.DataFrame:
 
 
 def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.config import AuxChannelMap
 
     return AuxChannelMap.vstim_openephys_default()
 

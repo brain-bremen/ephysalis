@@ -132,7 +132,7 @@ def test_pipeline_mains_csd(tmp_path):
     task = rng.standard_normal((ref.size, n_chan)) * 30
     task[:, channels] += 400 * np.sin(phase + 0.5)[:, None]
     task[:, mains_channel] = 3000 * ref
-    session = write_openephys(tmp_path / "ses", [{"data": excluded}, {"data": task}])
+    recording_session = write_openephys(tmp_path / "ses", [{"data": excluded}, {"data": task}])
     geometry = probeinterface.Probe(ndim=2)
     geometry.set_contacts(positions=xy_um, shapes="circle", shape_params={"radius": 100})
     geometry.set_device_channel_indices(np.arange(len(channels)))
@@ -146,9 +146,9 @@ def test_pipeline_mains_csd(tmp_path):
         '[line_noise]\nenabled = true\n'
         f'[aux_channels.analog]\nmains = {mains_channel}\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["calibrate", str(session), *common]) == 0  # nothing to do: Open Ephys has no calibration
+    assert main(["calibrate", str(recording_session), *common]) == 0  # nothing to do: Open Ephys has no calibration
     assert not (tmp_path / "work" / "calibration.json").exists()
-    assert main(["lfp", str(session), *common, "--n-jobs", "1"]) == 0
+    assert main(["lfp", str(recording_session), *common, "--n-jobs", "1"]) == 0
     status = json.loads((tmp_path / "work" / "lfp" / f"{TASK}_epidural" / "line_noise.json").read_text())
     assert status["applied"]
     import spikeinterface.core as si
@@ -158,12 +158,12 @@ def test_pipeline_mains_csd(tmp_path):
     expected = np.round(task[:, channels]).astype(np.int16)[10_000:].astype(float)
     residual_noise = (cleaned - (expected - 400 * np.sin(phase + 0.5)[10_000:, None])).std()
     assert residual_noise < 0.25 * 400 * np.sqrt(0.5)
-    assert main(["csd", str(session), *common, "--n-jobs", "1"]) == 0
+    assert main(["csd", str(recording_session), *common, "--n-jobs", "1"]) == 0
     csd = si.load(tmp_path / "work" / "csd" / f"{TASK}_epidural")
     info = json.loads((tmp_path / "work" / "csd" / f"{TASK}_epidural" / "csd.json").read_text())
     assert "AI20" not in info["inputs"] and len(info["outputs"]) == 37
-    assert extract_all([str(session), *common]) == 0
-    assert main(["export", str(session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
+    assert extract_all([str(recording_session), *common]) == 0
+    assert main(["export", str(recording_session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
     with h5py.File(tmp_path / "out.dh5") as f:
         block = f["CONT8001"]
         stored = block["DATA"][:, 0]
@@ -172,7 +172,7 @@ def test_pipeline_mains_csd(tmp_path):
         assert calibration_value == pytest.approx(np.abs(values).max() / DH5_FULL_SCALE)
         np.testing.assert_array_equal(stored, c_round(values / calibration_value).astype(np.int16))
         assert block.attrs["SignalType"] in (b"CSD", "CSD")
-    assert main(["export", str(session), *common, "-o", str(tmp_path / "out.nwb")]) == 0
+    assert main(["export", str(recording_session), *common, "-o", str(tmp_path / "out.nwb")]) == 0
 
 
 def _common_lfp(n: int, n_chan: int, rng) -> np.ndarray:
@@ -183,7 +183,7 @@ def _common_lfp(n: int, n_chan: int, rng) -> np.ndarray:
 
 def test_channel_quality():
     from ephysalis.processing.quality import channel_quality
-    from ephysalis.session.config import ChannelQualityConfig
+    from ephysalis.recording_session.config import ChannelQualityConfig
 
     channels, xy_um = fritz_grid()
     rng = np.random.default_rng(7)
@@ -210,7 +210,7 @@ def test_quality_restricts_csd(tmp_path):
         data[:, channels] = _common_lfp(40_000, len(channels), rng)
         data[:, bad_channel] = 0
         recordings.append({"data": data})
-    session = write_openephys(tmp_path / "ses", recordings)
+    recording_session = write_openephys(tmp_path / "ses", recordings)
     geometry = probeinterface.Probe(ndim=2)
     geometry.set_contacts(positions=xy_um, shapes="circle", shape_params={"radius": 100})
     geometry.set_device_channel_indices(np.arange(len(channels)))
@@ -222,14 +222,14 @@ def test_quality_restricts_csd(tmp_path):
         '[probes.epidural.csd]\n[probes.epidural.quality]\nn_windows = 40\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
     for step in ("lfp", "quality", "csd"):
-        assert main([step, str(session), *common, *(["--n-jobs", "1"] if step != "quality" else [])]) == 0
+        assert main([step, str(recording_session), *common, *(["--n-jobs", "1"] if step != "quality" else [])]) == 0
     info = {name: json.loads((tmp_path / "work" / "csd" / f"{name}_epidural" / "csd.json").read_text())
             for name in (CAL, TASK)}
     assert "AI5" not in info[CAL]["outputs"] and "AI5" in info[TASK]["outputs"]
     assert "AI17" in info[CAL]["inputs"] and "AI17" not in info[TASK]["inputs"]
     assert len(info[CAL]["outputs"]) == len(channels) - 1
-    assert extract_all([str(session), *common]) == 0
-    assert main(["export", str(session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
+    assert extract_all([str(recording_session), *common]) == 0
+    assert main(["export", str(recording_session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
     index5, index17 = channels.index(5), channels.index(17)
     with h5py.File(tmp_path / "out.dh5") as f:
         assert len(f[f"CONT{8001 + index5}"]["INDEX"]) == 1 and len(f[f"CONT{8001 + index17}"]["INDEX"]) == 1
@@ -239,7 +239,7 @@ def test_quality_restricts_csd(tmp_path):
         assert lfp5["ChannelStatus"] == "bad" and lfp5["ChannelStatusDescription"].startswith(f"{CAL}: flat")
         assert f[f"CONT{2001}"].attrs["ChannelStatus"] == "good"
     bids = tmp_path / "bids"
-    assert main(["export", str(session), *common, "--bids", str(bids)]) == 0
+    assert main(["export", str(recording_session), *common, "--bids", str(bids)]) == 0
     import pandas as pd
 
     table = pd.read_csv(next(bids.rglob("*_channels.tsv")), sep="\t")

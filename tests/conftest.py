@@ -10,12 +10,12 @@ import numpy as np
 import pytest
 
 _DATA_DIR = Path(__file__).parent / "data"
-_SESSION_NAME = "Test_2026-03-12_16-32-08"
+_RECORDING_SESSION_NAME = "Test_2026-03-12_16-32-08"
 
-DATA_FOLDER = _DATA_DIR / _SESSION_NAME
-LEGACY_DH5_PATH = _DATA_DIR / f"{_SESSION_NAME}_exp1_rec1.dh5"
+DATA_FOLDER = _DATA_DIR / _RECORDING_SESSION_NAME
+LEGACY_DH5_PATH = _DATA_DIR / f"{_RECORDING_SESSION_NAME}_exp1_rec1.dh5"
 SPIKEGLX_TEMPLATES = _DATA_DIR / "spikeglx_np1"
-SPIKEGLX_CROP_SESSION = _DATA_DIR / "SOMxCD1_172_20250109_crop"
+SPIKEGLX_CROP_RECORDING_SESSION = _DATA_DIR / "SOMxCD1_172_20250109_crop"
 
 skip_if_no_data = pytest.mark.skipif(
     not (DATA_FOLDER.exists() and LEGACY_DH5_PATH.exists()),
@@ -87,7 +87,7 @@ def _write_stream(run_dir: Path, run: str, stream: str, start: str, duration_s: 
 
 
 @pytest.fixture
-def make_spikeglx_session(tmp_path: Path) -> Callable[..., Path]:
+def make_spikeglx_recording_session(tmp_path: Path) -> Callable[..., Path]:
     """Create a tiny SpikeGLX session: one folder per (run_name, start_time) pair."""
 
     def make(
@@ -96,13 +96,13 @@ def make_spikeglx_session(tmp_path: Path) -> Callable[..., Path]:
         duration_s: float = 0.05,
         name: str = "SOMxCD1_172_20250109_Recording1",
     ) -> Path:
-        session = tmp_path / name
+        recording_session = tmp_path / name
         for run, start in runs:
-            run_dir = session / run
+            run_dir = recording_session / run
             run_dir.mkdir(parents=True)
             for stream in streams:
                 _write_stream(run_dir, run, stream, start, duration_s)
-        return session
+        return recording_session
 
     return make
 

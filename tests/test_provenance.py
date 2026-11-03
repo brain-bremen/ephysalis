@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 from ephysalis.cli.main import main
 from ephysalis.provenance import (
     CLOCK_AND_EXTRACT_STEPS,
@@ -17,7 +17,7 @@ from ephysalis.provenance import (
     record_config,
     replay_argv,
 )
-from ephysalis.session.config import SCHEMA_VERSION, load_session_config, save_session_config
+from ephysalis.recording_session.config import SCHEMA_VERSION, load_recording_session_config, save_recording_session_config
 
 RUN = "3_rfmappingFine_g0"
 # DH5 export needs dh5io with SPIKE block writing (dh5io PR #15)
@@ -29,22 +29,22 @@ def processed(tmp_path_factory):
     """Work dir of the clock alignment, the extract steps, lfp and both exports with an edited session.toml."""
     work = tmp_path_factory.mktemp("work")
     config_path = work / "session.toml"
-    assert main(["init", str(SPIKEGLX_CROP_SESSION), "-o", str(config_path)]) == 0
-    config = load_session_config(config_path)
+    assert main(["init", str(SPIKEGLX_CROP_RECORDING_SESSION), "-o", str(config_path)]) == 0
+    config = load_recording_session_config(config_path)
     config.probes["imec0"].area = "V1"
     config.probes["imec0"].bad_channels = [1]
-    save_session_config(config, config_path)
+    save_recording_session_config(config, config_path)
     common = ["--work-dir", str(work), "--config", str(config_path)]
     for step in CLOCK_AND_EXTRACT_STEPS:
-        assert main([step, str(SPIKEGLX_CROP_SESSION), *common]) == 0
-    assert main(["lfp", str(SPIKEGLX_CROP_SESSION), *common, "--n-jobs", "1", "--rate", "500"]) == 0
+        assert main([step, str(SPIKEGLX_CROP_RECORDING_SESSION), *common]) == 0
+    assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), *common, "--n-jobs", "1", "--rate", "500"]) == 0
     (work / "sorting" / "imec0").mkdir(parents=True)
     (work / "sorting" / "imec0" / "segments.json").write_text(json.dumps(
         {"runs": [], "sorter": "kilosort4", "sorter_params": {"clear_cache": True, "nearest_chans": 8}}))
     files = {}
     for fmt in FORMATS:
         files[fmt] = work / f"out.{fmt}"
-        assert main(["export", str(SPIKEGLX_CROP_SESSION), *common, "--output-format", fmt,
+        assert main(["export", str(SPIKEGLX_CROP_RECORDING_SESSION), *common, "--output-format", fmt,
                      "-o", str(files[fmt])]) == 0
     return work, config, files
 
@@ -107,11 +107,11 @@ def test_compare():
 def test_replay_argv(processed, tmp_path):
     _, _, files = processed
     record = read_processing_record(files["nwb"])
-    lfp = replay_argv(record["steps"]["lfp"][-1], SPIKEGLX_CROP_SESSION, tmp_path / "w", tmp_path / "c.toml")
-    assert lfp[:2] == ["lfp", str(SPIKEGLX_CROP_SESSION)]
+    lfp = replay_argv(record["steps"]["lfp"][-1], SPIKEGLX_CROP_RECORDING_SESSION, tmp_path / "w", tmp_path / "c.toml")
+    assert lfp[:2] == ["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION)]
     assert lfp[lfp.index("--rate") + 1] == "500.0" and lfp[lfp.index("--n-jobs") + 1] == "1"
     assert lfp[lfp.index("--work-dir") + 1] == str(tmp_path / "w")
-    export = replay_argv(record["export"], SPIKEGLX_CROP_SESSION, tmp_path / "w", None)
+    export = replay_argv(record["export"], SPIKEGLX_CROP_RECORDING_SESSION, tmp_path / "w", None)
     assert "--output" not in export and "--config" not in export  # output goes to the new work dir
 
 
@@ -122,7 +122,7 @@ def test_reproduce(processed, tmp_path, capsys):
     out = capsys.readouterr().out
     assert [line.split()[1] for line in out.splitlines() if line.startswith("ephysalis ")] == [
         *CLOCK_AND_EXTRACT_STEPS, "lfp", "export"]
-    assert load_session_config(new / "session.toml") == config
+    assert load_recording_session_config(new / "session.toml") == config
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(work)]) == 1  # same work dir
 
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new), "--run"]) == 0
@@ -132,7 +132,7 @@ def test_reproduce(processed, tmp_path, capsys):
     assert len(lfp_files) == 2  # imec0, imec1
     for original in lfp_files:
         assert (new / original.relative_to(work)).read_bytes() == original.read_bytes()
-    assert (new / f"{SPIKEGLX_CROP_SESSION.name}.{FORMATS[-1]}").exists()
+    assert (new / f"{SPIKEGLX_CROP_RECORDING_SESSION.name}.{FORMATS[-1]}").exists()
 
 
 def test_records_before_the_rename(tmp_path):
@@ -150,7 +150,7 @@ def test_records_before_the_rename(tmp_path):
     current = {"packages": {"ephysalis": "0.3.0.dev0"}, "ephysalis_source": {"commit": "abc", "dirty": False},
                "python": None}
     assert compare_environment({**record, "python": None}, current) == []
-    session = tmp_path / "session"
-    assert default_work_dir(session) == session / "ephysalis"
-    (session / "ephyscon").mkdir(parents=True)
-    assert default_work_dir(session) == session / "ephyscon"
+    recording_session = tmp_path / "recording_session"
+    assert default_work_dir(recording_session) == recording_session / "ephysalis"
+    (recording_session / "ephyscon").mkdir(parents=True)
+    assert default_work_dir(recording_session) == recording_session / "ephyscon"

@@ -23,8 +23,8 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import EventsConfig
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import EventsConfig
 
 TRIAL_ROLE = "trial"
 TRIAL_START_MARKER = "trial_start"
@@ -104,7 +104,7 @@ def line_descriptions(lines: dict[int, str], config: EventsConfig) -> dict[str, 
     return out
 
 
-def session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str, float],
+def recording_session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str, float],
                    config: EventsConfig) -> tuple[pd.DataFrame, dict[int, str]]:
     """Pulses of all runs on the file's time axis (``offsets``: start of each run on it) and
     the lines with a role (``line -> role``), from ``events/<run>.csv``."""

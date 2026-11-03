@@ -21,9 +21,9 @@ from PySide6.QtWidgets import (
 
 from ephysalis.gui.config_widget import ConfigStepWidget
 from ephysalis.gui.pipeline import STEPS, PipelineOptions, step_commands, work_dir_summary
-from ephysalis.session.config import (
-    SESSION_CONFIG_FILENAME, AuxChannelMap, EventsConfig, ProbeConfig, RunConfig, SessionConfig, SortingConfig,
-    SubjectConfig, default_session_config, load_session_config, save_session_config,
+from ephysalis.recording_session.config import (
+    RECORDING_SESSION_CONFIG_FILENAME, AuxChannelMap, EventsConfig, ProbeConfig, RunConfig, RecordingSessionConfig, SortingConfig,
+    SubjectConfig, default_recording_session_config, load_recording_session_config, save_recording_session_config,
 )
 
 _GENERAL_EXCLUDED = {"schema_version", "runs", "probes", "subject", "sorting", "aux_channels", "events"}
@@ -38,9 +38,9 @@ def _settings() -> QSettings:
     return QSettings("brain-bremen", "ephysalis")
 
 
-def _config_key(session: Path) -> str:
+def _config_key(recording_session: Path) -> str:
     """QSettings key of the config file last used for ``session``."""
-    return "pipeline/config/" + str(session.resolve()).replace("\\", "/").replace("/", "|")
+    return "pipeline/config/" + str(recording_session.resolve()).replace("\\", "/").replace("/", "|")
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -64,38 +64,38 @@ def _path_row(edit: QLineEdit, on_browse) -> QHBoxLayout:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class SessionOverview:
+class RecordingSessionOverview:
     name: str
     format: str
-    runs: list[dict] = field(default_factory=list)  # name, start, duration, probes, aux, paradigms
+    runs: list[dict] = field(default_factory=list)  # name, start, duration, probes, aux, experimental protocols
     probe_ids: list[str] = field(default_factory=list)
-    default_config: SessionConfig | None = None
+    default_config: RecordingSessionConfig | None = None
 
 
 class _OverviewLoader(QThread):
     loaded: Signal = Signal(object)
     failed: Signal = Signal(str)
 
-    def __init__(self, session_path: Path, config: SessionConfig | None, config_dir: Path | None, parent=None):
+    def __init__(self, recording_session_path: Path, config: RecordingSessionConfig | None, config_dir: Path | None, parent=None):
         super().__init__(parent)
-        self._session_path, self._config, self._config_dir = session_path, config, config_dir
+        self._recording_session_path, self._config, self._config_dir = recording_session_path, config, config_dir
 
     def run(self) -> None:
         try:
-            from ephysalis.formats.input.base import open_session
-            from ephysalis.session.probes import configure_probes
+            from ephysalis.formats.input.base import open_recording_session
+            from ephysalis.recording_session.probes import configure_probes
             from ephysalis.metadata.base import run_trial_tables
 
-            session = open_session(self._session_path)
-            overview = SessionOverview(session.name, session.format.input_format_name, default_config=default_session_config(session))
-            configure_probes(session, self._config, self._config_dir)
-            overview.probe_ids = session.probe_ids
-            for run in session.runs:
+            recording_session = open_recording_session(self._recording_session_path)
+            overview = RecordingSessionOverview(recording_session.name, recording_session.format.input_format_name, default_config=default_recording_session_config(recording_session))
+            configure_probes(recording_session, self._config, self._config_dir)
+            overview.probe_ids = recording_session.probe_ids
+            for run in recording_session.runs:
                 try:
                     plugin, tables = run_trial_tables(run, None, None, self._config)
-                    paradigms = [f"{plugin.metadata_plugin_name}: {name}" for name in tables] if plugin else []
+                    experimental_protocols = [f"{plugin.metadata_plugin_name}: {name}" for name in tables] if plugin else []
                 except Exception as exc:  # a broken stimulus folder must not hide the session
-                    paradigms = [f"error: {exc}"]
+                    experimental_protocols = [f"error: {exc}"]
                 overview.runs.append({
                     "name": run.name,
                     "start": run.start_time.isoformat(sep=" ", timespec="seconds") if run.start_time else "?",
@@ -103,7 +103,7 @@ class _OverviewLoader(QThread):
                     "probes": [f"{p.probe_id}: {p.part_number or p.model_name or '?'}, {p.num_channels or '?'} ch"
                                for p in run.probes.values()],
                     "aux": run.aux_stream or "",
-                    "paradigms": paradigms,
+                    "experimental_protocols": experimental_protocols,
                 })
             self.loaded.emit(overview)
         except Exception as exc:
@@ -222,12 +222,12 @@ class _ProbesEditor(QWidget):
         return dict(self._probes)
 
 
-class SessionConfigEditor(QTabWidget):
+class RecordingSessionConfigEditor(QTabWidget):
     """All sections of ``session.toml``."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._general = ConfigStepWidget(SessionConfig, checkable=False, excluded_fields=_GENERAL_EXCLUDED)
+        self._general = ConfigStepWidget(RecordingSessionConfig, checkable=False, excluded_fields=_GENERAL_EXCLUDED)
         self._subject = ConfigStepWidget(SubjectConfig, checkable=False)
         self._runs = _RunsTable()
         self._probes = _ProbesEditor()
@@ -239,9 +239,9 @@ class SessionConfigEditor(QTabWidget):
                               (self._probes, "&Probes"), (self._sorting, "S&orting"), (self._aux, "&Aux channels"),
                               (self._events, "&Events")):
             self.addTab(widget, label)
-        self._base: SessionConfig | None = None
+        self._base: RecordingSessionConfig | None = None
 
-    def set_config(self, config: SessionConfig) -> None:
+    def set_config(self, config: RecordingSessionConfig) -> None:
         self._base = config
         self._general.set_field_values(config)
         self._subject.set_model(config.subject)
@@ -251,12 +251,12 @@ class SessionConfigEditor(QTabWidget):
         self._aux.set_model(config.aux_channels)
         self._events.set_model(config.events)
 
-    def config(self) -> SessionConfig:
+    def config(self) -> RecordingSessionConfig:
         """The edited config (raises ValidationError or ValueError for invalid input)."""
         general = {name: value for name, value in self._general.get_model().model_dump().items()  # type: ignore[union-attr]
                    if name not in _GENERAL_EXCLUDED}
         base = self._base.model_dump() if self._base is not None else {}
-        return SessionConfig.model_validate({
+        return RecordingSessionConfig.model_validate({
             **base, **general,
             "subject": self._subject.get_model(), "runs": self._runs.runs(), "probes": self._probes.probes(),
             "sorting": self._sorting.get_model(), "aux_channels": self._aux.get_model(),
@@ -279,7 +279,7 @@ SHARED_SECTIONS = {
 _GENERAL_SHARED = ("experimenter", "lab", "institution")
 
 
-def apply_sections(source: SessionConfig, target: SessionConfig, sections: list[str]) -> SessionConfig:
+def apply_sections(source: RecordingSessionConfig, target: RecordingSessionConfig, sections: list[str]) -> RecordingSessionConfig:
     """``target`` with the ``sections`` (keys of :data:`SHARED_SECTIONS`) of ``source``."""
     update: dict = {}
     for section in sections:
@@ -291,7 +291,7 @@ def apply_sections(source: SessionConfig, target: SessionConfig, sections: list[
 
 
 class _ApplyDialog(QDialog):
-    def __init__(self, sessions: list[Path], parent=None):
+    def __init__(self, recording_sessions: list[Path], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Apply settings to sessions")
         layout = QVBoxLayout(self)
@@ -301,14 +301,14 @@ class _ApplyDialog(QDialog):
             box.setChecked(key in ("sorting", "aux_channels", "events"))
             layout.addWidget(box)
         layout.addWidget(QLabel("to the configs of these sessions:"))
-        self.session_list = QListWidget()
-        for path in sessions:
+        self.recording_session_list = QListWidget()
+        for path in recording_sessions:
             item = QListWidgetItem(path.name)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
-            self.session_list.addItem(item)
-        layout.addWidget(self.session_list)
+            self.recording_session_list.addItem(item)
+        layout.addWidget(self.recording_session_list)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -317,28 +317,28 @@ class _ApplyDialog(QDialog):
     def sections(self) -> list[str]:
         return [key for key, box in self.section_boxes.items() if box.isChecked()]
 
-    def sessions(self) -> list[Path]:
-        return [Path(self.session_list.item(i).data(Qt.ItemDataRole.UserRole)) for i in range(self.session_list.count())
-                if self.session_list.item(i).checkState() == Qt.CheckState.Checked]
+    def recording_sessions(self) -> list[Path]:
+        return [Path(self.recording_session_list.item(i).data(Qt.ItemDataRole.UserRole)) for i in range(self.recording_session_list.count())
+                if self.recording_session_list.item(i).checkState() == Qt.CheckState.Checked]
 
 
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
 
-_COL_SESSION, _COL_INFO, _COL_CONFIG, _COL_STATUS = range(4)
+_COL_RECORDING_SESSION, _COL_INFO, _COL_CONFIG, _COL_STATUS = range(4)
 
 
-class SessionPipelinePage(QWidget):
+class RecordingSessionPipelinePage(QWidget):
     """Sessions (SpikeGLX / Open Ephys) → steps → NWB or DH5 file, optionally in a BIDS dataset."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._config_path: Path | None = None  # of the shown session
         self._shown: Path | None = None
-        self._loaded_config: SessionConfig | None = None
+        self._loaded_config: RecordingSessionConfig | None = None
         self._loader: _OverviewLoader | None = None
-        self._overview: SessionOverview | None = None
+        self._overview: RecordingSessionOverview | None = None
         self._process: QProcess | None = None
         self._queue: list[tuple[Path, str, list[str]]] = []
         self._running: tuple[Path, str] | None = None
@@ -347,8 +347,8 @@ class SessionPipelinePage(QWidget):
         self._cancelled = False
         self._setup_ui()
         self._work_edit.setText(str(_settings().value("pipeline/work_dir") or ""))
-        sessions = _settings().value("pipeline/sessions") or []
-        self.add_sessions([Path(str(p)) for p in (sessions if isinstance(sessions, list) else [sessions])
+        recording_sessions = _settings().value("pipeline/sessions") or []
+        self.add_recording_sessions([Path(str(p)) for p in (recording_sessions if isinstance(recording_sessions, list) else [recording_sessions])
                            if Path(str(p)).is_dir()], show=False)
 
     # --- UI -------------------------------------------------------------
@@ -356,27 +356,27 @@ class SessionPipelinePage(QWidget):
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        sessions_group = QGroupBox("Sessions")
-        sessions_layout = QVBoxLayout(sessions_group)
-        self._sessions = QTableWidget(0, 4)
-        self._sessions.setHorizontalHeaderLabels(["Session", "Content", "Config", "Status"])
-        header = self._sessions.horizontalHeader()
-        for column in (_COL_SESSION, _COL_INFO, _COL_STATUS):
+        recording_sessions_group = QGroupBox("Sessions")
+        recording_sessions_layout = QVBoxLayout(recording_sessions_group)
+        self._recording_sessions = QTableWidget(0, 4)
+        self._recording_sessions.setHorizontalHeaderLabels(["Session", "Content", "Config", "Status"])
+        header = self._recording_sessions.horizontalHeader()
+        for column in (_COL_RECORDING_SESSION, _COL_INFO, _COL_STATUS):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_COL_CONFIG, QHeaderView.ResizeMode.Stretch)
-        self._sessions.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._sessions.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._sessions.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._sessions.setMinimumHeight(110)
-        self._sessions.setMaximumHeight(200)
-        self._sessions.itemSelectionChanged.connect(self._on_session_selected)
-        sessions_layout.addWidget(self._sessions)
+        self._recording_sessions.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._recording_sessions.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._recording_sessions.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._recording_sessions.setMinimumHeight(110)
+        self._recording_sessions.setMaximumHeight(200)
+        self._recording_sessions.itemSelectionChanged.connect(self._on_recording_session_selected)
+        recording_sessions_layout.addWidget(self._recording_sessions)
         row = QHBoxLayout()
         add = QPushButton("&Add…")
         add.setToolTip("Add SpikeGLX or Open Ephys session folders (several at once)")
-        add.clicked.connect(self._pick_sessions)
+        add.clicked.connect(self._pick_recording_sessions)
         remove = QPushButton("Re&move")
-        remove.clicked.connect(self._remove_session)
+        remove.clicked.connect(self._remove_recording_session)
         self._apply_btn = QPushButton("Apply to sessions…")
         self._apply_btn.setToolTip("Copy sorting, aux channel roles etc. of the shown config to other sessions")
         self._apply_btn.clicked.connect(self._apply_dialog)
@@ -392,14 +392,14 @@ class SessionPipelinePage(QWidget):
         row.addLayout(_path_row(self._work_edit, self._browse_work_dir), 1)
         self._status = QLabel("")
         row.addWidget(self._status)
-        sessions_layout.addLayout(row)
-        root.addWidget(sessions_group)
+        recording_sessions_layout.addLayout(row)
+        root.addWidget(recording_sessions_group)
 
         splitter = QSplitter()
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        overview_group = QGroupBox("Runs, probes and paradigms")
+        overview_group = QGroupBox("Runs, probes and experimental protocols")
         overview_layout = QVBoxLayout(overview_group)
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Item", "Details"])
@@ -428,12 +428,12 @@ class SessionPipelinePage(QWidget):
         left_layout.addWidget(results_group, 1)
         splitter.addWidget(left)
 
-        config_group = QGroupBox(SESSION_CONFIG_FILENAME)
+        config_group = QGroupBox(RECORDING_SESSION_CONFIG_FILENAME)
         config_layout = QVBoxLayout(config_group)
         self._config_label = QLabel("no session shown")
         self._config_label.setWordWrap(True)
         config_layout.addWidget(self._config_label)
-        self._editor = SessionConfigEditor()
+        self._editor = RecordingSessionConfigEditor()
         self._editor.setEnabled(False)
         config_layout.addWidget(self._editor)
         buttons = QHBoxLayout()
@@ -532,56 +532,56 @@ class SessionPipelinePage(QWidget):
 
     # --- sessions -------------------------------------------------------
 
-    def _session_at(self, row: int) -> Path:
-        return Path(cast(QTableWidgetItem, self._sessions.item(row, _COL_SESSION)).data(Qt.ItemDataRole.UserRole))
+    def _recording_session_at(self, row: int) -> Path:
+        return Path(cast(QTableWidgetItem, self._recording_sessions.item(row, _COL_RECORDING_SESSION)).data(Qt.ItemDataRole.UserRole))
 
-    def sessions(self) -> list[Path]:
-        return [self._session_at(row) for row in range(self._sessions.rowCount())]
+    def recording_sessions(self) -> list[Path]:
+        return [self._recording_session_at(row) for row in range(self._recording_sessions.rowCount())]
 
-    def _row(self, session: Path) -> int:
-        return next(row for row, path in enumerate(self.sessions()) if path == session)
+    def _row(self, recording_session: Path) -> int:
+        return next(row for row, path in enumerate(self.recording_sessions()) if path == recording_session)
 
-    def _set_cell(self, session: Path, column: int, text: str) -> None:
-        self._sessions.setItem(self._row(session), column, QTableWidgetItem(text))
+    def _set_cell(self, recording_session: Path, column: int, text: str) -> None:
+        self._recording_sessions.setItem(self._row(recording_session), column, QTableWidgetItem(text))
 
-    def add_sessions(self, paths: list[Path], show: bool = True) -> None:
-        known = set(self.sessions())
+    def add_recording_sessions(self, paths: list[Path], show: bool = True) -> None:
+        known = set(self.recording_sessions())
         new = [p for p in paths if p not in known]
         for path in new:
-            row = self._sessions.rowCount()
-            self._sessions.insertRow(row)
+            row = self._recording_sessions.rowCount()
+            self._recording_sessions.insertRow(row)
             item = QTableWidgetItem(path.name)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             item.setToolTip(str(path))
-            self._sessions.setItem(row, _COL_SESSION, item)
-            self._sessions.setItem(row, _COL_INFO, QTableWidgetItem(""))
+            self._recording_sessions.setItem(row, _COL_RECORDING_SESSION, item)
+            self._recording_sessions.setItem(row, _COL_INFO, QTableWidgetItem(""))
             config = self._find_config(path)
-            self._sessions.setItem(row, _COL_CONFIG, QTableWidgetItem(str(config) if config else "defaults"))
-            self._sessions.setItem(row, _COL_STATUS, QTableWidgetItem(""))
-        self._store_sessions()
-        self._run_btn.setEnabled(self._sessions.rowCount() > 0)
+            self._recording_sessions.setItem(row, _COL_CONFIG, QTableWidgetItem(str(config) if config else "defaults"))
+            self._recording_sessions.setItem(row, _COL_STATUS, QTableWidgetItem(""))
+        self._store_recording_sessions()
+        self._run_btn.setEnabled(self._recording_sessions.rowCount() > 0)
         if new and show:
-            self._sessions.selectRow(self._row(new[0]))
+            self._recording_sessions.selectRow(self._row(new[0]))
 
-    def _store_sessions(self) -> None:
-        _settings().setValue("pipeline/sessions", [str(p) for p in self.sessions()])
+    def _store_recording_sessions(self) -> None:
+        _settings().setValue("pipeline/sessions", [str(p) for p in self.recording_sessions()])
 
-    def _pick_sessions(self) -> None:
-        from ephysalis.gui.settings import pick_session_dirs
+    def _pick_recording_sessions(self) -> None:
+        from ephysalis.gui.settings import pick_recording_session_dirs
 
-        initial = str(self.sessions()[-1].parent) if self.sessions() else ""
-        paths = pick_session_dirs(self, "Select SpikeGLX or Open Ephys session folder(s)", initial)
-        self.add_sessions([Path(p) for p in paths])
+        initial = str(self.recording_sessions()[-1].parent) if self.recording_sessions() else ""
+        paths = pick_recording_session_dirs(self, "Select SpikeGLX or Open Ephys session folder(s)", initial)
+        self.add_recording_sessions([Path(p) for p in paths])
 
-    def _remove_session(self) -> None:
-        session = self.session_path()
-        if session is None or self._process is not None:
+    def _remove_recording_session(self) -> None:
+        recording_session = self.recording_session_path()
+        if recording_session is None or self._process is not None:
             return
-        self._sessions.removeRow(self._row(session))
-        self._store_sessions()
-        if not self.sessions():
+        self._recording_sessions.removeRow(self._row(recording_session))
+        self._store_recording_sessions()
+        if not self.recording_sessions():
             self._clear_shown()
-        self._run_btn.setEnabled(self._sessions.rowCount() > 0)
+        self._run_btn.setEnabled(self._recording_sessions.rowCount() > 0)
 
     def _clear_shown(self) -> None:
         self._shown, self._overview, self._config_path, self._loaded_config = None, None, None, None
@@ -590,17 +590,17 @@ class SessionPipelinePage(QWidget):
         self._editor.setEnabled(False)
         self._config_label.setText("no session shown")
 
-    def _on_session_selected(self) -> None:
-        session = self.session_path()
-        if session is None or session == self._shown:
+    def _on_recording_session_selected(self) -> None:
+        recording_session = self.recording_session_path()
+        if recording_session is None or recording_session == self._shown:
             return
         if not self._confirm_discard():
             if self._shown is not None:  # back to the shown session
-                self._sessions.blockSignals(True)
-                self._sessions.selectRow(self._row(self._shown))
-                self._sessions.blockSignals(False)
+                self._recording_sessions.blockSignals(True)
+                self._recording_sessions.selectRow(self._row(self._shown))
+                self._recording_sessions.blockSignals(False)
             return
-        self.load_session()
+        self.load_recording_session()
 
     def _confirm_discard(self) -> bool:
         """True if the shown config has no unsaved changes, or they were saved or discarded."""
@@ -620,34 +620,34 @@ class SessionPipelinePage(QWidget):
         return answer == QMessageBox.StandardButton.Discard
 
     def _on_work_dir_changed(self) -> None:
-        for session in self.sessions():
-            config = self._find_config(session)
-            self._set_cell(session, _COL_CONFIG, str(config) if config else "defaults")
+        for recording_session in self.recording_sessions():
+            config = self._find_config(recording_session)
+            self._set_cell(recording_session, _COL_CONFIG, str(config) if config else "defaults")
         self.refresh_results()
 
     # --- paths ----------------------------------------------------------
 
-    def session_path(self) -> Path | None:
+    def recording_session_path(self) -> Path | None:
         """The selected session."""
-        rows = self._sessions.selectionModel().selectedRows()
+        rows = self._recording_sessions.selectionModel().selectedRows()
         if not rows:
             return None
-        return self._session_at(rows[0].row())
+        return self._recording_session_at(rows[0].row())
 
-    def work_dir(self, session: Path | None = None) -> Path:
+    def work_dir(self, recording_session: Path | None = None) -> Path:
         """Work dir of ``session`` (default: the shown one): the template with ``{session}``
         replaced, or ``<session>/ephysalis``."""
-        from ephysalis.cli.session_commands import SESSION_PLACEHOLDER
+        from ephysalis.cli.recording_session_commands import SESSION_PLACEHOLDER
         from ephysalis.timeline.steps import default_work_dir
 
-        session = session or self._shown or self.session_path()
+        recording_session = recording_session or self._shown or self.recording_session_path()
         text = self._work_edit.text().strip()
         if text:
-            return Path(text.replace(SESSION_PLACEHOLDER, session.name if session else ""))
-        return default_work_dir(session) if session else Path(".")
+            return Path(text.replace(SESSION_PLACEHOLDER, recording_session.name if recording_session else ""))
+        return default_work_dir(recording_session) if recording_session else Path(".")
 
     def _browse(self, edit: QLineEdit, title: str) -> None:
-        path = QFileDialog.getExistingDirectory(self, title, edit.text() or str(self.session_path() or ""))
+        path = QFileDialog.getExistingDirectory(self, title, edit.text() or str(self.recording_session_path() or ""))
         if path:
             edit.setText(path)
 
@@ -671,14 +671,14 @@ class SessionPipelinePage(QWidget):
 
     # --- session and config ---------------------------------------------
 
-    def _find_config(self, session: Path | None = None) -> Path | None:
+    def _find_config(self, recording_session: Path | None = None) -> Path | None:
         """The config file last opened or saved for ``session`` (default: the shown one), else
         ``session.toml`` in the session folder or the work dir."""
-        session = session or self._shown or self.session_path()
-        if session is None:
+        recording_session = recording_session or self._shown or self.recording_session_path()
+        if recording_session is None:
             return None
-        candidates = [session / SESSION_CONFIG_FILENAME, self.work_dir(session) / SESSION_CONFIG_FILENAME]
-        remembered = _settings().value(_config_key(session))
+        candidates = [recording_session / RECORDING_SESSION_CONFIG_FILENAME, self.work_dir(recording_session) / RECORDING_SESSION_CONFIG_FILENAME]
+        remembered = _settings().value(_config_key(recording_session))
         if remembered:
             candidates.insert(0, Path(str(remembered)))
         return next((p for p in candidates if p.exists()), None)
@@ -690,28 +690,28 @@ class SessionPipelinePage(QWidget):
             _settings().setValue(_config_key(self._shown), str(path))
             self._set_cell(self._shown, _COL_CONFIG, str(path))
 
-    def load_session(self) -> None:
+    def load_recording_session(self) -> None:
         """Show the selected session: overview and config."""
-        session = self.session_path()
-        if session is None or not session.is_dir():
+        recording_session = self.recording_session_path()
+        if recording_session is None or not recording_session.is_dir():
             QMessageBox.warning(self, "No session", "Please add and select a session folder.")
             return
-        self._shown = session
+        self._shown = recording_session
         self._overview = None
-        self._config_path = self._find_config(session)
+        self._config_path = self._find_config(recording_session)
         config = None
         if self._config_path is not None:
             try:
-                config = load_session_config(self._config_path)
+                config = load_recording_session_config(self._config_path)
             except Exception as exc:
                 QMessageBox.critical(self, "Invalid session.toml", f"{self._config_path}:\n{exc}")
                 return
-        self._status.setText(f"loading {session.name}…")
+        self._status.setText(f"loading {recording_session.name}…")
         self._tree.clear()
         self._editor.setEnabled(False)
-        self._loader = _OverviewLoader(session, config, self._config_path.parent if self._config_path else None, self)
+        self._loader = _OverviewLoader(recording_session, config, self._config_path.parent if self._config_path else None, self)
         loader = self._loader
-        self._loader.loaded.connect(lambda overview, s=session, l=loader: self._on_loaded(s, overview, config, l))
+        self._loader.loaded.connect(lambda overview, s=recording_session, l=loader: self._on_loaded(s, overview, config, l))
         self._loader.failed.connect(self._on_load_failed)
         self._loader.start()
 
@@ -719,13 +719,13 @@ class SessionPipelinePage(QWidget):
         self._status.setText("")
         QMessageBox.critical(self, "Cannot open session", message)
 
-    def _on_loaded(self, session: Path, overview: SessionOverview, config: SessionConfig | None,
+    def _on_loaded(self, recording_session: Path, overview: RecordingSessionOverview, config: RecordingSessionConfig | None,
                    loader: _OverviewLoader | None = None) -> None:
-        if session != self._shown or (loader is not None and loader is not self._loader):  # superseded
+        if recording_session != self._shown or (loader is not None and loader is not self._loader):  # superseded
             return
         self._overview = overview
         self._status.setText("")
-        self._set_cell(session, _COL_INFO, f"{overview.format}, {len(overview.runs)} runs, "
+        self._set_cell(recording_session, _COL_INFO, f"{overview.format}, {len(overview.runs)} runs, "
                                            f"{len(overview.probe_ids)} probes")
         for run in overview.runs:
             item = QTreeWidgetItem([run["name"], f"start {run['start']}, {run['duration']}"])
@@ -733,15 +733,15 @@ class SessionPipelinePage(QWidget):
                 item.addChild(QTreeWidgetItem(["probe", probe]))
             if run["aux"]:
                 item.addChild(QTreeWidgetItem(["aux", run["aux"]]))
-            for paradigm in run["paradigms"] or ["none found"]:
-                item.addChild(QTreeWidgetItem(["paradigm", paradigm]))
+            for experimental_protocol in run["experimental_protocols"] or ["none found"]:
+                item.addChild(QTreeWidgetItem(["experimental_protocol", experimental_protocol]))
             self._tree.addTopLevelItem(item)
             item.setExpanded(True)
         if config is None:
             config = overview.default_config
             self._config_label.setText(
-                f"No {SESSION_CONFIG_FILENAME} yet: showing the defaults; Save writes "
-                f"{self.work_dir() / SESSION_CONFIG_FILENAME}")
+                f"No {RECORDING_SESSION_CONFIG_FILENAME} yet: showing the defaults; Save writes "
+                f"{self.work_dir() / RECORDING_SESSION_CONFIG_FILENAME}")
         else:
             self._config_label.setText(str(self._config_path))
         assert config is not None
@@ -764,9 +764,9 @@ class SessionPipelinePage(QWidget):
         except ValueError as exc:
             QMessageBox.critical(self, "Invalid config", str(exc))
             return False
-        path = path or self._config_path or (self.work_dir() / SESSION_CONFIG_FILENAME)
+        path = path or self._config_path or (self.work_dir() / RECORDING_SESSION_CONFIG_FILENAME)
         path.parent.mkdir(parents=True, exist_ok=True)
-        save_session_config(config, path)
+        save_recording_session_config(config, path)
         self._set_config_path(path)
         self._loaded_config = config
         self._append(f"Saved {path}")
@@ -775,7 +775,7 @@ class SessionPipelinePage(QWidget):
     def open_config(self, path: Path) -> bool:
         """Show the config in ``path``, which becomes the config file of the shown session."""
         try:
-            config = load_session_config(path)
+            config = load_recording_session_config(path)
         except Exception as exc:
             QMessageBox.critical(self, "Invalid config", f"{path}:\n{exc}")
             return False
@@ -799,7 +799,7 @@ class SessionPipelinePage(QWidget):
             self.open_config(Path(path))
 
     def _save_config_as_dialog(self) -> None:
-        initial = self._config_path or (self.work_dir() / SESSION_CONFIG_FILENAME)
+        initial = self._config_path or (self.work_dir() / RECORDING_SESSION_CONFIG_FILENAME)
         path, _ = QFileDialog.getSaveFileName(self, "Save session config", str(initial), _TOML_FILTER)
         if path:
             self.save_config(Path(path))
@@ -812,30 +812,30 @@ class SessionPipelinePage(QWidget):
         if self._overview is not None and self._overview.default_config is not None:
             self._editor.set_config(self._overview.default_config)
 
-    def apply_to_sessions(self, sections: list[str], targets: list[Path]) -> list[Path]:
+    def apply_to_recording_sessions(self, sections: list[str], targets: list[Path]) -> list[Path]:
         """Copy ``sections`` of the shown config into the configs of ``targets`` (their config
         file, else a new ``<work dir>/session.toml`` from the recording's defaults); returns the
         written files."""
-        from ephysalis.formats.input.base import open_session
+        from ephysalis.formats.input.base import open_recording_session
 
         source = self._editor.config()
         written = []
-        for session in targets:
-            if session == self._shown:
+        for recording_session in targets:
+            if recording_session == self._shown:
                 continue
-            path = self._find_config(session)
-            target = load_session_config(path) if path else default_session_config(open_session(session))
-            path = path or (self.work_dir(session) / SESSION_CONFIG_FILENAME)
+            path = self._find_config(recording_session)
+            target = load_recording_session_config(path) if path else default_recording_session_config(open_recording_session(recording_session))
+            path = path or (self.work_dir(recording_session) / RECORDING_SESSION_CONFIG_FILENAME)
             path.parent.mkdir(parents=True, exist_ok=True)
-            save_session_config(apply_sections(source, target, sections), path)
-            _settings().setValue(_config_key(session), str(path))
-            self._set_cell(session, _COL_CONFIG, str(path))
+            save_recording_session_config(apply_sections(source, target, sections), path)
+            _settings().setValue(_config_key(recording_session), str(path))
+            self._set_cell(recording_session, _COL_CONFIG, str(path))
             self._append(f"Applied {', '.join(sections)} to {path}")
             written.append(path)
         return written
 
     def _apply_dialog(self) -> None:
-        others = [s for s in self.sessions() if s != self._shown]
+        others = [s for s in self.recording_sessions() if s != self._shown]
         if not others:
             QMessageBox.information(self, "No other sessions", "Add the sessions to apply the settings to first.")
             return
@@ -844,7 +844,7 @@ class SessionPipelinePage(QWidget):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            self.apply_to_sessions(dialog.sections(), dialog.sessions())
+            self.apply_to_recording_sessions(dialog.sections(), dialog.recording_sessions())
         except Exception as exc:
             QMessageBox.critical(self, "Apply failed", str(exc))
         finally:
@@ -859,13 +859,13 @@ class SessionPipelinePage(QWidget):
 
     # --- running the steps ----------------------------------------------
 
-    def pipeline_options(self, session: Path | None = None) -> PipelineOptions:
-        session = session or self._shown or self.session_path()
-        assert session is not None
+    def pipeline_options(self, recording_session: Path | None = None) -> PipelineOptions:
+        recording_session = recording_session or self._shown or self.recording_session_path()
+        assert recording_session is not None
         sorter = self._sorter_combo.currentText().strip()
         return PipelineOptions(
-            session=session, work_dir=self.work_dir(session),
-            config=self._config_path if session == self._shown else self._find_config(session),
+            recording_session=recording_session, work_dir=self.work_dir(recording_session),
+            config=self._config_path if recording_session == self._shown else self._find_config(recording_session),
             steps=[s for s, box in self._step_boxes.items() if box.isChecked()],
             n_jobs=self._jobs_spin.value(),
             scratch_dir=Path(self._scratch_edit.text()) if self._scratch_edit.text().strip() else None,
@@ -884,23 +884,23 @@ class SessionPipelinePage(QWidget):
             return
         if self._shown is not None and self._editor.isEnabled() and not self.save_config():
             return
-        sessions = self.sessions()
-        if len(sessions) > 1 and self._work_edit.text().strip() and "{session}" not in self._work_edit.text():
+        recording_sessions = self.recording_sessions()
+        if len(recording_sessions) > 1 and self._work_edit.text().strip() and "{session}" not in self._work_edit.text():
             QMessageBox.warning(self, "Work dir", "With several sessions, the work dir needs {session}, "
                                 "e.g. D:/work/{session} (or leave it empty for <session>/ephysalis).")
             return
         _settings().setValue("pipeline/scratch_dir", self._scratch_edit.text().strip())
         _settings().setValue("pipeline/bids_root", self._bids_edit.text().strip())
-        self._queue = [(session, step, argv) for session in sessions
-                       for step, argv in step_commands(self.pipeline_options(session))]
+        self._queue = [(recording_session, step, argv) for recording_session in recording_sessions
+                       for step, argv in step_commands(self.pipeline_options(recording_session))]
         if not self._queue:
             QMessageBox.information(self, "No steps", "Please choose at least one step.")
             return
         self._n_steps = len(self._queue)
         self._failed = set()
         self._cancelled = False
-        for session in sessions:
-            self._set_cell(session, _COL_STATUS, "waiting")
+        for recording_session in recording_sessions:
+            self._set_cell(recording_session, _COL_STATUS, "waiting")
         self._progress.setRange(0, self._n_steps)
         self._progress.setValue(0)
         self._editor.setEnabled(False)
@@ -911,15 +911,15 @@ class SessionPipelinePage(QWidget):
         while self._queue and self._queue[0][0] in self._failed:  # skip the rest of a failed session
             self._queue.pop(0)
         if not self._queue:
-            failed = ", ".join(s.name for s in self.sessions() if s in self._failed)
+            failed = ", ".join(s.name for s in self.recording_sessions() if s in self._failed)
             self._finish("--- all steps done ---" if not failed else f"--- done; failed: {failed} ---",
                          error=bool(failed))
             return
-        session, step, argv = self._queue.pop(0)
+        recording_session, step, argv = self._queue.pop(0)
         done = self._n_steps - len(self._queue) - 1
         self._progress.setValue(done)
-        self._progress.setFormat(f"{session.name}: {step}  ({done + 1}/{self._n_steps})")
-        self._set_cell(session, _COL_STATUS, f"running {step}")
+        self._progress.setFormat(f"{recording_session.name}: {step}  ({done + 1}/{self._n_steps})")
+        self._set_cell(recording_session, _COL_STATUS, f"running {step}")
         self._append(f"$ ephysalis {' '.join(argv[4:])}")
         process = QProcess(self)
         environment = QProcessEnvironment.systemEnvironment()
@@ -927,9 +927,9 @@ class SessionPipelinePage(QWidget):
         process.setProcessEnvironment(environment)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         process.readyReadStandardOutput.connect(self._read_output)
-        process.finished.connect(lambda code, status, s=session, step=step: self._step_finished(s, step, code, status))
+        process.finished.connect(lambda code, status, s=recording_session, step=step: self._step_finished(s, step, code, status))
         self._process = process
-        self._running = (session, step)
+        self._running = (recording_session, step)
         process.start(argv[0], argv[1:])
 
     def _read_output(self) -> None:
@@ -938,23 +938,23 @@ class SessionPipelinePage(QWidget):
             for line in text.rstrip("\n").splitlines():
                 self._append(line)
 
-    def _step_finished(self, session: Path, step: str, code: int, status: QProcess.ExitStatus) -> None:
+    def _step_finished(self, recording_session: Path, step: str, code: int, status: QProcess.ExitStatus) -> None:
         self._read_output()
         self._process = None
         self._running = None
-        if session == self._shown:
+        if recording_session == self._shown:
             self.refresh_results()
         if self._cancelled:
-            self._set_cell(session, _COL_STATUS, f"cancelled in {step}")
-            self._finish(f"--- cancelled during {step} of {session.name} (spike sorting resumes from its "
+            self._set_cell(recording_session, _COL_STATUS, f"cancelled in {step}")
+            self._finish(f"--- cancelled during {step} of {recording_session.name} (spike sorting resumes from its "
                          "checkpoints) ---", error=True)
             return
         if status != QProcess.ExitStatus.NormalExit or code != 0:
-            self._failed.add(session)
-            self._set_cell(session, _COL_STATUS, f"failed in {step}")
-            self._append(f"--- {session.name}: {step} failed (exit code {code}); continuing with the next session ---")
-        elif not any(s == session for s, _, _ in self._queue):
-            self._set_cell(session, _COL_STATUS, "done")
+            self._failed.add(recording_session)
+            self._set_cell(recording_session, _COL_STATUS, f"failed in {step}")
+            self._append(f"--- {recording_session.name}: {step} failed (exit code {code}); continuing with the next session ---")
+        elif not any(s == recording_session for s, _, _ in self._queue):
+            self._set_cell(recording_session, _COL_STATUS, "done")
         self._start_next()
 
     def _finish(self, message: str, error: bool = False) -> None:

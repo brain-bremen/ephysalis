@@ -4,8 +4,8 @@ The interface is in :mod:`ephysalis.plugins` (:class:`~ephysalis.plugins.Metadat
 capabilities :class:`~ephysalis.plugins.ExtractsTrialTables`,
 :class:`~ephysalis.plugins.EstimatesRunStartTime`,
 :class:`~ephysalis.plugins.AddsSessionConfigFromMetadataFiles`,
-:class:`~ephysalis.plugins.NamesEventWords`). :class:`Paradigm` is a helper for plugins that
-first list a run's paradigms and then read each one's trials.
+:class:`~ephysalis.plugins.NamesEventWords`). :class:`ExperimentalProtocol` is a helper for plugins that
+first list a run's experimental protocols and then read each one's trials.
 """
 
 from __future__ import annotations
@@ -27,22 +27,22 @@ from ephysalis.plugins import (
 
 if TYPE_CHECKING:
     from ephysalis.metadata.runstart import RunStart
-    from ephysalis.session.config import SessionConfig
-    from ephysalis.session.model import Run
+    from ephysalis.recording_session.config import RecordingSessionConfig
+    from ephysalis.recording_session.model import Run
     from ephysalis.timeline.auxsignals import AuxSignals
     from ephysalis.timeline.clocks import RunSync
 
 
 @dataclass
-class Paradigm:
-    """One paradigm presented in a run (helper for plugins)."""
+class ExperimentalProtocol:
+    """One experimental protocol presented in a run (helper for plugins)."""
 
-    paradigm_name: str  # e.g. "RF" for 1_stimulusStageRF; the key of its trial table
+    experimental_protocol_name: str  # e.g. "RF" for 1_stimulusStageRF; the key of its trial table
     run_name: str
-    index_in_run: int  # 0-based; runs can contain several paradigms
+    index_in_run: int  # 0-based; runs can contain several experimental protocols
     metadata_plugin_name: str  # the plugin that found it
-    metadata_path: Path | None = None  # the file or folder the paradigm is read from (e.g. the .tdr)
-    paradigm_metadata: dict[str, Any] = field(default_factory=dict)  # copied into the trial table's attrs
+    metadata_path: Path | None = None  # the file or folder the experimental protocol is read from (e.g. the .tdr)
+    experimental_protocol_metadata: dict[str, Any] = field(default_factory=dict)  # copied into the trial table's attrs
 
 
 def get_metadata_plugin(metadata_plugin_name: str) -> MetadataPlugin:
@@ -50,7 +50,7 @@ def get_metadata_plugin(metadata_plugin_name: str) -> MetadataPlugin:
 
 
 def run_trial_tables(run: Run, clock_alignment: RunSync | None, auxiliary_signals: AuxSignals | None,
-                     config: SessionConfig | None = None) -> tuple[MetadataPlugin | None, dict[str, pd.DataFrame]]:
+                     config: RecordingSessionConfig | None = None) -> tuple[MetadataPlugin | None, dict[str, pd.DataFrame]]:
     """``(plugin, trial tables)`` of a run: from the plugin set for the run in ``session.toml``
     (``runs[].metadata_plugin``), else from the first plugin (in name order) that recognises the
     run; ``(None, {})`` if none does."""

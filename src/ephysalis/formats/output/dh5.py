@@ -60,12 +60,12 @@ from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
 from ephysalis.processing.mua import MUA_FILTERING, mua_folder
 from ephysalis.formats.output.nwb import (
     RUNNING_SPEED_BIN_S,
-    session_trials,
+    recording_session_trials,
     sorting_info,
     time_axis,
 )
 from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
-from ephysalis.session.model import Run, Session, StreamKind
+from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
 from ephysalis.sorting.spikes import load_run_spikes
 from ephysalis.timeline.clocks import AUX
 
@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from dhspec.cont import ContSignalType
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.session.config import SessionConfig
+    from ephysalis.recording_session.config import RecordingSessionConfig
     from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)
@@ -249,16 +249,16 @@ def _write_cont_blocks(file: h5py.File, parts: list[tuple], first_id: int,
     return len(channel_ids)
 
 
-def _probe_channel_counts(session: Session, runs: list[Run]) -> dict[str, int]:
-    return {p: len(ids) for p, ids in _probe_channels(session, runs).items()}
+def _probe_channel_counts(recording_session: RecordingSession, runs: list[Run]) -> dict[str, int]:
+    return {p: len(ids) for p, ids in _probe_channels(recording_session, runs).items()}
 
 
-def _probe_channels(session: Session, runs: list[Run]) -> dict[str, list[str]]:
+def _probe_channels(recording_session: RecordingSession, runs: list[Run]) -> dict[str, list[str]]:
     return {p: [str(c) for c in next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids]
-            for p in session.probe_ids}
+            for p in recording_session.probe_ids}
 
 
-def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list[Run], offsets: dict[str, float],
+def _write_derived(file: h5py.File, recording_session: RecordingSession, work_dir: Path, runs: list[Run], offsets: dict[str, float],
                    syncs: dict[str, RunSync], kind: str) -> int:
     """LFP (``kind="lfp"``), MUA (``"mua"``) or CSD (``"csd"``) of all probes from the work dir.
     A channel missing in some runs (CSD after channel selection) has INDEX regions of the other
@@ -267,7 +267,7 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
     from dhspec.cont import ContSignalType
 
     from ephysalis.processing.csd import CSD_UNIT, DH5_FULL_SCALE, csd_folder
-    from ephysalis.processing.quality import session_status
+    from ephysalis.processing.quality import recording_session_status
 
     folder, first_id, signal_type, comment = {
         "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, f"LFP: {LFP_FILTERING}"),
@@ -278,7 +278,7 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
     scaling: dict[str, Any] = ({"to_int16": True} if kind == "mua" else
                {"to_int16": True, "full_scale": DH5_FULL_SCALE, "unit_factor": 1.0, "c_rounding": True} if kind == "csd"
                else {})
-    probe_channels = _probe_channels(session, runs)
+    probe_channels = _probe_channels(recording_session, runs)
     if sum(map(len, probe_channels.values())) > MAX_NEURAL_CHANNELS:
         raise ValueError(f"{sum(map(len, probe_channels.values()))} probe channels do not fit the {kind.upper()} CONT ids")
     global_index, n_blocks = 0, 0
@@ -294,7 +294,7 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
         attributes = {}
         if kind == "lfp":
             attributes = {c: {"ChannelStatus": status, "ChannelStatusDescription": why}
-                          for c, (status, why) in session_status(work_dir, runs, probe_id).items()}
+                          for c, (status, why) in recording_session_status(work_dir, runs, probe_id).items()}
         # channels by the runs that have them (all runs, except for the CSD after channel selection)
         present = [{str(c) for c in recording.channel_ids} for recording, *_ in parts]
         if not set().union(*present) <= set(channels):  # ids of the stream, not of the AP stream (Neuropixels LF)
@@ -315,12 +315,12 @@ def _write_derived(file: h5py.File, session: Session, work_dir: Path, runs: list
     return n_blocks
 
 
-def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict[str, float],
+def _write_raw(file: h5py.File, recording_session: RecordingSession, runs: list[Run], offsets: dict[str, float],
                syncs: dict[str, RunSync]) -> int:
     """Raw AP (wideband) data of all probes (CONT 1...) and the analog aux inputs (CONT 1601...)."""
     from dhspec.cont import ContSignalType
 
-    counts = _probe_channel_counts(session, runs)
+    counts = _probe_channel_counts(recording_session, runs)
     if sum(counts.values()) > MAX_NEURAL_CHANNELS:
         raise ValueError(f"{sum(counts.values())} probe channels do not fit the raw CONT ids")
     global_index, n_blocks = 0, 0
@@ -350,14 +350,14 @@ def _write_raw(file: h5py.File, session: Session, runs: list[Run], offsets: dict
 
 
 def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float],
-                  config: SessionConfig | None) -> int:
+                  config: RecordingSessionConfig | None) -> int:
     """EV02 from ``events/<run>.csv``, with the names of the codes as attributes."""
     import dh5io.event_triggers
     from dhspec.event_triggers import EV_DATASET_NAME
 
     from ephysalis.timeline.annotations import active_state, event_code_names as line_code_names
     from ephysalis.timeline.events import dh5_event_codes, event_word_names, load_run_events
-    from ephysalis.session.config import EventsConfig
+    from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
     times, codes, names, lines = [], [], {}, {}
@@ -391,17 +391,17 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
 
 
 def _write_annotations(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float],
-                       config: SessionConfig | None, trials: pd.DataFrame) -> tuple[int, int]:
+                       config: RecordingSessionConfig | None, trials: pd.DataFrame) -> tuple[int, int]:
     """``/Intervals`` (pulses per role, runs) and ``/Markers`` (:mod:`ephysalis.timeline.annotations`)."""
     import h5py.h5t as h5t
     from dhspec.intervals import INTERVAL_DATASET_DTYPE, INTERVAL_GROUP_NAME
     from dhspec.markers import MARKERS_DATASET_DTYPE, MARKERS_GROUP_NAME
 
-    from ephysalis.timeline.annotations import line_descriptions, markers, session_pulses
-    from ephysalis.session.config import EventsConfig
+    from ephysalis.timeline.annotations import line_descriptions, markers, recording_session_pulses
+    from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    pulses, lines = session_pulses(work_dir, runs, offsets, events_config)
+    pulses, lines = recording_session_pulses(work_dir, runs, offsets, events_config)
     intervals: dict[str, tuple[np.ndarray, str]] = {}
     descriptions = line_descriptions(lines, events_config)
     for role, group in pulses[pulses.stop_time.notna()].groupby("role", sort=True):
@@ -473,14 +473,14 @@ def _write_eye_position(file: h5py.File, work_dir: Path, runs: list[Run], offset
     return True
 
 
-def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[Run],
+def _write_spikes(file: h5py.File, recording_session: RecordingSession, work_dir: Path, runs: list[Run],
                   offsets: dict[str, float]) -> pd.DataFrame:
     import dh5io.spike
 
     from ephysalis.formats.output.nwb import peak_waveforms
 
     tables = []
-    for probe_index, probe_id in enumerate(session.probe_ids):
+    for probe_index, probe_id in enumerate(recording_session.probe_ids):
         units_csv = work_dir / "sorting" / probe_id / "units.csv"
         if not units_csv.exists():
             continue
@@ -492,7 +492,7 @@ def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[
         ap = next(r for r in runs if probe_id in r.probes).get_recording(StreamKind.AP, probe_id)
         channel_index = {str(c): i for i, c in enumerate(ap.channel_ids)}
         first_global = sum(len(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)
-                           for p in session.probe_ids[:probe_index])
+                           for p in recording_session.probe_ids[:probe_index])
 
         times, ids = [], []
         for run in runs:
@@ -578,11 +578,11 @@ def step_operation_details(processing: dict[str, Any]) -> dict[str, dict[str, st
     }
 
 
-def write_session_dh5(
-    session: Session,
+def write_recording_session_dh5(
+    recording_session: RecordingSession,
     work_dir: Path,
     path: Path,
-    config: SessionConfig | None = None,
+    config: RecordingSessionConfig | None = None,
     syncs: dict[str, RunSync] | None = None,
     lfp: bool = True,
     processing: dict | None = None,
@@ -608,21 +608,21 @@ def write_session_dh5(
     from ephysalis.provenance import DH5_ATTRIBUTE_NAME, DH5_OPERATION_NAME, step_operations
     from ephysalis.version import get_version_from_pyproject
 
-    runs, offsets, session_start = time_axis(session, config, run_clock)
+    runs, offsets, recording_session_start = time_axis(recording_session, config, run_clock)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.stem + ".partial.dh5")
-    trials = session_trials(work_dir, runs, offsets)
-    with create_dh_file(tmp, overwrite=True, boards=session.probe_ids) as dh5file:
+    trials = recording_session_trials(work_dir, runs, offsets)
+    with create_dh_file(tmp, overwrite=True, boards=recording_session.probe_ids) as dh5file:
         file = dh5file._file
-        file.attrs["SessionStartTime"] = session_start.isoformat()
-        n_raw = _write_raw(file, session, runs, offsets, syncs or {}) if raw else 0
-        n_lfp = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "lfp") if lfp else 0
-        n_mua = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "mua")
-        n_csd = _write_derived(file, session, work_dir, runs, offsets, syncs or {}, "csd")
+        file.attrs["SessionStartTime"] = recording_session_start.isoformat()
+        n_raw = _write_raw(file, recording_session, runs, offsets, syncs or {}) if raw else 0
+        n_lfp = _write_derived(file, recording_session, work_dir, runs, offsets, syncs or {}, "lfp") if lfp else 0
+        n_mua = _write_derived(file, recording_session, work_dir, runs, offsets, syncs or {}, "mua")
+        n_csd = _write_derived(file, recording_session, work_dir, runs, offsets, syncs or {}, "csd")
         n_events = _write_events(file, work_dir, runs, offsets, config)
         _write_running_speed(file, work_dir, runs, offsets)
         _write_eye_position(file, work_dir, runs, offsets)
-        units = _write_spikes(file, session, work_dir, runs, offsets)
+        units = _write_spikes(file, recording_session, work_dir, runs, offsets)
         if not trials.empty:
             _write_trialmap(file, trials)
         _write_annotations(file, work_dir, runs, offsets, config, trials)

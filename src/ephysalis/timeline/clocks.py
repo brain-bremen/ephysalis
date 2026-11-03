@@ -28,8 +28,8 @@ import numpy as np
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import AuxChannelMap
 
 logger = logging.getLogger(__name__)
 

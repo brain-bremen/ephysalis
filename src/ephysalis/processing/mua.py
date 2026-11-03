@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ephysalis.processing.lfp import LFP_FILTER_REACH_MS
-from ephysalis.session.model import Run, StreamKind
+from ephysalis.recording_session.model import Run, StreamKind
 
 if TYPE_CHECKING:
     from spikeinterface.core import BaseRecording

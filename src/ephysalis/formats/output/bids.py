@@ -65,16 +65,16 @@ def bids_label(text: str) -> str:
 
 def bids_labels(subject_id: str, session_id: str) -> tuple[str, str]:
     """Subject and session label; the session label without the subject id prefix."""
-    session = session_id.removeprefix(subject_id).lstrip("_-") or session_id
-    return bids_label(subject_id), bids_label(session)
+    recording_session = session_id.removeprefix(subject_id).lstrip("_-") or session_id
+    return bids_label(subject_id), bids_label(recording_session)
 
 
-def ecephys_path(root: Path, subject: str, session: str, extension: str = ".nwb", run: int | None = None,
+def ecephys_path(root: Path, subject: str, recording_session: str, extension: str = ".nwb", run: int | None = None,
                  task: str | None = None) -> Path:
     """Path of the session's data file (or of run ``run``'s) in the BIDS dataset at ``root``."""
-    entities = (f"sub-{subject}_ses-{session}" + (f"_task-{bids_label(task)}" if task else "")
+    entities = (f"sub-{subject}_ses-{recording_session}" + (f"_task-{bids_label(task)}" if task else "")
                 + (f"_run-{run:02d}" if run is not None else ""))
-    return root / f"sub-{subject}" / f"ses-{session}" / "ecephys" / f"{entities}_ecephys{extension}"
+    return root / f"sub-{subject}" / f"ses-{recording_session}" / "ecephys" / f"{entities}_ecephys{extension}"
 
 
 def _na(value: Any) -> Any:
@@ -201,7 +201,7 @@ def channels_table(nwbfile: NWBFile, streams: dict[int, tuple[list[str], float]]
 
 
 def events_table(nwbfile: NWBFile) -> pd.DataFrame:
-    """Runs (``trial_type = run``), trials (``trial_type`` = paradigm) and the pulses of the
+    """Runs (``trial_type = run``), trials (``trial_type`` = experimental protocol) and the pulses of the
     trigger lines (``trial_type`` = role, ``ttl_line``) on the session time axis."""
     tables = []
     if "trigger_pulses" in nwbfile.intervals:
@@ -220,7 +220,7 @@ def events_table(nwbfile: NWBFile) -> pd.DataFrame:
         trials = nwbfile.trials.to_dataframe()
         events = pd.DataFrame({
             "onset": trials.start_time, "duration": trials.stop_time - trials.start_time,
-            "trial_type": trials.paradigm,
+            "trial_type": trials.experimental_protocol,
         })
         tables.append(pd.concat([events, trials.drop(columns=["start_time", "stop_time"])], axis=1))
     if not tables:
@@ -237,7 +237,7 @@ def events_json(nwbfile: NWBFile, table: pd.DataFrame) -> dict:
     columns: dict[str, Any] = {
         "onset": {"Description": "start on the session time axis (NWB file times)", "Units": "s"},
         "duration": {"Units": "s"},
-        "trial_type": {"Description": "'run' for a whole run, otherwise the paradigm of the trial"},
+        "trial_type": {"Description": "'run' for a whole run, otherwise the experimental protocol of the trial"},
         "run": {"Description": "run name (NWB epoch tag)"},
         "ttl_line": {"Description": "TTL line of a trigger pulse (1-based)"},
     }
@@ -245,7 +245,7 @@ def events_json(nwbfile: NWBFile, table: pd.DataFrame) -> dict:
         lines = nwbfile.processing["events"]["trigger_lines"].to_dataframe()
         levels = {"run": "a whole run"}
         if nwbfile.trials is not None:
-            levels.update({str(p): f"trial of paradigm {p}" for p in sorted(set(nwbfile.trials["paradigm"][:]))})
+            levels.update({str(p): f"trial of experimental protocol {p}" for p in sorted(set(nwbfile.trials["experimental_protocol"][:]))})
         levels.update(dict(zip(lines.role, lines.meaning)))
         columns["trial_type"]["Levels"] = levels
         columns["duration"]["Description"] = "n/a for a pulse without end in the recording"
@@ -283,7 +283,7 @@ def ecephys_json(nwbfile: NWBFile, power_line_frequency: float | str,
         "RecordingType": "discontinuous" if len(epochs) > 1 else "continuous",
         "BodyPart": "BRAIN",
         "SampleEnvironment": "in vivo",
-        "TaskName": ", ".join(sorted(set(nwbfile.trials["paradigm"][:]))) if nwbfile.trials is not None else None,
+        "TaskName": ", ".join(sorted(set(nwbfile.trials["experimental_protocol"][:]))) if nwbfile.trials is not None else None,
         "TaskDescription": nwbfile.session_description,
     }
     return {k: v for k, v in data.items() if v is not None}
@@ -343,16 +343,16 @@ def file_start_time(nwbfile: NWBFile) -> str:
     return start.isoformat(timespec="milliseconds")
 
 
-def write_bids_sidecars(nwb_path: Path, root: Path, subject: str, session: str,
+def write_bids_sidecars(nwb_path: Path, root: Path, subject: str, recording_session: str,
                         power_line_frequency: float | str = 50.0, dataset_name: str | None = None) -> None:
     """Write the sidecar files of the NWB file at ``nwb_path`` and update the dataset-level files."""
     from pynwb import NWBHDF5IO
 
     with NWBHDF5IO(str(nwb_path), "r") as io:
-        write_sidecars(io.read(), nwb_path, root, subject, session, power_line_frequency, dataset_name)
+        write_sidecars(io.read(), nwb_path, root, subject, recording_session, power_line_frequency, dataset_name)
 
 
-def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, session: str,
+def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, recording_session: str,
                    power_line_frequency: float | str = 50.0, dataset_name: str | None = None,
                    streams: dict[int, tuple[list[str], float]] | None = None,
                    lfp: tuple[float, str] | None = None) -> None:
@@ -377,44 +377,44 @@ def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, 
     _write_json(events_json(nwbfile, events), Path(f"{prefix}_events.json"))
     _upsert_tsv(root / "participants.tsv", _participant(nwbfile, subject), "participant_id")
     acq_time = file_start_time(nwbfile)
-    sessions = root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv"
-    if sessions.exists():  # the earliest file of the session (one file per run)
-        earlier = pd.read_csv(sessions, sep="\t", dtype=str, keep_default_na=False)
-        times = earlier[earlier.session_id == f"ses-{session}"].acq_time.tolist()
+    recording_sessions = root / f"sub-{subject}" / f"sub-{subject}_sessions.tsv"
+    if recording_sessions.exists():  # the earliest file of the session (one file per run)
+        earlier = pd.read_csv(recording_sessions, sep="\t", dtype=str, keep_default_na=False)
+        times = earlier[earlier.session_id == f"ses-{recording_session}"].acq_time.tolist()
         acq_time = min([acq_time, *[t for t in times if t != NA]])
-    _upsert_tsv(sessions, {"session_id": f"ses-{session}", "acq_time": acq_time}, "session_id")
-    session_dir = root / f"sub-{subject}" / f"ses-{session}"
+    _upsert_tsv(recording_sessions, {"session_id": f"ses-{recording_session}", "acq_time": acq_time}, "session_id")
+    recording_session_dir = root / f"sub-{subject}" / f"ses-{recording_session}"
     runs = [tags[0] for tags in nwbfile.epochs.to_dataframe().tags] if nwbfile.epochs is not None else []
     method = ""
     if nwbfile.epochs is not None and "start_time_method" in nwbfile.epochs.colnames:
         first = int(np.argmin(nwbfile.epochs.start_time[:]))
         method = nwbfile.epochs["start_time_method"][first]
-    _upsert_tsv(session_dir / f"sub-{subject}_ses-{session}_scans.tsv",
-                {"filename": data_path.relative_to(session_dir).as_posix(), "acq_time": file_start_time(nwbfile),
+    _upsert_tsv(recording_session_dir / f"sub-{subject}_ses-{recording_session}_scans.tsv",
+                {"filename": data_path.relative_to(recording_session_dir).as_posix(), "acq_time": file_start_time(nwbfile),
                  "runs": ", ".join(runs), "start_time_method": method}, "filename")
     _write_json({
         "acq_time": {"Description": "start of the first run of the file (its first sample): the recording's start "
                      "time, or a better one from the metadata plugin (start_time_method; ephysalis.metadata.runstart)"},
         "runs": {"Description": "runs of the recording in the file (session.toml run names)"},
         "start_time_method": {"Description": "how acq_time was obtained (n/a: the recording's start time)"},
-    }, session_dir / f"sub-{subject}_ses-{session}_scans.json")
+    }, recording_session_dir / f"sub-{subject}_ses-{recording_session}_scans.json")
     logger.info("wrote the BIDS sidecars of %s", data_path)
 
 
-def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, session: str, run: int | None = None,
+def add_nwb_to_bids(nwb_path: Path, root: Path, subject: str, recording_session: str, run: int | None = None,
                     task: str | None = None, **kwargs: Any) -> Path:
     """Copy an existing session (or run) NWB file into the dataset at ``root`` and write its sidecars."""
-    target = ecephys_path(root, subject, session, run=run, task=task)
+    target = ecephys_path(root, subject, recording_session, run=run, task=task)
     if nwb_path.resolve() != target.resolve():
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.stem + ".partial.nwb")
         shutil.copyfile(nwb_path, tmp)
         tmp.replace(target)
-    write_bids_sidecars(target, root, subject, session, **kwargs)
+    write_bids_sidecars(target, root, subject, recording_session, **kwargs)
     return target
 
 
-def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, subject: str, session_label: str,
+def add_dh5_to_bids(recording_session: Any, work_dir: Path, dh5_path: Path, root: Path, subject: str, session_label: str,
                     config: Any = None, run: int | None = None, task: str | None = None, **kwargs: Any) -> Path:
     """Copy a session DH5 file (:mod:`ephysalis.formats.output.dh5`) into a BIDS-like dataset at ``root``
     (``_ecephys.dh5``, with its ``_trials.csv``/``_units.csv``) and write its sidecars."""
@@ -422,7 +422,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
 
     from ephysalis.formats.output.dh5 import sidecar_paths
     from ephysalis.processing.lfp import LFP_FILTERING
-    from ephysalis.formats.output.nwb import session_metadata_nwbfile
+    from ephysalis.formats.output.nwb import recording_session_metadata_nwbfile
 
     target = ecephys_path(root, subject, session_label, ".dh5", run=run, task=task)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -442,7 +442,7 @@ def add_dh5_to_bids(session: Any, work_dir: Path, dh5_path: Path, root: Path, su
                 rate = 1e9 / float(group.attrs["SamplePeriod"])
                 streams[row] = ([name], rate)
                 lfp = (rate, LFP_FILTERING)
-    nwbfile = session_metadata_nwbfile(session, work_dir, config, run_clock=run is not None)
+    nwbfile = recording_session_metadata_nwbfile(recording_session, work_dir, config, run_clock=run is not None)
     write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
     ignore = root / ".bidsignore"
     lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []

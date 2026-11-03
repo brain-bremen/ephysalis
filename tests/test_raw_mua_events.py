@@ -9,11 +9,11 @@ import scipy.signal as signal
 import spikeinterface.core as si
 
 import dh5io
-from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_SESSION, skip_if_no_data
+from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_RECORDING_SESSION, skip_if_no_data
 from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.output.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
-from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.base import open_recording_session
 from ephysalis.processing.mua import mua_folder
 
 OE_RUN = "experiment1_recording1"
@@ -51,8 +51,8 @@ def test_aux_raw_as_legacy_raw(oe_dh5):
 @pytest.fixture(scope="module")
 def crop_work(tmp_path_factory):
     work = tmp_path_factory.mktemp("crop")
-    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
-    assert main(["mua", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work), "--n-jobs", "1",
+    assert extract_all([str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work)]) == 0
+    assert main(["mua", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work), "--n-jobs", "1",
                  "--probes", "imec0"]) == 0
     return work
 
@@ -60,7 +60,7 @@ def crop_work(tmp_path_factory):
 def test_mua_matches_legacy_algorithm(crop_work):
     """filtfilt high-pass, rectification and anti-aliased decimation, as in the old converter."""
     mua = si.load(mua_folder(crop_work, CROP_RUN, "imec0"))
-    ap = open_session(SPIKEGLX_CROP_SESSION).run(CROP_RUN).get_recording("ap", "imec0")
+    ap = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION).run(CROP_RUN).get_recording("ap", "imec0")
     assert mua.sampling_frequency == 1000 and mua.get_num_channels() == ap.get_num_channels()
     channel = 5
     x = ap.get_traces(channel_ids=[ap.channel_ids[channel]], return_in_uV=True)[:, 0].astype(float)
@@ -77,16 +77,16 @@ def test_mua_and_events_in_nwb(crop_work):
     from pynwb import NWBHDF5IO
 
     path = crop_work / "crop.nwb"
-    assert main(["export", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(crop_work), "-o", str(path), "--raw"]) == 0
+    assert main(["export", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(crop_work), "-o", str(path), "--raw"]) == 0
     with NWBHDF5IO(str(path), "r") as io:
         nwbfile = io.read()
         series = nwbfile.processing["ecephys"]["MUA"][f"MUA_{CROP_RUN}_imec0"]
-        n_channels = open_session(SPIKEGLX_CROP_SESSION).run(CROP_RUN).get_recording("ap", "imec0").get_num_channels()
+        n_channels = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION).run(CROP_RUN).get_recording("ap", "imec0").get_num_channels()
         assert series.rate == pytest.approx(1000, rel=1e-4) and series.data.shape[1] == n_channels
         events = nwbfile.processing["events"]["events"].to_dataframe()
         assert (events.line == 7).all() and len(events) == 22
         raw = nwbfile.acquisition[f"ElectricalSeries_{CROP_RUN}_imec0"]
-        assert raw.data.shape == (open_session(SPIKEGLX_CROP_SESSION).run(CROP_RUN).get_recording("ap", "imec0")
+        assert raw.data.shape == (open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION).run(CROP_RUN).get_recording("ap", "imec0")
                                   .get_num_samples(), n_channels)
         aux = nwbfile.acquisition[f"aux_analog_{CROP_RUN}"]
         assert aux.unit == "volts" and aux.data.shape[1] == 8
@@ -95,7 +95,7 @@ def test_mua_and_events_in_nwb(crop_work):
 @needs_dh5_spikes
 def test_mua_in_dh5(crop_work):
     path = crop_work / "crop.dh5"
-    assert main(["export", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(crop_work), "--output-format", "dh5",
+    assert main(["export", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(crop_work), "--output-format", "dh5",
                  "-o", str(path)]) == 0
     mua = si.load(mua_folder(crop_work, CROP_RUN, "imec0"))
     with h5py.File(path, "r") as file:
@@ -108,14 +108,14 @@ def test_mua_in_dh5(crop_work):
 
 
 @skip_if_no_data
-def test_several_sessions(tmp_path):
-    sessions = [str(SPIKEGLX_CROP_SESSION), str(DATA_FOLDER)]
-    assert extract_all([*sessions, "--work-dir", str(tmp_path / "w")]) == 2  # needs {session}
-    assert extract_all([*sessions, "--work-dir", str(tmp_path / "{session}")]) == 0
-    for session in (SPIKEGLX_CROP_SESSION, DATA_FOLDER):
-        assert (tmp_path / session.name / "trials").is_dir()
-        assert len(pd.read_csv(next((tmp_path / session.name / "events").glob("*.csv"))))
+def test_several_recording_sessions(tmp_path):
+    recording_sessions = [str(SPIKEGLX_CROP_RECORDING_SESSION), str(DATA_FOLDER)]
+    assert extract_all([*recording_sessions, "--work-dir", str(tmp_path / "w")]) == 2  # needs {session}
+    assert extract_all([*recording_sessions, "--work-dir", str(tmp_path / "{session}")]) == 0
+    for recording_session in (SPIKEGLX_CROP_RECORDING_SESSION, DATA_FOLDER):
+        assert (tmp_path / recording_session.name / "trials").is_dir()
+        assert len(pd.read_csv(next((tmp_path / recording_session.name / "events").glob("*.csv"))))
     # a failing session does not stop the others
-    assert extract_all([str(tmp_path / "missing"), str(SPIKEGLX_CROP_SESSION),
+    assert extract_all([str(tmp_path / "missing"), str(SPIKEGLX_CROP_RECORDING_SESSION),
                  "--work-dir", str(tmp_path / "again_{session}")]) == 1
-    assert (tmp_path / f"again_{SPIKEGLX_CROP_SESSION.name}" / "trials").is_dir()
+    assert (tmp_path / f"again_{SPIKEGLX_CROP_RECORDING_SESSION.name}" / "trials").is_dir()

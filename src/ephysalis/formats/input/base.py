@@ -2,7 +2,7 @@
 
 Input formats are plugins (:class:`ephysalis.plugins.InputFormat` and its optional capabilities,
 entry point group ``ephysalis.input_formats``): typically a module of functions that turns a
-session folder into a :class:`~ephysalis.session.model.Session` and hands out lazy spikeinterface
+session folder into a :class:`~ephysalis.recording_session.model.Session` and hands out lazy spikeinterface
 recordings for each stream. Everything downstream (clock alignment, sorting, LFP, writers) only
 talks to that interface.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from ephysalis.plugins import INPUT_FORMAT_GROUP, InputFormat, available, get_plugin
-from ephysalis.session.model import Session
+from ephysalis.recording_session.model import RecordingSession
 
 
 def keep_lines(events: pd.DataFrame, lines: Collection[int] | None) -> pd.DataFrame:
@@ -25,16 +25,16 @@ def keep_lines(events: pd.DataFrame, lines: Collection[int] | None) -> pd.DataFr
     return events[events["line"].isin(list(lines))].reset_index(drop=True)
 
 
-def open_session(session_path: str | Path, format_name: str | None = None) -> Session:
+def open_recording_session(recording_session_path: str | Path, format_name: str | None = None) -> RecordingSession:
     """Open a session, detecting the input format unless ``format_name`` is given."""
-    session_path = Path(session_path)
-    if not session_path.is_dir():
-        raise NotADirectoryError(session_path)
+    recording_session_path = Path(recording_session_path)
+    if not recording_session_path.is_dir():
+        raise NotADirectoryError(recording_session_path)
     if format_name is not None:
-        return get_plugin(INPUT_FORMAT_GROUP, format_name).open_session(session_path)
+        return get_plugin(INPUT_FORMAT_GROUP, format_name).open_recording_session(recording_session_path)
     for name in available(INPUT_FORMAT_GROUP):
         reader: InputFormat = get_plugin(INPUT_FORMAT_GROUP, name)
-        if reader.can_read_session_folder(session_path):
-            return reader.open_session(session_path)
-    raise ValueError(f"Could not detect the input format of {session_path}. Available formats: "
+        if reader.can_read_recording_session_folder(recording_session_path):
+            return reader.open_recording_session(recording_session_path)
+    raise ValueError(f"Could not detect the input format of {recording_session_path}. Available formats: "
                      f"{available(INPUT_FORMAT_GROUP)}")

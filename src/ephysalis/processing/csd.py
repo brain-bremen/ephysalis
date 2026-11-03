@@ -33,8 +33,8 @@ from spikeinterface.core import BaseRecording
 from spikeinterface.preprocessing.basepreprocessor import BasePreprocessor, BasePreprocessorSegment
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import CsdConfig
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import CsdConfig
 
 logger = logging.getLogger(__name__)
 

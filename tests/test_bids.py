@@ -5,16 +5,16 @@ import json
 import pandas as pd
 import pytest
 
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 from ephysalis.formats.output.bids import add_nwb_to_bids, bids_labels
-from ephysalis.formats.input.base import open_session
-from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephysalis.session.config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_recording_session_nwb
+from ephysalis.recording_session.config import ProbeConfig, SubjectConfig, default_recording_session_config
 from ephysalis.timeline.clocks import synchronize_run
 from ephysalis.timeline.steps import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 
-SUBJECT, SESSION = "SOMxCD1172", "20250109crop"
+SUBJECT, RECORDING_SESSION = "SOMxCD1172", "20250109crop"
 
 
 def test_bids_labels():
@@ -24,15 +24,15 @@ def test_bids_labels():
 
 @pytest.fixture(scope="module")
 def bids_root(work_dir, tmp_path_factory):  # noqa: F811
-    session = open_session(SPIKEGLX_CROP_SESSION)
-    config = default_session_config(session)
+    recording_session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    config = default_recording_session_config(recording_session)
     config.subject = SubjectConfig(species="Mus musculus", sex="F", age="P90D")
     config.probes["imec0"] = ProbeConfig(area="V1", insertion_depth_um=850, bad_channels=[1])
-    run = session.run(RUN)
+    run = recording_session.run(RUN)
     syncs = {RUN: synchronize_run(run, aux_channel_map(run, config))}
-    nwb = write_session_nwb(session, work_dir, work_dir / "bids_source.nwb", config, syncs)
+    nwb = write_recording_session_nwb(recording_session, work_dir, work_dir / "bids_source.nwb", config, syncs)
     root = tmp_path_factory.mktemp("bids")
-    add_nwb_to_bids(nwb, root, SUBJECT, SESSION)
+    add_nwb_to_bids(nwb, root, SUBJECT, RECORDING_SESSION)
     return root
 
 
@@ -41,7 +41,7 @@ def _tsv(path):
 
 
 def _ecephys(root, suffix):
-    return root / f"sub-{SUBJECT}" / f"ses-{SESSION}" / "ecephys" / f"sub-{SUBJECT}_ses-{SESSION}_{suffix}"
+    return root / f"sub-{SUBJECT}" / f"ses-{RECORDING_SESSION}" / "ecephys" / f"sub-{SUBJECT}_ses-{RECORDING_SESSION}_{suffix}"
 
 
 def test_dataset_files(bids_root):
@@ -50,8 +50,8 @@ def test_dataset_files(bids_root):
     participants = _tsv(bids_root / "participants.tsv")
     assert participants.to_dict("records") == [{"participant_id": f"sub-{SUBJECT}", "species": "Mus musculus",
                                                 "sex": "F", "age": "P90D", "strain": "n/a", "genotype": "n/a"}]
-    sessions = _tsv(bids_root / f"sub-{SUBJECT}" / f"sub-{SUBJECT}_sessions.tsv")
-    assert list(sessions.session_id) == [f"ses-{SESSION}"]
+    recording_sessions = _tsv(bids_root / f"sub-{SUBJECT}" / f"sub-{SUBJECT}_sessions.tsv")
+    assert list(recording_sessions.session_id) == [f"ses-{RECORDING_SESSION}"]
     assert _ecephys(bids_root, "ecephys.nwb").exists()
 
 
@@ -96,7 +96,7 @@ def test_events(bids_root, work_dir):  # noqa: F811
 
 
 def test_rerun_replaces_rows(bids_root):
-    add_nwb_to_bids(_ecephys(bids_root, "ecephys.nwb"), bids_root, SUBJECT, SESSION)
+    add_nwb_to_bids(_ecephys(bids_root, "ecephys.nwb"), bids_root, SUBJECT, RECORDING_SESSION)
     assert len(_tsv(bids_root / "participants.tsv")) == 1
     assert len(_tsv(bids_root / f"sub-{SUBJECT}" / f"sub-{SUBJECT}_sessions.tsv")) == 1
 

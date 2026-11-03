@@ -37,8 +37,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Session
-    from ephysalis.session.config import SessionConfig
+    from ephysalis.recording_session.model import RecordingSession
+    from ephysalis.recording_session.config import RecordingSessionConfig
 
 RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
@@ -124,23 +124,23 @@ def environment() -> dict[str, Any]:
             "plugin_sources": {p: s for p in plugin_packages() if (s := package_source(p)) is not None}}
 
 
-def input_fingerprint(session_path: Path, exclude: list[Path] | None = None) -> dict[str, dict[str, Any]]:
+def input_fingerprint(recording_session_path: Path, exclude: list[Path] | None = None) -> dict[str, dict[str, Any]]:
     """``{relative path: {size, sha256}}`` of the files of a session (``sha256`` for files up
     to :data:`HASH_MAX_BYTES`), leaving out the folders ``exclude`` (e.g. the work dir)."""
     excluded = [p.resolve() for p in exclude or []]
     files = {}
-    for path in sorted(session_path.rglob("*")):
+    for path in sorted(recording_session_path.rglob("*")):
         if not path.is_file() or any(path.resolve().is_relative_to(e) for e in excluded):
             continue
         size = path.stat().st_size
         entry: dict[str, Any] = {"size": size}
         if size <= HASH_MAX_BYTES:
             entry["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-        files[path.relative_to(session_path).as_posix()] = entry
+        files[path.relative_to(recording_session_path).as_posix()] = entry
     return files
 
 
-def step_record(step: str, session: Session, config: SessionConfig | None, config_path: Path | None,
+def step_record(step: str, recording_session: RecordingSession, config: RecordingSessionConfig | None, config_path: Path | None,
                 options: dict[str, Any], argv: list[str] | None = None,
                 work_dir: Path | None = None) -> dict[str, Any]:
     """Record of one invocation of ``step`` (``config`` None: defaults from the recording)."""
@@ -148,13 +148,13 @@ def step_record(step: str, session: Session, config: SessionConfig | None, confi
         "step": step,
         "time": datetime.now(UTC).isoformat(timespec="seconds"),
         "argv": ["ephysalis", *argv] if argv is not None else None,
-        "session": str(session.path),
+        "recording_session": str(recording_session.path),
         "config_file": str(config_path) if config_path else None,
         "config": config.model_dump(mode="json", exclude_none=True) if config else None,
         "options": options,
         "software": software_versions(),
         "environment": environment(),
-        "inputs": input_fingerprint(session.path, [work_dir] if work_dir else None),
+        "inputs": input_fingerprint(recording_session.path, [work_dir] if work_dir else None),
     }
 
 
@@ -245,14 +245,14 @@ def read_processing_record(path: str | Path) -> dict[str, Any] | None:
     return json.loads(text.decode() if isinstance(text, bytes) else str(text))
 
 
-def record_config(record: dict[str, Any], step: str = "export") -> SessionConfig | None:
+def record_config(record: dict[str, Any], step: str = "export") -> RecordingSessionConfig | None:
     """``session.toml`` used by ``step`` (its last invocation), upgraded to the current schema."""
-    from ephysalis.session.config import session_config_from_dict
+    from ephysalis.recording_session.config import recording_session_config_from_dict
 
     entry = record["export"] if step == "export" else (record["steps"].get(step) or [None])[-1]
     if entry is None or entry.get("config") is None:
         return None
-    return session_config_from_dict(entry["config"], source=f"processing record ({step})")
+    return recording_session_config_from_dict(entry["config"], source=f"processing record ({step})")
 
 
 def replay_invocations(record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -265,19 +265,19 @@ def replay_invocations(record: dict[str, Any]) -> list[dict[str, Any]]:
 def _step_parser(step: str) -> Any:
     import argparse
 
-    from ephysalis.cli.session_commands import add_session_commands
+    from ephysalis.cli.recording_session_commands import add_recording_session_commands
 
     parser = argparse.ArgumentParser(prog="ephysalis")
     sub = parser.add_subparsers(dest="command")
-    add_session_commands(sub)
+    add_recording_session_commands(sub)
     return sub.choices[step]
 
 
-def replay_argv(invocation: dict[str, Any], session: Path, work_dir: Path, config: Path | None) -> list[str]:
+def replay_argv(invocation: dict[str, Any], recording_session: Path, work_dir: Path, config: Path | None) -> list[str]:
     """Command line (without ``ephysalis``) that redoes ``invocation`` into ``work_dir``, with
     the session at ``session`` and the recorded config saved at ``config``."""
     options = dict(invocation["options"], work_dir=str(work_dir), config=str(config) if config else None)
-    argv = [invocation["step"], str(session)]  # positional: one session
+    argv = [invocation["step"], str(recording_session)]  # positional: one session
     for action in _step_parser(invocation["step"])._actions:
         if not action.option_strings or action.dest in _NOT_REPLAYED or action.dest == "help":
             continue
@@ -294,18 +294,18 @@ def replay_argv(invocation: dict[str, Any], session: Path, work_dir: Path, confi
     return argv
 
 
-def replay_commands(record: dict[str, Any], session: Path, work_dir: Path) -> list[tuple[list[str], dict | None]]:
+def replay_commands(record: dict[str, Any], recording_session: Path, work_dir: Path) -> list[tuple[list[str], dict | None]]:
     """``[(argv, config)]`` that redo the processing of an output: each invocation's command
     line and the raw ``session.toml`` it used (None: defaults from the recording). The
     caller writes the configs; :func:`write_replay_configs` does so."""
-    return [(replay_argv(inv, session, work_dir, None), inv.get("config")) for inv in replay_invocations(record)]
+    return [(replay_argv(inv, recording_session, work_dir, None), inv.get("config")) for inv in replay_invocations(record)]
 
 
-def write_replay_configs(record: dict[str, Any], session: Path, work_dir: Path) -> list[list[str]]:
+def write_replay_configs(record: dict[str, Any], recording_session: Path, work_dir: Path) -> list[list[str]]:
     """Write the configs of the recorded steps to ``work_dir`` (``session.toml``, or
     ``session_<n>.toml`` when the steps used different ones) and return the commands that
     redo the processing with them."""
-    from ephysalis.session.config import save_session_config, session_config_from_dict
+    from ephysalis.recording_session.config import save_recording_session_config, recording_session_config_from_dict
 
     invocations = replay_invocations(record)
     configs: list[dict] = []
@@ -316,9 +316,9 @@ def write_replay_configs(record: dict[str, Any], session: Path, work_dir: Path) 
     paths = []
     for i, data in enumerate(configs):
         path = work_dir / ("session.toml" if len(configs) == 1 else f"session_{i + 1}.toml")
-        save_session_config(session_config_from_dict(data, source="processing record"), path)
+        save_recording_session_config(recording_session_config_from_dict(data, source="processing record"), path)
         paths.append(path)
-    return [replay_argv(inv, session, work_dir, paths[configs.index(inv["config"])] if inv.get("config") else None)
+    return [replay_argv(inv, recording_session, work_dir, paths[configs.index(inv["config"])] if inv.get("config") else None)
             for inv in invocations]
 
 

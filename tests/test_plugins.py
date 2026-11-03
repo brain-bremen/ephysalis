@@ -58,7 +58,7 @@ def test_metadata_plugin_problems():
 
 
 def test_partly_provided_capability():
-    fmt = _input_format_module(can_read_session_folder=lambda session_path: False, open_session=lambda session_path: None,
+    fmt = _input_format_module(can_read_recording_session_folder=lambda recording_session_path: False, open_recording_session=lambda recording_session_path: None,
                   get_stream_recording=lambda run, kind, probe_id: None,
                   default_auxiliary_channel_roles=lambda run: None,
                   read_digital_line_edges=lambda run, lines: None)  # read_auxiliary_digital_line missing

@@ -1,35 +1,35 @@
 import pytest
 
-from ephysalis.session.config import (
+from ephysalis.recording_session.config import (
     AuxChannelMap,
-    default_session_config,
-    load_session_config,
-    save_session_config,
+    default_recording_session_config,
+    load_recording_session_config,
+    save_recording_session_config,
 )
-from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.base import open_recording_session
 
 RUNS = [("3_rfmapping_g0", "2025-01-09T13:27:45"), ("5_DoseResponse_g0", "2025-01-09T13:58:53")]
 
 
-def test_default_config_and_roundtrip(make_spikeglx_session, tmp_path):
-    session = open_session(make_spikeglx_session(runs=RUNS))
-    config = default_session_config(session)
+def test_default_config_and_roundtrip(make_spikeglx_recording_session, tmp_path):
+    recording_session = open_recording_session(make_spikeglx_recording_session(runs=RUNS))
+    config = default_recording_session_config(recording_session)
     assert config.subject_id == "SOMxCD1_172"
     assert config.included_runs == ["3_rfmapping_g0", "5_DoseResponse_g0"]
-    assert config.probes["imec0"].serial_number == session.runs[0].probes["imec0"].serial_number
+    assert config.probes["imec0"].serial_number == recording_session.runs[0].probes["imec0"].serial_number
     assert config.aux_channels == AuxChannelMap()
 
     config.probes["imec0"].bad_channels = [3, 191]
     path = tmp_path / "session.toml"
-    save_session_config(config, path)
-    assert load_session_config(path) == config
+    save_recording_session_config(config, path)
+    assert load_recording_session_config(path) == config
 
 
 def test_newer_schema_is_rejected(tmp_path):
     path = tmp_path / "session.toml"
     path.write_text('schema_version = 99\nsession_id = "x"\nsubject_id = "y"\n')
     with pytest.raises(ValueError, match="newer"):
-        load_session_config(path)
+        load_recording_session_config(path)
 
 
 def test_legacy_aux_defaults():
@@ -38,18 +38,18 @@ def test_legacy_aux_defaults():
 
 
 def test_schema_migration(tmp_path):
-    from ephysalis.session.schema import migrate
-    from ephysalis.session.config import SCHEMA_VERSION
+    from ephysalis.recording_session.schema import migrate
+    from ephysalis.recording_session.config import SCHEMA_VERSION
 
     path = tmp_path / "session.toml"
     path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n'
                     'stimulus_system = "vstim"\n')
-    config = load_session_config(path)
+    config = load_recording_session_config(path)
     assert config.schema_version == SCHEMA_VERSION == 8 and config.runs[0].name == "r"
     assert config.runs[0].metadata_plugin == "vstim"  # renamed in schema 8
     assert config.events.exclude_roles == ["sync", "wheel"]
     assert config.calibration.run is None and not config.line_noise.enabled
-    save_session_config(config, path)
+    save_recording_session_config(config, path)
     assert "schema_version = 8" in path.read_text()
 
     migrations = {1: lambda d: {k: v for k, v in d.items() if k != "a"} | {"b": d["a"]}, 2: lambda d: {**d, "b": d["b"] * 2}}

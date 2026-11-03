@@ -4,31 +4,31 @@ import numpy as np
 import pytest
 from spikeinterface.core import NumpySorting
 
-from ephysalis.formats.input.base import open_session
-from ephysalis.session.config import ProbeConfig
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.recording_session.config import ProbeConfig
 from ephysalis.sorting.spikes import RunSegment, concatenate_runs, cut_spikes, load_run_spikes, save_run_spikes, sorting_channels
-from ephysalis.session.model import StreamKind
+from ephysalis.recording_session.model import StreamKind
 from ephysalis.timeline.clocks import ClockMap, RunSync
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 
 RUN = "3_rfmappingFine_g0"
 
 
 @pytest.fixture(scope="module")
-def session():
-    return open_session(SPIKEGLX_CROP_SESSION)
+def recording_session():
+    return open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
 
 
-def test_sorting_channels_by_depth_and_bad_channels(session):
-    recording = session.run(RUN).get_recording(StreamKind.AP, "imec0")  # channels 82-89, y 820..880 um
+def test_sorting_channels_by_depth_and_bad_channels(recording_session):
+    recording = recording_session.run(RUN).get_recording(StreamKind.AP, "imec0")  # channels 82-89, y 820..880 um
     assert sorting_channels(recording, None).size == 8
     selected = sorting_channels(recording, ProbeConfig(insertion_depth_um=850, bad_channels=[1]))
     assert list(selected) == ["imec0.ap#AP82", "imec0.ap#AP84", "imec0.ap#AP85"]
 
 
-def test_concatenate_runs(session):
-    recording, segments = concatenate_runs(session, "imec1", [RUN, RUN], ProbeConfig(insertion_depth_um=760))  # channels 72-79, y 720..780 um
-    n = session.run(RUN).get_recording(StreamKind.AP, "imec1").get_num_samples()
+def test_concatenate_runs(recording_session):
+    recording, segments = concatenate_runs(recording_session, "imec1", [RUN, RUN], ProbeConfig(insertion_depth_um=760))  # channels 72-79, y 720..780 um
+    n = recording_session.run(RUN).get_recording(StreamKind.AP, "imec1").get_num_samples()
     assert segments == [RunSegment(RUN, 0, n), RunSegment(RUN, n, n)]
     assert recording.get_num_samples() == 2 * n
     assert recording.get_num_channels() == 4
@@ -63,11 +63,11 @@ def test_run_spikes_roundtrip(tmp_path):
 
 
 def test_sorter_settings_precedence():
-    from ephysalis.session.config import SessionConfig, SortingConfig
+    from ephysalis.recording_session.config import RecordingSessionConfig, SortingConfig
     from ephysalis.sorting.spikes import sorter_settings
 
     assert sorter_settings(None, "p0") == ("kilosort4", {"clear_cache": True})
-    config = SessionConfig(session_id="s", subject_id="m", sorting=SortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
+    config = RecordingSessionConfig(session_id="s", subject_id="m", sorting=SortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
     config.probes["p1"] = ProbeConfig(sorting=SortingConfig(sorter="mountainsort5", params={"detect_threshold": 6}))
     assert sorter_settings(config, "p0") == ("kilosort4", {"clear_cache": True, "Th_universal": 8})
     assert sorter_settings(config, "p1") == ("mountainsort5", {"detect_threshold": 6})

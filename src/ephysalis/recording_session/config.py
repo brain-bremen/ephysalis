@@ -5,7 +5,7 @@ The session config replaces the legacy Excel sheets (font colour = run included)
 created once per session (``ephysalis init``) and can be edited by hand. The outputs embed
 the config they were made with (:mod:`ephysalis.provenance`).
 
-Schema versions (``schema_version``, see :mod:`ephysalis.session.schema`):
+Schema versions (``schema_version``, see :mod:`ephysalis.recording_session.schema`):
 
 1. first version
 2. ``lab``, ``institution``, ``[subject]``, ``[sorting]``; probes: ``stream``, ``channels``,
@@ -29,11 +29,11 @@ from typing import Any, Literal
 import tomli_w
 from pydantic import BaseModel, Field
 
-from ephysalis.session.schema import Migration, migrate
-from ephysalis.session.model import Session
+from ephysalis.recording_session.schema import Migration, migrate
+from ephysalis.recording_session.model import RecordingSession
 
 SCHEMA_VERSION = 8
-SESSION_CONFIG_FILENAME = "session.toml"
+RECORDING_SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
     1: lambda data: data,  # 2 only added fields, all with defaults
@@ -268,7 +268,7 @@ class LineNoiseConfig(BaseModel):
                                           "of on the reference as recorded (dh_remove_50hz)")
 
 
-class SessionConfig(BaseModel):
+class RecordingSessionConfig(BaseModel):
     schema_version: int = SCHEMA_VERSION
     session_id: str
     subject_id: str
@@ -302,41 +302,41 @@ class SessionConfig(BaseModel):
         return [r.name for r in self.runs if r.include]
 
 
-def save_session_config(config: SessionConfig, path: str | Path) -> None:
+def save_recording_session_config(config: RecordingSessionConfig, path: str | Path) -> None:
     data = config.model_dump(mode="json", exclude_none=True)
     Path(path).write_text(tomli_w.dumps(data), encoding="utf-8")
 
 
-def session_config_from_dict(data: dict[str, Any], source: object = "session config") -> SessionConfig:
+def recording_session_config_from_dict(data: dict[str, Any], source: object = "session config") -> RecordingSessionConfig:
     """Config from raw data of any supported schema version (older ones are migrated)."""
-    return SessionConfig.model_validate(migrate(data, SCHEMA_VERSION, MIGRATIONS, source=source))
+    return RecordingSessionConfig.model_validate(migrate(data, SCHEMA_VERSION, MIGRATIONS, source=source))
 
 
-def load_session_config(path: str | Path) -> SessionConfig:
+def load_recording_session_config(path: str | Path) -> RecordingSessionConfig:
     data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-    return session_config_from_dict(data, source=path)
+    return recording_session_config_from_dict(data, source=path)
 
 
-_SESSION_NAME_RE = re.compile(r"^(?P<subject>.+?)_(?P<date>\d{8})(?:_|$)")
+_RECORDING_SESSION_NAME_RE = re.compile(r"^(?P<subject>.+?)_(?P<date>\d{8})(?:_|$)")
 
 
-def default_session_config(session: Session) -> SessionConfig:
+def default_recording_session_config(recording_session: RecordingSession) -> RecordingSessionConfig:
     """Config with all runs included and probe metadata taken from the recording files."""
-    match = _SESSION_NAME_RE.match(session.name)
-    subject = match["subject"] if match else session.name
+    match = _RECORDING_SESSION_NAME_RE.match(recording_session.name)
+    subject = match["subject"] if match else recording_session.name
 
     probes: dict[str, ProbeConfig] = {}
-    for run in session.runs:
+    for run in recording_session.runs:
         for pid, info in run.probes.items():
             probes.setdefault(pid, ProbeConfig(serial_number=info.serial_number))
 
-    with_aux = [r for r in session.runs if r.aux_stream is not None] or session.runs
-    aux_channels = session.format.default_auxiliary_channel_roles(with_aux[0] if with_aux else None)
-    return SessionConfig(
-        session_id=session.name,
+    with_aux = [r for r in recording_session.runs if r.aux_stream is not None] or recording_session.runs
+    aux_channels = recording_session.format.default_auxiliary_channel_roles(with_aux[0] if with_aux else None)
+    return RecordingSessionConfig(
+        session_id=recording_session.name,
         subject_id=subject,
-        input_format=session.format.input_format_name,
-        runs=[RunConfig(name=run.name) for run in session.runs],
+        input_format=recording_session.format.input_format_name,
+        runs=[RunConfig(name=run.name) for run in recording_session.runs],
         probes=probes,
         aux_channels=aux_channels,
     )

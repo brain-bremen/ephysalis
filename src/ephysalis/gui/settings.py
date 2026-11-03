@@ -15,12 +15,12 @@ def _q() -> QSettings:
     return QSettings("brain-bremen", "OEcon")
 
 
-def get_last_session_dir() -> str | None:
+def get_last_recording_session_dir() -> str | None:
     v = _q().value("last_session_dir")
     return str(v) if v and Path(str(v)).is_dir() else None
 
 
-def set_last_session_dir(path: Path) -> None:
+def set_last_recording_session_dir(path: Path) -> None:
     _q().setValue("last_session_dir", str(path.parent))
 
 
@@ -33,7 +33,7 @@ def set_last_config_path(path: str) -> None:
     _q().setValue("last_config_path", path)
 
 
-def _pick_session_dirs_windows(
+def _pick_recording_session_dirs_windows(
     parent: QWidget, title: str, initial: str
 ) -> "list[Path] | None":
     """
@@ -408,7 +408,7 @@ def _pick_session_dirs_windows(
         return None
 
 
-def _pick_session_dirs_qt_fallback(
+def _pick_recording_session_dirs_qt_fallback(
     parent: QWidget, title: str, initial: str
 ) -> list[Path]:
     """Non-native Qt folder picker with multi-select. Used on Linux/Mac."""
@@ -426,7 +426,7 @@ def _pick_session_dirs_qt_fallback(
     return [Path(p) for p in dialog.selectedFiles()]
 
 
-def pick_session_dirs(
+def pick_recording_session_dirs(
     parent: QWidget,
     title: str = "Select Open Ephys session folder(s)",
     initial: str = "",
@@ -439,9 +439,9 @@ def pick_session_dirs(
     Falls back to a non-native Qt dialog on Linux/Mac (or if COM initialisation fails).
     """
     if sys.platform == "win32":
-        result = _pick_session_dirs_windows(parent, title, initial)
+        result = _pick_recording_session_dirs_windows(parent, title, initial)
         if result is not None:
             return result
         # Fall through to Qt fallback if COM approach failed for any reason
 
-    return _pick_session_dirs_qt_fallback(parent, title, initial)
+    return _pick_recording_session_dirs_qt_fallback(parent, title, initial)

@@ -4,7 +4,7 @@
     clock of every stream on the run's reference clock (:func:`align_run_clocks`), from the
     sync-pulse edges (cached in ``<work>/sync``); report ``<work>/clocks/<run>.json``
 ``ephysalis extract-trials``
-    trial tables of all paradigms of the metadata plugin and the run start time from its clock
+    trial tables of all experimental protocols of the metadata plugin and the run start time from its clock
     (:func:`extract_run_trials`; ``trials/``, ``run_start/``)
 ``ephysalis extract-events``
     edges of the digital lines and event words (:mod:`ephysalis.timeline.events`; ``events/``)
@@ -29,10 +29,10 @@ import numpy as np
 import pandas as pd
 
 from ephysalis.timeline.auxsignals import AuxSignals, bin_means_on_reference, wheel_speed
-from ephysalis.session.model import Run, StreamKind
+from ephysalis.recording_session.model import Run, StreamKind
 from ephysalis.timeline.events import run_events
 from ephysalis.metadata.runstart import RunStart
-from ephysalis.session.config import AuxChannelMap, EventsConfig, SessionConfig
+from ephysalis.recording_session.config import AuxChannelMap, EventsConfig, RecordingSessionConfig
 from ephysalis.metadata.base import run_start_time, run_trial_tables
 from ephysalis.timeline.clocks import AUX, RunSync, SyncEdgeCache, synchronize_run
 
@@ -44,38 +44,38 @@ WORK_DIR_NAME = "ephysalis"
 OLD_WORK_DIR_NAME = "ephyscon"  # before the rename to ephysalis
 
 
-def default_work_dir(session_path: str | Path) -> Path:
+def default_work_dir(recording_session_path: str | Path) -> Path:
     """``<session>/ephysalis``, or ``<session>/ephyscon`` of an existing work dir made before the rename."""
-    new, old = Path(session_path) / WORK_DIR_NAME, Path(session_path) / OLD_WORK_DIR_NAME
+    new, old = Path(recording_session_path) / WORK_DIR_NAME, Path(recording_session_path) / OLD_WORK_DIR_NAME
     return old if old.is_dir() and not new.exists() else new
 
 
-def default_sync_cache(session_path: str | Path) -> SyncEdgeCache:
-    return SyncEdgeCache(default_work_dir(session_path) / "sync")
+def default_sync_cache(recording_session_path: str | Path) -> SyncEdgeCache:
+    return SyncEdgeCache(default_work_dir(recording_session_path) / "sync")
 
 
 @dataclass
 class RunTiming:
     run_name: str
     sync: RunSync
-    trials: dict[str, pd.DataFrame] = field(default_factory=dict)  # paradigm name -> trials
+    trials: dict[str, pd.DataFrame] = field(default_factory=dict)  # experimental protocol name -> trials
     running_speed: np.ndarray | None = None  # cm/s at RUNNING_SPEED_RATE, sample k = (k, k+1] ms
     eye_position: np.ndarray | None = None  # (samples, 2) x/y in V at RUNNING_SPEED_RATE, same bins
     events: pd.DataFrame | None = None  # see ephysalis.timeline.events
     run_start: RunStart | None = None  # better start time from the metadata plugin (ephysalis.metadata.runstart)
 
-    def trial_samples(self, paradigm: str, stream: str, column: str = "start_time") -> np.ndarray:
-        """Trial times of a paradigm as fractional sample indices of another stream."""
-        return self.sync.to_samples(stream, self.trials[paradigm][column].to_numpy())
+    def trial_samples(self, experimental_protocol: str, stream: str, column: str = "start_time") -> np.ndarray:
+        """Trial times of a experimental protocol as fractional sample indices of another stream."""
+        return self.sync.to_samples(stream, self.trials[experimental_protocol][column].to_numpy())
 
 
-def aux_channel_map(run: Run, config: SessionConfig | None = None) -> AuxChannelMap:
+def aux_channel_map(run: Run, config: RecordingSessionConfig | None = None) -> AuxChannelMap:
     if config is not None:
         return config.aux_channels
     return run.format.default_auxiliary_channel_roles(run)
 
 
-def align_run_clocks(run: Run, config: SessionConfig | None = None,
+def align_run_clocks(run: Run, config: RecordingSessionConfig | None = None,
                      sync_cache: SyncEdgeCache | None = None) -> RunSync:
     """Clock of every stream of a run on the reference clock. Sync edges are taken from (and
     added to) ``sync_cache`` if given; without a cache they are extracted from the data every time."""
@@ -106,13 +106,13 @@ def write_clock_report(work_dir: Path, run_name: str, sync: RunSync) -> Path:
     return path
 
 
-def _aux(run: Run, config: SessionConfig | None) -> AuxSignals | None:
+def _aux(run: Run, config: RecordingSessionConfig | None) -> AuxSignals | None:
     return AuxSignals(run, aux_channel_map(run, config)) if run.aux_stream is not None else None
 
 
-def extract_run_trials(run: Run, sync: RunSync, config: SessionConfig | None = None
+def extract_run_trials(run: Run, sync: RunSync, config: RecordingSessionConfig | None = None
                        ) -> tuple[dict[str, pd.DataFrame], RunStart | None]:
-    """``(trial table per paradigm, run start time)`` from the run's metadata plugin."""
+    """``(trial table per experimental protocol, run start time)`` from the run's metadata plugin."""
     plugin, tables = run_trial_tables(run, sync, _aux(run, config), config)
     if plugin is None:
         logger.info("Run %s: no metadata plugin recognises it (no trials)", run.name)
@@ -120,12 +120,12 @@ def extract_run_trials(run: Run, sync: RunSync, config: SessionConfig | None = N
     return tables, run_start_time(plugin, run, tables)
 
 
-def extract_run_events(run: Run, sync: RunSync, config: SessionConfig | None = None) -> pd.DataFrame:
+def extract_run_events(run: Run, sync: RunSync, config: RecordingSessionConfig | None = None) -> pd.DataFrame:
     """Edges of the digital lines and event words (:func:`ephysalis.timeline.events.run_events`)."""
     return run_events(run, sync, aux_channel_map(run, config), config.events if config is not None else EventsConfig())
 
 
-def extract_run_behavior(run: Run, sync: RunSync, config: SessionConfig | None = None
+def extract_run_behavior(run: Run, sync: RunSync, config: RecordingSessionConfig | None = None
                          ) -> tuple[np.ndarray | None, np.ndarray | None]:
     """``(running speed, eye position)`` at RUNNING_SPEED_RATE on the reference clock, None
     where the run has no wheel / eye channels ([aux_channels])."""
@@ -146,7 +146,7 @@ def extract_run_behavior(run: Run, sync: RunSync, config: SessionConfig | None =
 
 
 def extract_run_timing(
-    run: Run, config: SessionConfig | None = None, sync_cache: SyncEdgeCache | None = None
+    run: Run, config: RecordingSessionConfig | None = None, sync_cache: SyncEdgeCache | None = None
 ) -> RunTiming:
     """Clock alignment, trials, events and behaviour signals of a run in one go (``ephysalis
     inspect --timing``)."""

@@ -13,8 +13,8 @@ import pytest
 from conftest import OE_TOOLS_DATA, skip_if_no_oe_tools_data
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.formats.input.base import open_session
-from ephysalis.session.model import StreamKind
+from ephysalis.formats.input.base import open_recording_session
+from ephysalis.recording_session.model import StreamKind
 
 FORMATS = ["v0.6.7_Binary", "v0.6.7_NWB", "v0.6.7_OpenEphys"]
 NODE = "Record Node 105"
@@ -23,16 +23,16 @@ FIRST_SAMPLE = 40091  # Binary and NWB
 
 
 def _run(fmt):
-    return open_session(OE_TOOLS_DATA / fmt / NODE).runs[0]
+    return open_recording_session(OE_TOOLS_DATA / fmt / NODE).runs[0]
 
 
 @skip_if_no_oe_tools_data
 @pytest.mark.parametrize("fmt", FORMATS)
 def test_discovery(fmt):
-    session = open_session(OE_TOOLS_DATA / fmt / NODE)
-    assert session.format.input_format_name == "openephys"
-    run = session.runs[0]
-    assert [r.name for r in session.runs] == ["experiment1_recording1"]
+    recording_session = open_recording_session(OE_TOOLS_DATA / fmt / NODE)
+    assert recording_session.format.input_format_name == "openephys"
+    run = recording_session.runs[0]
+    assert [r.name for r in recording_session.runs] == ["experiment1_recording1"]
     assert run.streams == [STREAM] and run.aux_stream == STREAM and run.probes == {}
     recording = run.get_recording(StreamKind.AUX)
     assert recording.get_num_channels() == 16 and recording.sampling_frequency == 40000
@@ -57,11 +57,11 @@ def test_binary_and_nwb_hold_the_same_samples():
 @skip_if_no_oe_tools_data
 def test_legacy_samples_as_package_loader():
     """Lazy reads across the 1024-sample records equal open-ephys-python-tools' (in-memory) loader."""
-    from open_ephys.analysis import Session
+    from open_ephys.analysis import RecordingSession
 
     run = _run(FORMATS[2])
     recording = run.get_recording(StreamKind.AUX)
-    expected = Session(str(OE_TOOLS_DATA / FORMATS[2])).recordnodes[1].recordings[0].continuous[0].samples
+    expected = RecordingSession(str(OE_TOOLS_DATA / FORMATS[2])).recordnodes[1].recordings[0].continuous[0].samples
     np.testing.assert_array_equal(recording.get_traces(), expected)
     np.testing.assert_array_equal(recording.get_traces(start_frame=1000, end_frame=3100, channel_ids=["CH16", "CH2"]),
                                   expected[1000:3100][:, [15, 1]])
@@ -105,13 +105,13 @@ def test_pipeline(fmt, tmp_path):
     (tmp_path / "session.toml").write_text(
         'schema_version = 3\nsession_id = "s"\nsubject_id = "m"\n'
         '[probes.probe0]\nstream = "File_Reader-100.example_data"\ngeometry = { file = "probe.json" }\n')
-    session = str(OE_TOOLS_DATA / fmt / NODE)
+    recording_session = str(OE_TOOLS_DATA / fmt / NODE)
     common = ["--work-dir", str(tmp_path), "--config", str(tmp_path / "session.toml")]
-    assert extract_all([session, *common]) == 0
-    assert main(["lfp", session, *common, "--n-jobs", "1"]) == 0
-    assert main(["mua", session, *common, "--n-jobs", "1"]) == 0
-    assert main(["export", session, *common, "-o", str(tmp_path / "out.nwb")]) == 0
-    assert main(["export", session, *common, "--output-format", "dh5", "--raw", "-o", str(tmp_path / "out.dh5")]) == 0
+    assert extract_all([recording_session, *common]) == 0
+    assert main(["lfp", recording_session, *common, "--n-jobs", "1"]) == 0
+    assert main(["mua", recording_session, *common, "--n-jobs", "1"]) == 0
+    assert main(["export", recording_session, *common, "-o", str(tmp_path / "out.nwb")]) == 0
+    assert main(["export", recording_session, *common, "--output-format", "dh5", "--raw", "-o", str(tmp_path / "out.dh5")]) == 0
     events = pd.read_csv(tmp_path / "events" / "experiment1_recording1.csv")
     assert (events.source == "word").sum() == len(_run(fmt).format.read_event_words(_run(fmt)))
     with h5py.File(tmp_path / "out.dh5") as f:
@@ -148,9 +148,9 @@ def _write_np_binary(root: Path, n_samples: int = 3000) -> Path:
 
 
 def test_neuropixels_probe_from_settings(tmp_path):
-    session = open_session(_write_np_binary(tmp_path / "np"))
-    run = session.runs[0]
-    assert session.probe_ids == ["ProbeA"] and run.probes["ProbeA"].has_lf
+    recording_session = open_recording_session(_write_np_binary(tmp_path / "np"))
+    run = recording_session.runs[0]
+    assert recording_session.probe_ids == ["ProbeA"] and run.probes["ProbeA"].has_lf
     assert run.aux_stream == "Record Node 101#NI-DAQmx-102.PXI-6221"
     ap = run.get_recording(StreamKind.AP, "ProbeA")
     assert ap.get_num_channels() == 384 and "SYNC" not in ap.channel_ids  # SYNC channel left out
@@ -174,7 +174,7 @@ def test_recording_is_serializable(tmp_path):
     """Parallel steps (LFP, MUA) rebuild recordings in worker processes from their kwargs."""
     from spikeinterface.core import load
 
-    run = open_session(_write_np_binary(tmp_path / "np")).runs[0]
+    run = open_recording_session(_write_np_binary(tmp_path / "np")).runs[0]
     ap = run.get_recording(StreamKind.AP, "ProbeA")
     again = load(ap.to_dict())
     np.testing.assert_array_equal(again.get_traces(end_frame=50), ap.get_traces(end_frame=50))

@@ -13,10 +13,10 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from conftest import DATA_FOLDER, SPIKEGLX_CROP_SESSION  # noqa: E402
-from ephysalis.gui import session_page  # noqa: E402
+from conftest import DATA_FOLDER, SPIKEGLX_CROP_RECORDING_SESSION  # noqa: E402
+from ephysalis.gui import recording_session_page  # noqa: E402
 from ephysalis.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
-from ephysalis.session.config import load_session_config, save_session_config  # noqa: E402
+from ephysalis.recording_session.config import load_recording_session_config, save_recording_session_config  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -27,10 +27,10 @@ def app():
 @pytest.fixture
 def page(app, tmp_path, monkeypatch):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
-    monkeypatch.setattr(session_page, "_settings", lambda: settings)
-    widget = session_page.SessionPipelinePage()
+    monkeypatch.setattr(recording_session_page, "_settings", lambda: settings)
+    widget = recording_session_page.RecordingSessionPipelinePage()
     widget._work_edit.setText(str(tmp_path / "work"))
-    widget.add_sessions([SPIKEGLX_CROP_SESSION])
+    widget.add_recording_sessions([SPIKEGLX_CROP_RECORDING_SESSION])
     yield widget
     widget.deleteLater()
 
@@ -45,7 +45,7 @@ def _wait(app, condition, timeout_s=120.0):
 
 
 def test_step_commands(tmp_path):
-    options = PipelineOptions(session=tmp_path / "s", work_dir=tmp_path / "w", config=tmp_path / "w" / "session.toml",
+    options = PipelineOptions(recording_session=tmp_path / "s", work_dir=tmp_path / "w", config=tmp_path / "w" / "session.toml",
                               steps=["export", "sort", "align-clocks"], sorter="mountainsort5", output_format="dh5",
                               bids_root=tmp_path / "bids", export_lfp=False, scratch_dir=tmp_path / "scratch")
     commands = step_commands(options)
@@ -68,8 +68,8 @@ def test_work_dir_summary(tmp_path):
     assert work_dir_summary(tmp_path, "s") == [("trials/run_RF.csv", "2 trials"), ("sorting/imec0", "3 units, 2 good")]
 
 
-def test_load_edit_and_save_session_config(app, page, tmp_path):
-    page.load_session()
+def test_load_edit_and_save_recording_session_config(app, page, tmp_path):
+    page.load_recording_session()
     _wait(app, lambda: page._overview is not None)
     assert page._tree.topLevelItemCount() == 1
     run = page._tree.topLevelItem(0)
@@ -87,21 +87,21 @@ def test_load_edit_and_save_session_config(app, page, tmp_path):
     page._editor.set_config(config)
     assert page.save_config()
 
-    saved = load_session_config(tmp_path / "work" / "session.toml")
+    saved = load_recording_session_config(tmp_path / "work" / "session.toml")
     assert saved.probes["imec0"].area == "V1" and saved.probes["imec0"].bad_channels == [1]
     assert saved.sorting.sorter == "mountainsort5" and saved.subject.species == "Mus musculus"
     assert saved.probes["imec1"].serial_number == config.probes["imec1"].serial_number
 
 
 def test_save_as_and_open_config(app, page, tmp_path):
-    page.load_session()
+    page.load_recording_session()
     _wait(app, lambda: page._overview is not None)
     config = page._editor.config()
     config.probes["imec0"].area = "LGN"
     page._editor.set_config(config)
     other = tmp_path / "templates" / "lgn.toml"
     assert page.save_config(other)
-    assert page._config_path == other and load_session_config(other).probes["imec0"].area == "LGN"
+    assert page._config_path == other and load_recording_session_config(other).probes["imec0"].area == "LGN"
 
     config.probes["imec0"].area = "changed"
     page._editor.set_config(config)
@@ -109,21 +109,21 @@ def test_save_as_and_open_config(app, page, tmp_path):
     assert page._editor.config().probes["imec0"].area == "LGN"
 
     # a new page finds the config file last used for the session
-    again = session_page.SessionPipelinePage()  # sessions and work dir from the settings
-    assert again.sessions() == [SPIKEGLX_CROP_SESSION] and again.work_dir(SPIKEGLX_CROP_SESSION) == tmp_path / "work"
-    assert again._find_config(SPIKEGLX_CROP_SESSION) == other
+    again = recording_session_page.RecordingSessionPipelinePage()  # sessions and work dir from the settings
+    assert again.recording_sessions() == [SPIKEGLX_CROP_RECORDING_SESSION] and again.work_dir(SPIKEGLX_CROP_RECORDING_SESSION) == tmp_path / "work"
+    assert again._find_config(SPIKEGLX_CROP_RECORDING_SESSION) == other
     again.deleteLater()
 
     elsewhere = tmp_path / "v1.toml"
     config.probes["imec0"].area = "V1"
-    save_session_config(config, elsewhere)
+    save_recording_session_config(config, elsewhere)
     assert page.open_config(elsewhere)
     assert page._config_path == elsewhere and page._editor.config().probes["imec0"].area == "V1"
     assert page.pipeline_options().config == elsewhere
 
 
 def test_run_events_step(app, page, tmp_path):
-    page.load_session()
+    page.load_recording_session()
     _wait(app, lambda: page._overview is not None)
     for step, box in page._step_boxes.items():
         box.setChecked(step == "extract-events")  # steps run in a subprocess: no test metadata plugin there
@@ -137,37 +137,37 @@ def test_run_events_step(app, page, tmp_path):
     assert "events" in outputs
 
 
-def test_apply_to_sessions(app, page, tmp_path):
+def test_apply_to_recording_sessions(app, page, tmp_path):
     _wait(app, lambda: page._overview is not None)
     page._work_edit.setText(str(tmp_path / "{session}"))
-    page.add_sessions([DATA_FOLDER], show=False)
+    page.add_recording_sessions([DATA_FOLDER], show=False)
     config = page._editor.config()
     config.sorting.sorter = "mountainsort5"
     config.events.exclude_roles = ["sync"]
     config.probes["imec0"].area = "V1"  # probes are not copied
     page._editor.set_config(config)
-    [written] = page.apply_to_sessions(["sorting", "events"], [SPIKEGLX_CROP_SESSION, DATA_FOLDER])
+    [written] = page.apply_to_recording_sessions(["sorting", "events"], [SPIKEGLX_CROP_RECORDING_SESSION, DATA_FOLDER])
     assert written == tmp_path / DATA_FOLDER.name / "session.toml"
-    other = load_session_config(written)
+    other = load_recording_session_config(written)
     assert other.sorting.sorter == "mountainsort5" and other.events.exclude_roles == ["sync"]
     assert [r.name for r in other.runs] == ["experiment1_recording1"] and other.probes == {}
     assert page._find_config(DATA_FOLDER) == written
 
 
-def test_run_several_sessions(app, page, tmp_path):
+def test_run_several_recording_sessions(app, page, tmp_path):
     _wait(app, lambda: page._overview is not None)
     page._work_edit.setText(str(tmp_path / "{session}"))
     missing = tmp_path / "missing_session"
     missing.mkdir()
-    page.add_sessions([missing, DATA_FOLDER], show=False)
+    page.add_recording_sessions([missing, DATA_FOLDER], show=False)
     for step, box in page._step_boxes.items():
         box.setChecked(step in ("extract-trials", "extract-events"))
     page._run_or_cancel()
     _wait(app, lambda: page._process is None and page._run_btn.text().startswith("▶"), timeout_s=300)
     log = page._log.toPlainText()
     assert "failed: missing_session" in log, log[-2000:]
-    status = {page.sessions()[r].name: page._sessions.item(r, 3).text() for r in range(page._sessions.rowCount())}
-    assert status == {SPIKEGLX_CROP_SESSION.name: "done", "missing_session": "failed in extract-trials",
+    status = {page.recording_sessions()[r].name: page._recording_sessions.item(r, 3).text() for r in range(page._recording_sessions.rowCount())}
+    assert status == {SPIKEGLX_CROP_RECORDING_SESSION.name: "done", "missing_session": "failed in extract-trials",
                       DATA_FOLDER.name: "done"}
     assert (tmp_path / DATA_FOLDER.name / "events" / "experiment1_recording1.csv").exists()
-    assert (tmp_path / SPIKEGLX_CROP_SESSION.name / "trials").is_dir()
+    assert (tmp_path / SPIKEGLX_CROP_RECORDING_SESSION.name / "trials").is_dir()

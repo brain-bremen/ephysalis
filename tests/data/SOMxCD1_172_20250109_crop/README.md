@@ -21,8 +21,8 @@ this window (imec0: 1015 spikes from 20 units, imec1: 1169 spikes from 21 units)
 |---|---|
 | `*.imec{0,1}.ap.bin/.meta` | 8 neural channels + sync, 30 kHz, saved as a SpikeGLX channel subset; `firstSample` is shifted by the crop start |
 | `*.imec{0,1}.lf.bin/.meta` | same channels, 2.5 kHz |
-| `*.nidq.bin/.meta` | all 9 channels, 26041 Hz: photodiode AI2, lasers AI0/AI4/AI6, digital word with sync (bit 1), photodiode invalid (bit 2), paradigm (bit 3) and wheel encoder (bit 7) |
+| `*.nidq.bin/.meta` | all 9 channels, 26041 Hz: photodiode AI2, lasers AI0/AI4/AI6, digital word with sync (bit 1), photodiode invalid (bit 2), experimental protocol (bit 3) and wheel encoder (bit 7) |
 | `1_stimulusStageRF/` | `params.mat`, slimmed `stimulation.mat` (stimulus order, screen and session info; experimenter redacted), laser calibration, `TrialTimeCorrectionInfo.mat` |
 | `1_stimulusStageRF/legacy_reference_imec{0,1}.npz` | output of the MATLAB pipeline for this window, relative to the crop start: trial on/offsets (imec samples), running velocity and LFP at 1 kHz, Kilosort spikes on the kept channels (`spike_times_s`, `spike_unit_ids`, `spike_peak_channels`) |
 
-The window contains the first 23 trials of the paradigm; the first starts at 0.605 s.
+The window contains the first 23 trials of the experimental protocol; the first starts at 0.605 s.

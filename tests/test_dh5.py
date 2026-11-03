@@ -6,11 +6,11 @@ import pytest
 import spikeinterface.core as si
 
 import dh5io
-from conftest import SPIKEGLX_CROP_SESSION
-from ephysalis.formats.output.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_session_dh5
-from ephysalis.formats.input.base import open_session
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
+from ephysalis.formats.output.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_recording_session_dh5
+from ephysalis.formats.input.base import open_recording_session
 from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S
-from ephysalis.session.config import default_session_config
+from ephysalis.recording_session.config import default_recording_session_config
 from ephysalis.timeline.clocks import synchronize_run
 from ephysalis.timeline.steps import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
@@ -29,11 +29,11 @@ def test_lfp_regions_split_drifting_clocks():
 
 @pytest.fixture(scope="module")
 def dh5_path(work_dir):  # noqa: F811
-    session = open_session(SPIKEGLX_CROP_SESSION)
-    config = default_session_config(session)
-    run = session.run(RUN)
+    recording_session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    config = default_recording_session_config(recording_session)
+    run = recording_session.run(RUN)
     syncs = {RUN: synchronize_run(run, aux_channel_map(run, config))}
-    return write_session_dh5(session, work_dir, work_dir / "session.dh5", config, syncs)
+    return write_recording_session_dh5(recording_session, work_dir, work_dir / "session.dh5", config, syncs)
 
 
 def test_lfp_blocks(dh5_path, work_dir):  # noqa: F811
@@ -92,7 +92,7 @@ def test_export_cli_into_bids(work_dir, tmp_path, output_format):  # noqa: F811
     from ephysalis.cli.main import main
 
     root = tmp_path / "bids"
-    assert main(["export", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work_dir), "--output-format",
+    assert main(["export", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work_dir), "--output-format",
                  output_format, "--bids", str(root)]) == 0
     ecephys = next(root.glob("sub-*/ses-*/ecephys"))
     data = next(ecephys.glob(f"*_ecephys.{output_format}"))

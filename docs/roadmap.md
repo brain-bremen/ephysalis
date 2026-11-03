@@ -17,7 +17,7 @@ pipeline (`ephysalis convert`) was replaced by the session pipeline; its raw dat
   VStim 1.x trials) and ephysalis-freiburg (the Freiburg Neuropixels setup: stimulusStage trials,
   MATLAB pipeline metadata).
 - **Spike sorting**: spikeinterface + Kilosort4, sorted per probe over the concatenated runs.
-- **Output**: one NWB file per session (all probes; paradigms as epochs plus a trials
+- **Output**: one NWB file per session (all probes; experimental protocols as epochs plus a trials
   table). NWB first, DH5 second. BIDS microephys layout on top of the NWB files.
 - **No backwards compatibility** with the legacy `mergedCombined_*.mat` files.
 - **Later**: artefact removal, eye calibration (eye position is stored as uncalibrated volts), automatic curation.
@@ -28,7 +28,7 @@ pipeline (`ephysalis convert`) was replaced by the session pipeline; its raw dat
 |---|---|---|
 | 0 | Fork oecon, rename to ephysalis, plugin registries | done |
 | 1 | Readers (SpikeGLX, Open Ephys), session model, `session.toml`, Excel migration, conditions of the Freiburg Psychtoolbox setup | done |
-| 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-paradigm runs by the paradigm line, laser calibration to mW |
+| 2 | Sync (NIDQ ↔ imec sync edges), NIDQ decoding (photodiode trials, wheel, lasers), trial timing in stimulus plugins | done; open: splitting multi-experimental protocol runs by the experimental protocol line, laser calibration to mW |
 | 3 | Sorting: concatenation, bad channels, NP1/NP2 geometry, KS4 via `run_sorter`, SortingAnalyzer, Phy round-trip; collect sync edges (`EdgeAccumulator`) in the same AP pass | done (`ephysalis sort`); open: Phy round-trip (curation), sync edges during the copy, multi-shank NP2 |
 | 4 | LFP (NP1 `lf` stream, NP2 from AP, anti-aliased) and optional MUA, generalising `decimation.py`/`mua.py` to spikeinterface recordings | done (`ephysalis lfp`, `ephysalis mua`) |
 | 5 | NWB writer, BIDS layout, extend the DH5 writer with spikes and trials | session NWB and DH5 writers and BIDS ecephys layout done (`ephysalis export`); open: raw AP in NWB (external link or none), probe geometry extension (ndx-probeinterface) |
@@ -43,7 +43,7 @@ From the MATLAB code, for 8-channel NIDQ rigs (defaults in `AuxChannelMap`):
 | sync | digital bit 1 (NIDQ), bit 6 (imec SY) | MATLAB smooths edge differences and resamples NIDQ to 30 kHz; ephysalis maps edge times instead |
 | photodiode | AI2 | trials: smoothed, gated by `photodiode_invalid`, threshold 4000 |
 | photodiode invalid | digital bit 2 | high = photodiode signal not valid |
-| paradigm | digital bit 3 | separates paradigms in old multi-paradigm runs |
+| experimental protocol | digital bit 3 | separates experimental protocols in old multi-experimental protocol runs |
 | wheel | digital bit 7 | 900 pulses/rev, 8 cm radius (`get_wheelspeed.m`) |
 | lasers red/green/blue | AI0 / AI4 / AI6 | calibration in `{Red,Green,Blue}_mW2BinVolt.mat` |
 
@@ -56,8 +56,8 @@ Validated against the MATLAB output on `tests/data/SOMxCD1_172_20250109_crop`:
 - **Photodiode gating**: MATLAB zeroes the photodiode up to the first falling edge of the
   "invalid" line even if the line starts low (and fails if it never falls). ephysalis only
   gates when the line starts high.
-- **Multi-paradigm runs** (several `<k>_stimulusStage*` folders per run, split by the paradigm
-  line) are not supported yet. All 22 runs in `RawData` have one paradigm each.
+- **Multi-experimental protocol runs** (several `<k>_stimulusStage*` folders per run, split by the experimental protocol
+  line) are not supported yet. All 22 runs in `RawData` have one experimental protocol each.
 
 `TrialTimeCorrectionInfo.mat` matches photodiode onsets to the write/creation times of
 `trialWiseInformation/trialNr*.txt`. Creation times are lost when data is copied, so this

@@ -1,15 +1,15 @@
-"""``dataset.toml``: many sessions processed alike (:mod:`ephysalis.dataset.runner`).
+"""``dataset.toml``: many recording sessions processed alike (:mod:`ephysalis.dataset.runner`).
 
 Example (paths are relative to ``root``, which is relative to the file; default: the file's folder)::
 
     schema_version = 1
-    name = "V1 array recordings of monkey B"
+    dataset_name = "V1 array recordings of monkey B"
     root = ".."
-    work_dir = "derivatives/ephysalis/{session}"
+    work_dir = "derivatives/ephysalis/{recording_session}"
     state_dir = "derivatives/ephysalis"            # pause file and status table (default: <root>/.ephysalis)
     steps = ["align-clocks", "extract-trials", "extract-events", "lfp", "export"]
 
-    [defaults]                                     # session.toml content of every session
+    [defaults]                                     # session.toml content of every recording session
     schema_version = 8
     lab = "Kreiter lab"
     [defaults.aux_channels.digital]
@@ -21,20 +21,20 @@ Example (paths are relative to ``root``, which is relative to the file; default:
     output_format = "dh5"
     per_run = true
 
-    [[sessions]]
-    id = "sub-b_ses-20101207"                      # {session} in work_dir and in step options
-    path = "sourcedata/sub-b/ses-20101207"
-    config = "code/sessions/sub-b_ses-20101207/session.toml"   # overrides of the defaults (optional)
-    [sessions.overrides]                           # inline overrides (optional), after the file
+    [[recording_sessions]]
+    recording_session_id = "sub-b_ses-20101207"   # {recording_session} in work_dir and in step options
+    recording_session_path = "sourcedata/sub-b/ses-20101207"
+    recording_session_config_file = "code/sessions/sub-b_ses-20101207/session.toml"   # overrides (optional)
+    [recording_sessions.overrides]                 # inline overrides (optional), after the file
     task = "shapetracking"
-    [sessions.step_options.export]                 # this session's step options (optional)
+    [recording_sessions.step_options.export]       # this recording session's step options (optional)
     session_label = "20101207"
 
-A session's config is the defaults, overridden by its ``config`` file, overridden by its ``overrides``:
-tables are merged key by key, everything else (values, arrays such as ``runs``) is replaced. Each part
-is migrated from its own ``schema_version`` (``overrides``: that of the defaults) before merging.
-Relative probe geometry files are relative to the file that names them (the defaults and inline
-overrides: the dataset file).
+A recording session's config is the defaults, overridden by its ``recording_session_config_file``,
+overridden by its ``overrides``: tables are merged key by key, everything else (values, arrays such as
+``runs``) is replaced. Each part is migrated from its own ``schema_version`` (``overrides``: that of the
+defaults) before merging. Relative probe geometry files are relative to the file that names them (the
+defaults and inline overrides: the dataset file).
 """
 
 from __future__ import annotations
@@ -46,17 +46,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ephysalis.session.config import (
+from ephysalis.recording_session.config import (
     MIGRATIONS,
     SCHEMA_VERSION,
-    SessionConfig,
-    session_config_from_dict,
+    RecordingSessionConfig,
+    recording_session_config_from_dict,
 )
-from ephysalis.session.schema import migrate
+from ephysalis.recording_session.schema import migrate
 
 DATASET_SCHEMA_VERSION = 1
 DATASET_MIGRATIONS: dict[int, Any] = {}
-SESSION_PLACEHOLDER = "{session}"
+RECORDING_SESSION_PLACEHOLDER = "{recording_session}"
 # steps in the order they run and the steps whose outputs each one reads
 STEP_INPUTS: dict[str, tuple[str, ...]] = {
     "align-clocks": (),
@@ -73,15 +73,15 @@ STEP_INPUTS: dict[str, tuple[str, ...]] = {
                "csd", "mua", "sort"),
 }
 # options the runner sets itself
-_RUNNER_OPTIONS = {"config", "work_dir", "format", "runs", "force", "sessions"}
+_RUNNER_OPTIONS = {"config", "work_dir", "format", "runs", "force", "recording_sessions"}
 
 
 @dataclass
-class DatasetSession:
-    session_id: str  # {session} in work_dir and in step options
-    session_path: Path  # the recording's session folder
+class DatasetRecordingSession:
+    recording_session_id: str  # {session} in work_dir and in step options
+    recording_session_path: Path  # the recording's session folder
     work_dir: Path
-    session_config: SessionConfig  # defaults < session file < inline overrides
+    recording_session_config: RecordingSessionConfig  # defaults < session file < inline overrides
     config_files: list[Path]  # the files the config was made from (dataset file, override file)
     referenced_files: list[Path]  # files the config names (probe geometry)
     step_options: dict[str, dict[str, Any]]
@@ -95,13 +95,13 @@ class Dataset:
     root: Path  # relative paths of the dataset file are relative to it
     state_dir: Path
     steps: list[str]
-    sessions: list[DatasetSession] = field(default_factory=list)
+    recording_sessions: list[DatasetRecordingSession] = field(default_factory=list)
 
-    def session(self, session_id: str) -> DatasetSession:
-        for dataset_session in self.sessions:
-            if dataset_session.session_id == session_id:
-                return dataset_session
-        raise KeyError(f"{self.dataset_file}: no session {session_id!r}")
+    def recording_session(self, recording_session_id: str) -> DatasetRecordingSession:
+        for dataset_recording_session in self.recording_sessions:
+            if dataset_recording_session.recording_session_id == recording_session_id:
+                return dataset_recording_session
+        raise KeyError(f"{self.dataset_file}: no session {recording_session_id!r}")
 
 
 def merge_tables(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -125,7 +125,7 @@ def _resolve_geometry_files(data: dict[str, Any], folder: Path) -> dict[str, Any
     return data
 
 
-def _session_part(data: dict[str, Any], version: int, folder: Path, source: object) -> dict[str, Any]:
+def _recording_session_part(data: dict[str, Any], version: int, folder: Path, source: object) -> dict[str, Any]:
     data = migrate(dict(data, schema_version=data.get("schema_version", version)), SCHEMA_VERSION, MIGRATIONS,
                    source=source)
     return _resolve_geometry_files(data, folder)
@@ -170,7 +170,7 @@ def load_dataset(path: str | Path) -> Dataset:
     path = Path(path).resolve()
     data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), DATASET_SCHEMA_VERSION, DATASET_MIGRATIONS,
                    source=path)
-    known = {"schema_version", "name", "root", "work_dir", "state_dir", "steps", "defaults", "step_options", "sessions"}
+    known = {"schema_version", "dataset_name", "root", "work_dir", "state_dir", "steps", "defaults", "step_options", "recording_sessions"}
     if unknown := set(data) - known:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
@@ -185,53 +185,75 @@ def load_dataset(path: str | Path) -> Dataset:
         _check_step_options(step, options, str(path))
     raw_defaults = data.get("defaults", {})
     defaults_version = raw_defaults.get("schema_version", SCHEMA_VERSION)
-    defaults = _session_part(raw_defaults, defaults_version, path.parent, f"{path} [defaults]")
-    work_template = data.get("work_dir", "{session}/ephysalis")
-    dataset = Dataset(dataset_file=path, dataset_name=data.get("name", path.parent.name), root=root,
+    defaults = _recording_session_part(raw_defaults, defaults_version, path.parent, f"{path} [defaults]")
+    if "work_dir" not in data:
+        raise ValueError(f"{path}: work_dir is required (outside the recording session folders), "
+                         f"e.g. work_dir = \"derivatives/ephysalis/{RECORDING_SESSION_PLACEHOLDER}\"")
+    work_template = data["work_dir"]
+    dataset = Dataset(dataset_file=path, dataset_name=data.get("dataset_name", path.parent.name), root=root,
                       state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps)
     seen = set()
-    for entry in data.get("sessions", []):
-        session_id = entry.get("id")
-        if not session_id or "path" not in entry:
-            raise ValueError(f"{path}: every [[sessions]] needs id and path ({entry})")
-        if session_id in seen:
-            raise ValueError(f"{path}: session {session_id} twice")
-        seen.add(session_id)
-        if unknown := set(entry) - {"id", "path", "config", "overrides", "step_options", "include"}:
-            raise ValueError(f"{path} session {session_id}: unknown keys {', '.join(sorted(unknown))}")
+    for entry in data.get("recording_sessions", []):
+        recording_session_id = entry.get("recording_session_id")
+        if not recording_session_id or "recording_session_path" not in entry:
+            raise ValueError(f"{path}: every [[recording_sessions]] needs recording_session_id and recording_session_path ({entry})")
+        if recording_session_id in seen:
+            raise ValueError(f"{path}: session {recording_session_id} twice")
+        seen.add(recording_session_id)
+        if unknown := set(entry) - {"recording_session_id", "recording_session_path", "recording_session_config_file",
+                                  "overrides", "step_options", "include"}:
+            raise ValueError(f"{path} session {recording_session_id}: unknown keys {', '.join(sorted(unknown))}")
         merged, files = defaults, [path]
-        if "config" in entry:
-            config_file = (root / entry["config"]).resolve()
+        if "recording_session_config_file" in entry:
+            config_file = (root / entry["recording_session_config_file"]).resolve()
             raw = tomllib.loads(config_file.read_text(encoding="utf-8"))
-            merged = merge_tables(merged, _session_part(raw, raw.get("schema_version", 1), config_file.parent,
+            merged = merge_tables(merged, _recording_session_part(raw, raw.get("schema_version", 1), config_file.parent,
                                                         config_file))
             files.append(config_file)
         if "overrides" in entry:
-            merged = merge_tables(merged, _session_part(entry["overrides"], defaults_version, path.parent,
-                                                        f"{path} session {session_id} overrides"))
-        merged.setdefault("session_id", session_id)
-        config = session_config_from_dict(merged, source=f"{path} session {session_id}")
+            merged = merge_tables(merged, _recording_session_part(entry["overrides"], defaults_version, path.parent,
+                                                        f"{path} session {recording_session_id} overrides"))
+        merged.setdefault("session_id", recording_session_id)
+        config = recording_session_config_from_dict(merged, source=f"{path} session {recording_session_id}")
         options = merge_tables(step_options, entry.get("step_options", {}))
         for step, step_opts in entry.get("step_options", {}).items():
             if step not in STEP_INPUTS:
-                raise ValueError(f"{path} session {session_id}: step_options of unknown step {step}")
-            _check_step_options(step, step_opts, f"{path} session {session_id}")
-        options = {step: {k: _fill(v, session_id) for k, v in opts.items()} for step, opts in options.items()}
-        session_path = (root / entry["path"]).resolve()
+                raise ValueError(f"{path} session {recording_session_id}: step_options of unknown step {step}")
+            _check_step_options(step, step_opts, f"{path} session {recording_session_id}")
+        options = {step: {k: _fill(v, recording_session_id) for k, v in opts.items()} for step, opts in options.items()}
+        recording_session_path = (root / entry["recording_session_path"]).resolve()
         referenced = [Path(probe.geometry.file) for probe in config.probes.values()
                       if probe.geometry and probe.geometry.file]
-        dataset.sessions.append(DatasetSession(
-            session_id=session_id, session_path=session_path,
-            work_dir=(root / _fill(work_template, session_id)).resolve(),
-            session_config=config, config_files=files, referenced_files=referenced, step_options=options,
+        dataset.recording_sessions.append(DatasetRecordingSession(
+            recording_session_id=recording_session_id, recording_session_path=recording_session_path,
+            work_dir=(root / _fill(work_template, recording_session_id)).resolve(),
+            recording_session_config=config, config_files=files, referenced_files=referenced, step_options=options,
             include=entry.get("include", True)))
+    _check_outputs_outside_sources(dataset)
     return dataset
 
 
-def _fill(value: Any, session_id: str) -> Any:
-    """``value`` with :data:`SESSION_PLACEHOLDER` replaced by the session id (also inside lists)."""
+def _check_outputs_outside_sources(dataset: Dataset) -> None:
+    """Work dirs, the state dir and the sort scratch dirs must not lie in a recording session folder (the
+    source data): the steps write and delete there."""
+    sources = [s.recording_session_path for s in dataset.recording_sessions]
+    for dataset_recording_session in dataset.recording_sessions:
+        scratch = dataset_recording_session.step_options.get("sort", {}).get("scratch_dir")
+        outputs = {"work_dir": dataset_recording_session.work_dir, "state_dir": dataset.state_dir}
+        if scratch:
+            outputs["sort scratch_dir"] = (dataset.root / scratch).resolve()
+        for what, folder in outputs.items():
+            for source in sources:
+                if folder == source or folder.is_relative_to(source) or source.is_relative_to(folder):
+                    raise ValueError(f"{dataset.dataset_file}: {what} {folder} of "
+                                     f"{dataset_recording_session.recording_session_id} overlaps the recording "
+                                     f"session folder {source} (source data are never written)")
+
+
+def _fill(value: Any, recording_session_id: str) -> Any:
+    """``value`` with :data:`RECORDING_SESSION_PLACEHOLDER` replaced by the session id (also inside lists)."""
     if isinstance(value, str):
-        return value.replace(SESSION_PLACEHOLDER, session_id)
+        return value.replace(RECORDING_SESSION_PLACEHOLDER, recording_session_id)
     if isinstance(value, list):
-        return [_fill(v, session_id) for v in value]
+        return [_fill(v, recording_session_id) for v in value]
     return value

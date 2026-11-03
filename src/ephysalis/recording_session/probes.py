@@ -32,12 +32,12 @@ import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
 from ephysalis.plugins import ListsStreamChannelIds
-from ephysalis.session.model import ProbeInfo, Session, StreamKind
+from ephysalis.recording_session.model import ProbeInfo, RecordingSession, StreamKind
 
 if TYPE_CHECKING:
     from probeinterface import Probe
 
-    from ephysalis.session.config import ProbeGeometry, SessionConfig
+    from ephysalis.recording_session.config import ProbeGeometry, RecordingSessionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +50,12 @@ def _match_stream(names: list[str], wanted: str) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def configure_probes(session: Session, config: SessionConfig | None, config_dir: Path | None = None) -> Session:
+def configure_probes(recording_session: RecordingSession, config: RecordingSessionConfig | None, config_dir: Path | None = None) -> RecordingSession:
     """Add the probes defined in ``config`` (``stream`` set) to every run that has the stream and,
     when the format can tell (:meth:`InputFormat.stream_channel_ids`), records all of the probe's
     channels and reference channels; other runs get no such probe (a warning)."""
     if config is None:
-        return session
+        return recording_session
     for probe_id, probe_config in config.probes.items():
         if probe_config.stream is None:
             continue
@@ -63,7 +63,7 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
         if geometry and "file" in geometry and config_dir is not None and not Path(geometry["file"]).is_absolute():
             geometry["file"] = str(config_dir / geometry["file"])
         found = False
-        for run in session.runs:
+        for run in recording_session.runs:
             stream = _match_stream(run.streams, probe_config.stream)
             if stream is None:
                 continue
@@ -90,7 +90,7 @@ def configure_probes(session: Session, config: SessionConfig | None, config_dir:
             )
         if not found:
             logger.warning("probe %s: no run has a stream %r", probe_id, probe_config.stream)
-    return session
+    return recording_session
 
 
 def build_probe(geometry: dict) -> Probe:

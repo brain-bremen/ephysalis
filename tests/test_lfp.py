@@ -3,16 +3,16 @@
 import numpy as np
 import pytest
 
-from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.base import open_recording_session
 from ephysalis.processing.lfp import extract_lfp, lfp_recording
-from conftest import SPIKEGLX_CROP_SESSION
+from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 
 RUN = "3_rfmappingFine_g0"
 
 
 @pytest.fixture(scope="module")
 def run():
-    return open_session(SPIKEGLX_CROP_SESSION).run(RUN)
+    return open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION).run(RUN)
 
 
 @pytest.mark.parametrize("probe_id", ["imec0", "imec1"])

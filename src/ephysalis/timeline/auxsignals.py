@@ -18,8 +18,8 @@ from ephysalis.plugins import ReadsAuxiliaryAnalogInputs, ReadsDigitalLineEdges,
 
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Run
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.model import Run
+    from ephysalis.recording_session.config import AuxChannelMap
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def detect_photodiode_pulses(
     n_trials: int | None = None,
 ) -> PhotodiodePulses:
     """Trial pulses of the screen photodiode (port of ``extractParadigmStartAndNumberFromNidq``
-    and ``fillInSampleIndsInStim_CR`` for runs with a single paradigm).
+    and ``fillInSampleIndsInStim_CR`` for runs with a single experimental protocol).
 
     ``photodiode`` is in raw ADC counts. ``invalid`` is the "photodiode invalid" digital line:
     the signal is ignored until it first goes low (short dips later on are ignored, as in

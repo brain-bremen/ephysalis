@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from ephysalis.session.model import Session
+    from ephysalis.recording_session.model import RecordingSession
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,11 @@ def write_run_start(work_dir: Path, run_name: str, recorded: datetime | None, st
     logger.info("Run %s: start %s (%s)", run_name, start.start_time.isoformat(timespec="milliseconds"), start.method)
 
 
-def apply_run_starts(session: Session, work_dir: Path) -> None:
+def apply_run_starts(recording_session: RecordingSession, work_dir: Path) -> None:
     """Set ``start_time``, ``recorded_start_time`` and ``start_time_method`` of the runs from
     ``<work>/run_start/`` (see the module docs)."""
     records: dict[str, dict[str, Any]] = {}
-    for run in session.runs:
+    for run in recording_session.runs:
         path = run_start_path(work_dir, run.name)
         if path.exists():
             records[run.name] = json.loads(path.read_text(encoding="utf-8"))
@@ -65,7 +65,7 @@ def apply_run_starts(session: Session, work_dir: Path) -> None:
     for record in records.values():
         offsets.setdefault(datetime.fromisoformat(record["recorded_start_time"]).date(), []).append(
             record["recorded_offset_s"])
-    for run in session.runs:
+    for run in recording_session.runs:
         recorded = run.recorded_start_time or run.start_time
         if recorded is None:
             continue

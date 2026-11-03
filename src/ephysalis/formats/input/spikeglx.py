@@ -31,14 +31,14 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import pandas as pd
 
-from ephysalis.session.model import ProbeInfo, Run, Session, StreamKind
+from ephysalis.recording_session.model import ProbeInfo, Run, RecordingSession, StreamKind
 from ephysalis.timeline.clocks import SyncSource
 
 if TYPE_CHECKING:
     from ephysalis.plugins import InputFormat
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.config import AuxChannelMap
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +95,15 @@ plugin_api_version = 2
 
 def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:
     """The MATLAB pipeline's NIDQ layout for 8 or 4 analog inputs."""
-    from ephysalis.session.config import AuxChannelMap
+    from ephysalis.recording_session.config import AuxChannelMap
 
     n_analog = run.extra.get("aux", {}).get("n_analog", 8) if run is not None else 8
     return AuxChannelMap.legacy_default(n_analog)
 
 
-def can_read_session_folder(session_path: Path) -> bool:
-    return _is_run(session_path) or any(
-        _is_run(d) for d in session_path.iterdir() if d.is_dir()
+def can_read_recording_session_folder(recording_session_path: Path) -> bool:
+    return _is_run(recording_session_path) or any(
+        _is_run(d) for d in recording_session_path.iterdir() if d.is_dir()
     )
 
 
@@ -122,11 +122,11 @@ def _is_run(path: Path) -> bool:
     return bool(_run_metas(path))
 
 
-def open_session(session_path: Path) -> Session:
-    candidates = [d for d in sorted(session_path.iterdir()) if d.is_dir()]
-    if _is_run(session_path):
+def open_recording_session(recording_session_path: Path) -> RecordingSession:
+    candidates = [d for d in sorted(recording_session_path.iterdir()) if d.is_dir()]
+    if _is_run(recording_session_path):
         # the path itself is a single run folder
-        candidates = [session_path]
+        candidates = [recording_session_path]
 
     runs: list[Run] = []
     for run_path in candidates:
@@ -137,7 +137,7 @@ def open_session(session_path: Path) -> Session:
     runs.sort(key=lambda r: (r.start_time or datetime.max, r.name))
     for i, run in enumerate(runs):
         run.index = i
-    return Session(name=session_path.name, path=session_path, format=_this_format(), runs=runs)
+    return RecordingSession(name=recording_session_path.name, path=recording_session_path, format=_this_format(), runs=runs)
 
 
 def _open_run(run_path: Path) -> Run | None:

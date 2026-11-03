@@ -40,7 +40,7 @@ class ProbeInfo:
     num_channels: int = 0
     has_lf: bool = False
     streams: dict[StreamKind, str] = field(default_factory=dict)  # kind -> format stream id
-    # probes defined in session.toml (ephysalis.session.probes): channels of the stream, geometry
+    # probes defined in session.toml (ephysalis.recording_session.probes): channels of the stream, geometry
     channel_ids: tuple[str, ...] | None = None
     geometry: dict | None = None
     # re-reference (session.toml probes.<id>.reference_channels): the mean of these channels of the same stream is
@@ -74,7 +74,7 @@ class Run:
         info = self.probes.get(probe_id) if probe_id is not None else None
         if info is not None and kind in (StreamKind.AP, StreamKind.LF) and (
                 info.channel_ids or info.geometry or info.reference_channel_ids):
-            from ephysalis.session.probes import apply_probe
+            from ephysalis.recording_session.probes import apply_probe
 
             recording = apply_probe(recording, info)
         if info is not None and kind in (StreamKind.AP, StreamKind.LF) and info.gain_factors is not None:
@@ -86,7 +86,7 @@ class Run:
 
 
 @dataclass
-class Session:
+class RecordingSession:
     name: str
     path: Path
     format: InputFormat

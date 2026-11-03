@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QTree
 
 _CHANNEL_NAMES_ROLE = 257  # UserRole: stores list[str] of channel names on stream items
 
-from ephysalis.formats.input.openephys_inspect import SessionInfo, inspect_session, validate_session_path
+from ephysalis.formats.input.openephys_inspect import RecordingSessionInfo, inspect_recording_session, validate_recording_session_path
 from ephysalis.formats.input.openephys_inspect import _fmt_duration, _fmt_rate, _fmt_size
 
 
@@ -34,7 +34,7 @@ class _InspectWorker(QThread):
         try:
             if self.isInterruptionRequested():
                 return
-            info = inspect_session(self._path)
+            info = inspect_recording_session(self._path)
             if self.isInterruptionRequested():
                 return
             self.result.emit(info)
@@ -43,7 +43,7 @@ class _InspectWorker(QThread):
                 self.error.emit(str(exc))
 
 
-class SessionInspectorWidget(QGroupBox):
+class RecordingSessionInspectorWidget(QGroupBox):
     """Tree panel showing all loaded Open Ephys sessions with their contents."""
 
     channels_changed: Signal = Signal()
@@ -51,8 +51,8 @@ class SessionInspectorWidget(QGroupBox):
     def __init__(self, buttons: list[QPushButton] | None = None, parent=None):
         super().__init__("Sessions", parent)
         self._workers: dict[Path, _InspectWorker] = {}
-        self._session_channel_names: dict[Path, list[str]] = {}
-        self._session_sample_rates: dict[Path, dict[str, float]] = {}
+        self._recording_session_channel_names: dict[Path, list[str]] = {}
+        self._recording_session_sample_rates: dict[Path, dict[str, float]] = {}
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -120,13 +120,13 @@ class SessionInspectorWidget(QGroupBox):
                 w.requestInterruption()
                 if not w.wait(2000):  # 2 second timeout
                     w.terminate()  # fallback if thread doesn't respond
-        self._session_channel_names.pop(path, None)
-        self._session_sample_rates.pop(path, None)
+        self._recording_session_channel_names.pop(path, None)
+        self._recording_session_sample_rates.pop(path, None)
         self.channels_changed.emit()
         self._check_mismatch()
         return path
 
-    def session_paths(self) -> list[Path]:
+    def recording_session_paths(self) -> list[Path]:
         return [
             self._tree.topLevelItem(i).data(0, _PATH_ROLE)
             for i in range(self._tree.topLevelItemCount())
@@ -136,7 +136,7 @@ class SessionInspectorWidget(QGroupBox):
         """Return deduplicated channel names from all loaded sessions (insertion order)."""
         seen: set[str] = set()
         result: list[str] = []
-        for names in self._session_channel_names.values():
+        for names in self._recording_session_channel_names.values():
             for name in names:
                 if name not in seen:
                     seen.add(name)
@@ -152,8 +152,8 @@ class SessionInspectorWidget(QGroupBox):
                 if not w.wait(2000):  # 2 second timeout
                     w.terminate()  # fallback if thread doesn't respond
         self._workers.clear()
-        self._session_channel_names.clear()
-        self._session_sample_rates.clear()
+        self._recording_session_channel_names.clear()
+        self._recording_session_sample_rates.clear()
         self._tree.clear()
         self.channels_changed.emit()
         self._check_mismatch()
@@ -163,21 +163,21 @@ class SessionInspectorWidget(QGroupBox):
     # ------------------------------------------------------------------
 
     def _check_mismatch(self) -> None:
-        paths = list(self._session_channel_names.keys())
+        paths = list(self._recording_session_channel_names.keys())
         if len(paths) < 2:
             self._mismatch_label.hide()
             return
 
-        ref_channels = sorted(self._session_channel_names[paths[0]])
-        ref_rates = self._session_sample_rates.get(paths[0], {})
+        ref_channels = sorted(self._recording_session_channel_names[paths[0]])
+        ref_rates = self._recording_session_sample_rates.get(paths[0], {})
 
         ch_mismatched = [
             p.name for p in paths
-            if sorted(self._session_channel_names[p]) != ref_channels
+            if sorted(self._recording_session_channel_names[p]) != ref_channels
         ]
         rate_mismatched = [
             p.name for p in paths
-            if self._session_sample_rates.get(p) != ref_rates
+            if self._recording_session_sample_rates.get(p) != ref_rates
         ]
 
         parts = []
@@ -199,7 +199,7 @@ class SessionInspectorWidget(QGroupBox):
                 return item
         return None
 
-    def _on_result(self, path: Path, info: SessionInfo) -> None:
+    def _on_result(self, path: Path, info: RecordingSessionInfo) -> None:
         item = self._top_level_item_for(path)
         if item is None:
             return
@@ -214,8 +214,8 @@ class SessionInspectorWidget(QGroupBox):
                     if ch not in seen:
                         seen.add(ch)
                         channel_names.append(ch)
-        self._session_channel_names[path] = channel_names
-        self._session_sample_rates[path] = {
+        self._recording_session_channel_names[path] = channel_names
+        self._recording_session_sample_rates[path] = {
             stream.name: stream.sample_rate
             for rec in info.recordings
             for stream in rec.streams

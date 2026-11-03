@@ -13,7 +13,7 @@ import pandas as pd
 # (step, label, description) in pipeline order
 STEPS = [
     ("align-clocks", "Clock alignment", "every stream on the reference clock, from the sync-pulse edges (reads the AP files)"),
-    ("extract-trials", "Trials", "trial tables of all paradigms of the metadata plugin, run start times"),
+    ("extract-trials", "Trials", "trial tables of all experimental protocols of the metadata plugin, run start times"),
     ("extract-events", "Events", "edges of the digital lines and event words"),
     ("extract-behavior", "Behaviour", "eye position and running speed at 1 kHz"),
     ("calibrate", "Calibration", "channel gains from the calibration-sine run ([calibration] in session.toml)"),
@@ -28,7 +28,7 @@ STEPS = [
 
 @dataclass
 class PipelineOptions:
-    session: Path
+    recording_session: Path
     work_dir: Path
     config: Path | None = None
     steps: list[str] = field(default_factory=lambda: [s for s, _, _ in STEPS])
@@ -50,7 +50,7 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
     for step, _, _ in STEPS:
         if step not in options.steps:
             continue
-        args = [step, str(options.session), *common]
+        args = [step, str(options.recording_session), *common]
         if step in ("lfp", "csd", "mua", "sort"):
             args += ["--n-jobs", str(options.n_jobs)]
         if step == "sort":
@@ -70,7 +70,7 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
     return commands
 
 
-def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]:
+def work_dir_summary(work_dir: Path, recording_session_name: str) -> list[tuple[str, str]]:
     """``[(output, description)]`` of what the steps have written to ``work_dir``."""
     rows: list[tuple[str, str]] = []
     if not work_dir.exists():
@@ -109,7 +109,7 @@ def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]
         n = sum(int(np.load(p)["time"].size) for p in spikes)
         rows.append(("spikes", f"{n:,} spikes in {len(spikes)} run × probe tables"))
     for extension in (".nwb", ".dh5"):
-        path = work_dir / f"{session_name}{extension}"
+        path = work_dir / f"{recording_session_name}{extension}"
         if path.exists():
             rows.append((path.name, f"{path.stat().st_size / 1e9:.2f} GB"))
     return rows

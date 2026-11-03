@@ -11,8 +11,8 @@ electrodes                  channel positions of the AP streams; ``in_brain`` (c
                             quality`` ``quality_status`` / ``quality_description`` (bad if bad in
                             any run, :func:`ephysalis.processing.quality.session_status`)
 epochs                      one per run (tag = run name)
-trials                      ``trials/<run>_<paradigm>.csv`` of all runs, with ``run`` and
-                            ``paradigm`` columns; parameters missing in a paradigm are NaN
+trials                      ``trials/<run>_<experimental protocol>.csv`` of all runs, with ``run`` and
+                            ``experimental protocol`` columns; parameters missing in a experimental protocol are NaN
 units                       ``sorting/<probe>/units.csv`` and ``spikes/<run>_<probe>.npz``;
                             mean waveform on the peak channel from the SortingAnalyzer
 acquisition                 with ``raw``: raw AP (wideband) data per run and probe
@@ -54,14 +54,14 @@ from hdmf.data_utils import GenericDataChunkIterator
 from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
 from ephysalis.processing.mua import MUA_FILTERING, mua_folder
 from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
-from ephysalis.session.model import Run, Session, StreamKind
+from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
 from ephysalis.sorting.spikes import load_run_spikes, sorting_channels
 
 if TYPE_CHECKING:
     from pynwb import NWBFile
     from spikeinterface.core import BaseRecording
 
-    from ephysalis.session.config import SessionConfig
+    from ephysalis.recording_session.config import RecordingSessionConfig
     from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)
@@ -99,9 +99,9 @@ class RecordingDataChunkIterator(GenericDataChunkIterator):
         return (self.recording.get_num_samples(), self.recording.get_num_channels())
 
 
-def included_runs(session: Session, config: SessionConfig | None) -> list[Run]:
+def included_runs(recording_session: RecordingSession, config: RecordingSessionConfig | None) -> list[Run]:
     return [
-        r for r in session.runs
+        r for r in recording_session.runs
         if config is None or (rc := config.run_config(r.name)) is None or rc.include
     ]
 
@@ -119,13 +119,13 @@ def run_offsets(runs: list[Run]) -> dict[str, float]:
     return offsets
 
 
-def time_axis(session: Session, config: SessionConfig | None, run_clock: bool = False
+def time_axis(recording_session: RecordingSession, config: RecordingSessionConfig | None, run_clock: bool = False
               ) -> tuple[list[Run], dict[str, float], datetime]:
     """Included runs, their start in s on the file's time axis, and the time of its 0: the
     session axis (``SESSION_START_MARGIN_S`` before the first run), or with ``run_clock`` the
     own clock of the session's only run (its acquisition clock where the format keeps one,
     ``Run.clock_start_s``, e.g. the DAQ clock; else 0 at its first sample)."""
-    runs = included_runs(session, config)
+    runs = included_runs(recording_session, config)
     if not run_clock:
         offsets = run_offsets(runs)
         assert runs[0].start_time is not None  # checked by run_offsets
@@ -139,9 +139,9 @@ def time_axis(session: Session, config: SessionConfig | None, run_clock: bool = 
     return runs, {run.name: origin}, run.start_time - timedelta(seconds=origin)
 
 
-def single_run_session(session: Session, run: Run) -> Session:
+def single_run_recording_session(recording_session: RecordingSession, run: Run) -> RecordingSession:
     """The session with only ``run`` (for one file per run)."""
-    return Session(name=session.name, path=session.path, format=session.format, runs=[run])
+    return RecordingSession(name=recording_session.name, path=recording_session.path, format=recording_session.format, runs=[run])
 
 
 def sorting_info(work_dir: Path, probe_id: str) -> dict:
@@ -153,20 +153,20 @@ def sorting_info(work_dir: Path, probe_id: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def _paradigm(csv: Path, run_name: str) -> str:
+def _experimental_protocol(csv: Path, run_name: str) -> str:
     return csv.stem.removeprefix(run_name + "_")
 
 
-def session_trials(work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> pd.DataFrame:
-    """Trials of all runs on the session time axis, with ``run`` and ``paradigm`` columns."""
+def recording_session_trials(work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> pd.DataFrame:
+    """Trials of all runs on the session time axis, with ``run`` and ``experimental protocol`` columns."""
     tables = []
     for run in runs:
         for csv in sorted((work_dir / "trials").glob(f"{run.name}_*.csv")):
             try:
                 trials = pd.read_csv(csv)
-            except pd.errors.EmptyDataError:  # a paradigm without trials
+            except pd.errors.EmptyDataError:  # a experimental protocol without trials
                 continue
-            trials.insert(0, "paradigm", _paradigm(csv, run.name))
+            trials.insert(0, "experimental_protocol", _experimental_protocol(csv, run.name))
             trials.insert(0, "run", run.name)
             trials[["start_time", "stop_time"]] += offsets[run.name]
             tables.append(trials)
@@ -179,7 +179,7 @@ def session_trials(work_dir: Path, runs: list[Run], offsets: dict[str, float]) -
     return table.reset_index(drop=True)
 
 
-def _new_nwbfile(session: Session, config: SessionConfig | None, start_time: datetime) -> NWBFile:
+def _new_nwbfile(recording_session: RecordingSession, config: RecordingSessionConfig | None, start_time: datetime) -> NWBFile:
     from pynwb import NWBFile
     from pynwb.file import Subject
 
@@ -194,10 +194,10 @@ def _new_nwbfile(session: Session, config: SessionConfig | None, start_time: dat
             date_of_birth=datetime.fromisoformat(s.date_of_birth).astimezone() if s.date_of_birth else None,
         )
     return NWBFile(
-        session_description=(config.description if config and config.description else session.name),
+        session_description=(config.description if config and config.description else recording_session.name),
         identifier=str(uuid.uuid4()),
         session_start_time=start_time.astimezone(),
-        session_id=config.session_id if config else session.name,
+        session_id=config.session_id if config else recording_session.name,
         experimenter=(config.experimenter or None) if config else None,
         lab=config.lab if config else None,
         institution=config.institution if config else None,
@@ -208,24 +208,24 @@ def _new_nwbfile(session: Session, config: SessionConfig | None, start_time: dat
     )
 
 
-def _add_electrodes(nwbfile: NWBFile, session: Session, runs: list[Run], config: SessionConfig | None,
+def _add_electrodes(nwbfile: NWBFile, recording_session: RecordingSession, runs: list[Run], config: RecordingSessionConfig | None,
                     work_dir: Path | None = None) -> dict:
     """Devices, electrode groups and electrodes; returns ``{(probe, channel index): row}``."""
-    from ephysalis.processing.quality import session_status
+    from ephysalis.processing.quality import recording_session_status
 
-    if not session.probe_ids:  # behaviour-only sessions
+    if not recording_session.probe_ids:  # behaviour-only sessions
         return {}
     nwbfile.add_electrode_column("channel_name", "channel id in the AP stream")
     nwbfile.add_electrode_column("in_brain", "contact closer to the tip than the insertion depth")
     nwbfile.add_electrode_column("bad_channel", "excluded from sorting (session.toml bad_channels)")
-    status = {p: session_status(work_dir, runs, p) for p in session.probe_ids} if work_dir is not None else {}
+    status = {p: recording_session_status(work_dir, runs, p) for p in recording_session.probe_ids} if work_dir is not None else {}
     with_quality = any(status.values())
     if with_quality:
         nwbfile.add_electrode_column("quality_status", "channel selection on the LFP (ephysalis quality): good, bad, "
                                      "or n/a (not assessed)")
         nwbfile.add_electrode_column("quality_description", "reasons of the channel selection")
     rows: dict[tuple[str, int], int] = {}
-    for probe_id in session.probe_ids:
+    for probe_id in recording_session.probe_ids:
         run = next(r for r in runs if probe_id in r.probes)
         info = run.probes[probe_id]
         probe_config = config.probes.get(probe_id) if config else None
@@ -270,14 +270,14 @@ def _add_epochs_and_trials(nwbfile: NWBFile, work_dir: Path, runs: list[Run], of
     for k, run in enumerate(runs):
         nwbfile.add_epoch(start_time=offsets[run.name], stop_time=offsets[run.name] + (run.duration_s or 0.0),
                           tags=[run.name], **{c: v[k] for c, v in methods.items()})
-    trials = session_trials(work_dir, runs, offsets)
+    trials = recording_session_trials(work_dir, runs, offsets)
     if trials.empty:
         return
     columns = [c for c in trials.columns if c not in ("start_time", "stop_time")]
     for column in columns:
-        nwbfile.add_trial_column(column, {"run": "run name", "paradigm": "paradigm of the metadata plugin",
+        nwbfile.add_trial_column(column, {"run": "run name", "experimental_protocol": "experimental protocol of the metadata plugin",
                                           "trial": "trial index within the run and paradigm"}.get(
-                                              column, "stimulus parameter (NaN if the paradigm does not have it)"))
+                                              column, "stimulus parameter (NaN if the experimental protocol does not have it)"))
     for values in trials.to_dict("records"):  # not itertuples: it renames columns that are not identifiers
         nwbfile.add_trial(**values)
 
@@ -519,16 +519,16 @@ def _events_module(nwbfile: NWBFile) -> Any:
 
 
 def _add_annotations(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float],
-                     config: SessionConfig | None) -> None:
+                     config: RecordingSessionConfig | None) -> None:
     """Pulses of the trigger lines and markers (:mod:`ephysalis.timeline.annotations`)."""
     from hdmf.common import DynamicTable, VectorData
     from pynwb.epoch import TimeIntervals
 
-    from ephysalis.timeline.annotations import line_descriptions, markers, session_pulses
-    from ephysalis.session.config import EventsConfig
+    from ephysalis.timeline.annotations import line_descriptions, markers, recording_session_pulses
+    from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    pulses, lines = session_pulses(work_dir, runs, offsets, events_config)
+    pulses, lines = recording_session_pulses(work_dir, runs, offsets, events_config)
     if lines:
         descriptions = line_descriptions(lines, events_config)
         roles = sorted(lines, key=lambda line: lines[line])
@@ -548,7 +548,7 @@ def _add_annotations(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets:
             table.add_interval(start_time=float(row.start_time), stop_time=float(row.stop_time), role=str(row.role),
                                line=int(row.line), run=str(row.run))
         nwbfile.add_time_intervals(table)
-    trials = session_trials(work_dir, runs, offsets)
+    trials = recording_session_trials(work_dir, runs, offsets)
     found = {name: value for name, value in markers(pulses, trials, events_config).items() if len(value[0])}
     if found:
         names = sorted(found)
@@ -601,23 +601,23 @@ def _add_eye_position(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets
         _behavior_module(nwbfile).add(EyeTracking(spatial_series=series, name="EyeTracking"))
 
 
-def session_metadata_nwbfile(session: Session, work_dir: Path, config: SessionConfig | None = None,
+def recording_session_metadata_nwbfile(recording_session: RecordingSession, work_dir: Path, config: RecordingSessionConfig | None = None,
                              run_clock: bool = False) -> NWBFile:
     """In-memory NWBFile with the session metadata only: subject, devices, electrodes, epochs
     and trials (no LFP or units); the source of the BIDS sidecars of other formats."""
-    runs, offsets, start = time_axis(session, config, run_clock)
-    nwbfile = _new_nwbfile(session, config, start)
-    _add_electrodes(nwbfile, session, runs, config, work_dir)
+    runs, offsets, start = time_axis(recording_session, config, run_clock)
+    nwbfile = _new_nwbfile(recording_session, config, start)
+    _add_electrodes(nwbfile, recording_session, runs, config, work_dir)
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
     _add_annotations(nwbfile, work_dir, runs, offsets, config)
     return nwbfile
 
 
-def write_session_nwb(
-    session: Session,
+def write_recording_session_nwb(
+    recording_session: RecordingSession,
     work_dir: Path,
     path: Path,
-    config: SessionConfig | None = None,
+    config: RecordingSessionConfig | None = None,
     syncs: dict[str, RunSync] | None = None,
     lfp: bool = True,
     compression: str | None = "gzip",
@@ -635,12 +635,12 @@ def write_session_nwb(
     """
     from pynwb import NWBHDF5IO
 
-    runs, offsets, start = time_axis(session, config, run_clock)
-    nwbfile = _new_nwbfile(session, config, start)
-    electrode_rows = _add_electrodes(nwbfile, session, runs, config, work_dir)
+    runs, offsets, start = time_axis(recording_session, config, run_clock)
+    nwbfile = _new_nwbfile(recording_session, config, start)
+    electrode_rows = _add_electrodes(nwbfile, recording_session, runs, config, work_dir)
     channel_index = {
         p: {str(c): i for i, c in enumerate(next(r for r in runs if p in r.probes).get_recording(StreamKind.AP, p).channel_ids)}
-        for p in session.probe_ids
+        for p in recording_session.probe_ids
     }
     _add_epochs_and_trials(nwbfile, work_dir, runs, offsets)
     _add_units(nwbfile, work_dir, runs, offsets, electrode_rows, channel_index)
