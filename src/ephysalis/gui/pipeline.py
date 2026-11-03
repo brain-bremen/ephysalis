@@ -21,7 +21,7 @@ STEPS = [
     ("quality", "Channel selection", "good channels of the probes with [probes.<id>.quality] (CSD uses them)"),
     ("csd", "CSD", "current source density of the probes with [probes.<id>.csd]"),
     ("mua", "MUA", "MUA envelope of every run and probe at 1 kHz (300 Hz high-pass, rectified)"),
-    ("sort", "Spike sorting", "spike sorting per probe over all runs, cut back into runs"),
+    ("spike-sort", "Spike sorting", "spike sorting per probe over all runs, cut back into runs"),
     ("export", "Export", "one NWB or DH5 file, optionally in a BIDS dataset"),
 ]
 
@@ -53,13 +53,13 @@ def step_commands(options: PipelineOptions) -> list[tuple[str, list[str]]]:
         if step not in options.steps:
             continue
         args = [step, str(options.recording_session), *common]
-        if step in ("lfp", "csd", "mua", "sort"):
+        if step in ("lfp", "csd", "mua", "spike-sort"):
             args += ["--n-jobs", str(options.n_jobs)]
-        if step == "sort":
+        if step == "spike-sort":
             if options.scratch_dir is not None:
                 args += ["--scratch-dir", str(options.scratch_dir)]
             if options.sorter:
-                args += ["--sorter", options.sorter]
+                args += ["--spike-sorter", options.sorter]
         if step == "export":
             args += ["--output-format", options.output_format]
             if options.bids_root is not None:
@@ -102,7 +102,7 @@ def work_dir_summary(work_dir: Path, recording_session_name: str) -> list[tuple[
     events = glob_in_work_folder(work_dir / "events", "*.csv")
     if events:
         rows.append(("events", f"{sum(len(pd.read_csv(p)) for p in events):,} events in {len(events)} runs"))
-    for units_csv in glob_in_work_folder(work_dir / "sorting", "*/units.csv"):
+    for units_csv in glob_in_work_folder(work_dir / "spike_sorting", "*/units.csv"):
         units = pd.read_csv(units_csv)
         good = f", {int((units.KSLabel == 'good').sum())} good" if "KSLabel" in units else ""
         rows.append((f"sorting/{units_csv.parent.name}", f"{len(units)} units{good}"))

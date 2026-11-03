@@ -7,9 +7,9 @@ Steps (:func:`sort_probe`):
    tip, minus ``bad_channels``) and concatenate the AP streams of all included runs.
 2. Write the concatenation to a local binary file once (the raw files are usually on a
    network share, and Kilosort reads the data several times).
-3. Run the spike sorter (``[sorting]`` in ``session.toml``, default Kilosort4; any sorter of
+3. Run the spike sorter (``[spike_sorting]`` in ``session.toml``, default Kilosort4; any sorter of
    ``spikeinterface.sorters``) on the local copy. Kilosort4 gets checkpoints after its long
-   steps (:mod:`ephysalis.sorting.kilosort_checkpoints`) so that an interrupted run resumes. Then build
+   steps (:mod:`ephysalis.spike_sorting.kilosort_checkpoints`) so that an interrupted run resumes. Then build
    a SortingAnalyzer (waveforms, templates, unit locations, quality metrics) on the band-pass
    filtered local copy, while it still exists; the sorters filter internally, but wideband
    streams (Neuropixels 2.0, most other probes) need the filter for the waveforms.
@@ -76,10 +76,10 @@ def sorter_settings(
     config: RecordingSessionConfig | None, probe_id: str, sorter: str | None = None, params: dict[str, Any] | None = None
 ) -> tuple[str, dict[str, Any]]:
     """Sorter and parameters of a probe: ``sorter``/``params`` (command line) over the probe's
-    ``sorting`` over the session's ``[sorting]`` over the defaults."""
+    ``sorting`` over the session's ``[spike_sorting]`` over the defaults."""
     probe_config = config.probes.get(probe_id) if config else None
-    configured = (probe_config.sorting if probe_config and probe_config.sorting else None) or (
-        config.sorting if config else None
+    configured = (probe_config.spike_sorting if probe_config and probe_config.spike_sorting else None) or (
+        config.spike_sorting if config else None
     )
     name = sorter or (configured.sorter if configured else DEFAULT_SORTER)
     merged = dict(DEFAULT_SORTER_PARAMS.get(name, {}))
@@ -207,7 +207,7 @@ def _compute_analyzer_locally_and_copy(sorting: Any, recording: Any, analyzer_di
     return si.load_sorting_analyzer(analyzer_dir)
 
 
-def sort_probe(
+def spike_sort_probe(
     recording_session: RecordingSession,
     probe_id: str,
     work_dir: Path,
@@ -239,7 +239,7 @@ def sort_probe(
     recording, segments = concatenate_runs(recording_session, probe_id, run_names, probe_config)
     sorter, params = sorter_settings(config, probe_id, sorter, sorter_params)
     params = adapt_sorter_params(sorter, params, recording.get_num_channels())
-    out = work_dir / "sorting" / probe_id
+    out = work_dir / "spike_sorting" / probe_id
     out.mkdir(parents=True, exist_ok=True)
     (out / "segments.json").write_text(json.dumps({
         "runs": [asdict(s) for s in segments],
@@ -275,7 +275,7 @@ def sort_probe(
     else:
         logger.info("%s: running %s with %s", probe_id, sorter, params)
         if sorter == "kilosort4":
-            from ephysalis.sorting.kilosort_checkpoints import checkpoints
+            from ephysalis.spike_sorting.kilosort_checkpoints import checkpoints
 
             resumable: Any = checkpoints(checkpoint_dir)
         else:

@@ -12,7 +12,7 @@ from ephysalis.cli.main import main
 from ephysalis.formats.input.base import open_recording_session
 from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_recording_session_nwb
 from ephysalis.recording_session.config import ProbeConfig, SubjectConfig, default_recording_session_config
-from ephysalis.sorting.spikes import save_run_spikes
+from ephysalis.spike_sorting.spikes import save_run_spikes
 from ephysalis.timeline.clocks import synchronize_run
 from ephysalis.timeline.steps import aux_channel_map
 
@@ -25,9 +25,9 @@ def work_dir(tmp_path_factory):
     assert extract_all([str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work)]) == 0
     assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work), "--n-jobs", "1"]) == 0
     # sorting outputs of imec0: units 3 (peak channel AP84) and 7 (AP89)
-    (work / "sorting" / "imec0").mkdir(parents=True)
+    (work / "spike_sorting" / "imec0").mkdir(parents=True)
     pd.DataFrame({"unit_id": [3, 7], "KSLabel": ["good", "mua"], "peak_channel": ["imec0.ap#AP84", "imec0.ap#AP89"],
-                  "y_um": [840.0, 880.0], "snr": [5.0, np.nan]}).to_csv(work / "sorting" / "imec0" / "units.csv", index=False)
+                  "y_um": [840.0, 880.0], "snr": [5.0, np.nan]}).to_csv(work / "spike_sorting" / "imec0" / "units.csv", index=False)
     (work / "spikes").mkdir()
     save_run_spikes(work / "spikes" / f"{RUN}_imec0.npz",
                     pd.DataFrame({"time": [0.5, 0.1, 2.0], "sample": [15000, 3000, 60000], "unit_id": [3, 7, 3]}))

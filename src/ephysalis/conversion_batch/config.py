@@ -1,9 +1,9 @@
-"""``dataset.toml``: many recording sessions processed alike (:mod:`ephysalis.dataset.runner`).
+"""``conversion_batch.toml``: many recording sessions processed alike (:mod:`ephysalis.conversion_batch.runner`).
 
 Example (paths are relative to ``root``, which is relative to the file; default: the file's folder)::
 
     schema_version = 1
-    dataset_name = "V1 array recordings of monkey B"
+    conversion_batch_name = "V1 array recordings of monkey B"
     root = ".."
     work_dir = "derivatives/ephysalis/{recording_session}"
     state_dir = "derivatives/ephysalis"            # pause file and status table (default: <root>/.ephysalis)
@@ -21,20 +21,20 @@ Example (paths are relative to ``root``, which is relative to the file; default:
     output_format = "dh5"
     per_run = true
 
-    [[recording_sessions]]
+    [[recording_session_jobs]]
     recording_session_id = "sub-b_ses-20101207"   # {recording_session} in work_dir and in step options
     recording_session_path = "sourcedata/sub-b/ses-20101207"
     recording_session_config_file = "code/sessions/sub-b_ses-20101207/session.toml"   # overrides (optional)
-    [recording_sessions.overrides]                 # inline overrides (optional), after the file
+    [recording_session_jobs.overrides]                 # inline overrides (optional), after the file
     task = "shapetracking"
-    [recording_sessions.step_options.export]       # this recording session's step options (optional)
+    [recording_session_jobs.step_options.export]       # this recording session's step options (optional)
     session_label = "20101207"
 
 A recording session's config is the defaults, overridden by its ``recording_session_config_file``,
 overridden by its ``overrides``: tables are merged key by key, everything else (values, arrays such as
 ``runs``) is replaced. Each part is migrated from its own ``schema_version`` (``overrides``: that of the
 defaults) before merging. Relative probe geometry files are relative to the file that names them (the
-defaults and inline overrides: the dataset file).
+defaults and inline overrides: the conversion batch file).
 """
 
 from __future__ import annotations
@@ -54,8 +54,8 @@ from ephysalis.recording_session.config import (
 )
 from ephysalis.recording_session.schema import migrate
 
-DATASET_SCHEMA_VERSION = 1
-DATASET_MIGRATIONS: dict[int, Any] = {}
+CONVERSION_BATCH_SCHEMA_VERSION = 1
+CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {}
 RECORDING_SESSION_PLACEHOLDER = "{recording_session}"
 # steps in the order they run and the steps whose outputs each one reads
 STEP_INPUTS: dict[str, tuple[str, ...]] = {
@@ -68,40 +68,40 @@ STEP_INPUTS: dict[str, tuple[str, ...]] = {
     "quality": ("lfp",),
     "csd": ("quality",),
     "mua": ("calibrate",),
-    "sort": ("align-clocks", "calibrate"),
+    "spike-sort": ("align-clocks", "calibrate"),
     "export": ("align-clocks", "calibrate", "extract-trials", "extract-events", "extract-behavior", "lfp", "quality",
-               "csd", "mua", "sort"),
+               "csd", "mua", "spike-sort"),
 }
 # options the runner sets itself
-_RUNNER_OPTIONS = {"config", "work_dir", "format", "runs", "force", "recording_sessions"}
+_RUNNER_OPTIONS = {"config", "work_dir", "format", "runs", "force", "recording_session_jobs"}
 
 
 @dataclass
-class DatasetRecordingSession:
+class RecordingSessionJob:
     recording_session_id: str  # {session} in work_dir and in step options
     recording_session_path: Path  # the recording's session folder
     work_dir: Path
     recording_session_config: RecordingSessionConfig  # defaults < session file < inline overrides
-    config_files: list[Path]  # the files the config was made from (dataset file, override file)
+    config_files: list[Path]  # the files the config was made from (conversion batch file, override file)
     referenced_files: list[Path]  # files the config names (probe geometry)
     step_options: dict[str, dict[str, Any]]
     include: bool = True
 
 
 @dataclass
-class Dataset:
-    dataset_file: Path  # dataset.toml
-    dataset_name: str
-    root: Path  # relative paths of the dataset file are relative to it
+class ConversionBatch:
+    conversion_batch_file: Path  # conversion_batch.toml
+    conversion_batch_name: str
+    root: Path  # relative paths of the conversion batch file are relative to it
     state_dir: Path
     steps: list[str]
-    recording_sessions: list[DatasetRecordingSession] = field(default_factory=list)
+    recording_session_jobs: list[RecordingSessionJob] = field(default_factory=list)
 
-    def recording_session(self, recording_session_id: str) -> DatasetRecordingSession:
-        for dataset_recording_session in self.recording_sessions:
-            if dataset_recording_session.recording_session_id == recording_session_id:
-                return dataset_recording_session
-        raise KeyError(f"{self.dataset_file}: no session {recording_session_id!r}")
+    def recording_session_job(self, recording_session_id: str) -> RecordingSessionJob:
+        for recording_session_job in self.recording_session_jobs:
+            if recording_session_job.recording_session_id == recording_session_id:
+                return recording_session_job
+        raise KeyError(f"{self.conversion_batch_file}: no session {recording_session_id!r}")
 
 
 def merge_tables(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -166,11 +166,11 @@ def step_argv(step: str, options: dict[str, Any]) -> list[str]:
     return argv
 
 
-def load_dataset(path: str | Path) -> Dataset:
+def load_conversion_batch(path: str | Path) -> ConversionBatch:
     path = Path(path).resolve()
-    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), DATASET_SCHEMA_VERSION, DATASET_MIGRATIONS,
+    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), CONVERSION_BATCH_SCHEMA_VERSION, CONVERSION_BATCH_MIGRATIONS,
                    source=path)
-    known = {"schema_version", "dataset_name", "root", "work_dir", "state_dir", "steps", "defaults", "step_options", "recording_sessions"}
+    known = {"schema_version", "conversion_batch_name", "root", "work_dir", "state_dir", "steps", "defaults", "step_options", "recording_session_jobs"}
     if unknown := set(data) - known:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
@@ -190,13 +190,13 @@ def load_dataset(path: str | Path) -> Dataset:
         raise ValueError(f"{path}: work_dir is required (outside the recording session folders), "
                          f"e.g. work_dir = \"derivatives/ephysalis/{RECORDING_SESSION_PLACEHOLDER}\"")
     work_template = data["work_dir"]
-    dataset = Dataset(dataset_file=path, dataset_name=data.get("dataset_name", path.parent.name), root=root,
+    conversion_batch = ConversionBatch(conversion_batch_file=path, conversion_batch_name=data.get("conversion_batch_name", path.parent.name), root=root,
                       state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps)
     seen = set()
-    for entry in data.get("recording_sessions", []):
+    for entry in data.get("recording_session_jobs", []):
         recording_session_id = entry.get("recording_session_id")
         if not recording_session_id or "recording_session_path" not in entry:
-            raise ValueError(f"{path}: every [[recording_sessions]] needs recording_session_id and recording_session_path ({entry})")
+            raise ValueError(f"{path}: every [[recording_session_jobs]] needs recording_session_id and recording_session_path ({entry})")
         if recording_session_id in seen:
             raise ValueError(f"{path}: session {recording_session_id} twice")
         seen.add(recording_session_id)
@@ -224,29 +224,29 @@ def load_dataset(path: str | Path) -> Dataset:
         recording_session_path = (root / entry["recording_session_path"]).resolve()
         referenced = [Path(probe.geometry.file) for probe in config.probes.values()
                       if probe.geometry and probe.geometry.file]
-        dataset.recording_sessions.append(DatasetRecordingSession(
+        conversion_batch.recording_session_jobs.append(RecordingSessionJob(
             recording_session_id=recording_session_id, recording_session_path=recording_session_path,
             work_dir=(root / _fill(work_template, recording_session_id)).resolve(),
             recording_session_config=config, config_files=files, referenced_files=referenced, step_options=options,
             include=entry.get("include", True)))
-    _check_outputs_outside_sources(dataset)
-    return dataset
+    _check_outputs_outside_sources(conversion_batch)
+    return conversion_batch
 
 
-def _check_outputs_outside_sources(dataset: Dataset) -> None:
+def _check_outputs_outside_sources(conversion_batch: ConversionBatch) -> None:
     """Work dirs, the state dir and the sort scratch dirs must not lie in a recording session folder (the
     source data): the steps write and delete there."""
-    sources = [s.recording_session_path for s in dataset.recording_sessions]
-    for dataset_recording_session in dataset.recording_sessions:
-        scratch = dataset_recording_session.step_options.get("sort", {}).get("scratch_dir")
-        outputs = {"work_dir": dataset_recording_session.work_dir, "state_dir": dataset.state_dir}
+    sources = [s.recording_session_path for s in conversion_batch.recording_session_jobs]
+    for recording_session_job in conversion_batch.recording_session_jobs:
+        scratch = recording_session_job.step_options.get("spike-sort", {}).get("scratch_dir")
+        outputs = {"work_dir": recording_session_job.work_dir, "state_dir": conversion_batch.state_dir}
         if scratch:
-            outputs["sort scratch_dir"] = (dataset.root / scratch).resolve()
+            outputs["sort scratch_dir"] = (conversion_batch.root / scratch).resolve()
         for what, folder in outputs.items():
             for source in sources:
                 if folder == source or folder.is_relative_to(source) or source.is_relative_to(folder):
-                    raise ValueError(f"{dataset.dataset_file}: {what} {folder} of "
-                                     f"{dataset_recording_session.recording_session_id} overlaps the recording "
+                    raise ValueError(f"{conversion_batch.conversion_batch_file}: {what} {folder} of "
+                                     f"{recording_session_job.recording_session_id} overlaps the recording "
                                      f"session folder {source} (source data are never written)")
 
 

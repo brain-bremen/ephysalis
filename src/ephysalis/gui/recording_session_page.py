@@ -22,11 +22,11 @@ from PySide6.QtWidgets import (
 from ephysalis.gui.config_widget import ConfigStepWidget
 from ephysalis.gui.pipeline import STEPS, PipelineOptions, step_commands, work_dir_summary
 from ephysalis.recording_session.config import (
-    RECORDING_SESSION_CONFIG_FILENAME, AuxChannelMap, EventsConfig, ProbeConfig, RunConfig, RecordingSessionConfig, SortingConfig,
+    RECORDING_SESSION_CONFIG_FILENAME, AuxChannelMap, EventsConfig, ProbeConfig, RunConfig, RecordingSessionConfig, SpikeSortingConfig,
     SubjectConfig, default_recording_session_config, load_recording_session_config, save_recording_session_config,
 )
 
-_GENERAL_EXCLUDED = {"schema_version", "runs", "probes", "subject", "sorting", "aux_channels", "events"}
+_GENERAL_EXCLUDED = {"schema_version", "runs", "probes", "subject", "spike_sorting", "aux_channels", "events"}
 _AUTO = "(auto-detect)"
 COMMON_SORTERS = ["kilosort4", "mountainsort5", "spykingcircus2", "tridesclous2"]
 
@@ -231,12 +231,12 @@ class RecordingSessionConfigEditor(QTabWidget):
         self._subject = ConfigStepWidget(SubjectConfig, checkable=False)
         self._runs = _RunsTable()
         self._probes = _ProbesEditor()
-        self._sorting = ConfigStepWidget(SortingConfig, checkable=False)
-        self._sorting.setToolTip(f"Any spikeinterface sorter, e.g. {', '.join(COMMON_SORTERS)}")
+        self._spike_sorting = ConfigStepWidget(SpikeSortingConfig, checkable=False)
+        self._spike_sorting.setToolTip(f"Any spikeinterface sorter, e.g. {', '.join(COMMON_SORTERS)}")
         self._aux = ConfigStepWidget(AuxChannelMap, checkable=False)
         self._events = ConfigStepWidget(EventsConfig, checkable=False)
         for widget, label in ((self._general, "&General"), (self._subject, "S&ubject"), (self._runs, "R&uns"),
-                              (self._probes, "&Probes"), (self._sorting, "S&orting"), (self._aux, "&Aux channels"),
+                              (self._probes, "&Probes"), (self._spike_sorting, "S&orting"), (self._aux, "&Aux channels"),
                               (self._events, "&Events")):
             self.addTab(widget, label)
         self._base: RecordingSessionConfig | None = None
@@ -247,7 +247,7 @@ class RecordingSessionConfigEditor(QTabWidget):
         self._subject.set_model(config.subject)
         self._runs.set_runs(config.runs)
         self._probes.set_probes(config.probes)
-        self._sorting.set_model(config.sorting)
+        self._spike_sorting.set_model(config.spike_sorting)
         self._aux.set_model(config.aux_channels)
         self._events.set_model(config.events)
 
@@ -259,7 +259,7 @@ class RecordingSessionConfigEditor(QTabWidget):
         return RecordingSessionConfig.model_validate({
             **base, **general,
             "subject": self._subject.get_model(), "runs": self._runs.runs(), "probes": self._probes.probes(),
-            "sorting": self._sorting.get_model(), "aux_channels": self._aux.get_model(),
+            "spike_sorting": self._spike_sorting.get_model(), "aux_channels": self._aux.get_model(),
             "events": self._events.get_model(),
         })
 
@@ -270,7 +270,7 @@ class RecordingSessionConfigEditor(QTabWidget):
 
 # sections of session.toml that can be copied to other sessions (runs and probes differ per session)
 SHARED_SECTIONS = {
-    "sorting": "Sorting",
+    "spike_sorting": "Spike sorting",
     "aux_channels": "Aux channels",
     "events": "Events",
     "subject": "Subject",
@@ -298,7 +298,7 @@ class _ApplyDialog(QDialog):
         layout.addWidget(QLabel("Copy these sections of the shown config:"))
         self.section_boxes = {key: QCheckBox(label) for key, label in SHARED_SECTIONS.items()}
         for key, box in self.section_boxes.items():
-            box.setChecked(key in ("sorting", "aux_channels", "events"))
+            box.setChecked(key in ("spike_sorting", "aux_channels", "events"))
             layout.addWidget(box)
         layout.addWidget(QLabel("to the configs of these sessions:"))
         self.recording_session_list = QListWidget()

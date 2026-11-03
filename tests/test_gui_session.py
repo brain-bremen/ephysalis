@@ -58,14 +58,14 @@ def _wait(app, condition, timeout_s=120.0):
 
 def test_step_commands(tmp_path):
     options = PipelineOptions(recording_session=tmp_path / "s", work_dir=tmp_path / "w", config=tmp_path / "w" / "session.toml",
-                              steps=["export", "sort", "align-clocks"], sorter="mountainsort5", output_format="dh5",
+                              steps=["export", "spike-sort", "align-clocks"], sorter="mountainsort5", output_format="dh5",
                               bids_root=tmp_path / "bids", export_lfp=False, scratch_dir=tmp_path / "scratch")
     commands = step_commands(options)
-    assert [step for step, _ in commands] == ["align-clocks", "sort", "export"]  # pipeline order
+    assert [step for step, _ in commands] == ["align-clocks", "spike-sort", "export"]  # pipeline order
     assert all(argv[:4] == [sys.executable, "-u", "-m", "ephysalis.cli.main"] for _, argv in commands)
     sort = commands[1][1][4:]
-    assert sort[:2] == ["sort", str(tmp_path / "s")]
-    assert "--sorter" in sort and "mountainsort5" in sort and "--scratch-dir" in sort
+    assert sort[:2] == ["spike-sort", str(tmp_path / "s")]
+    assert "--spike-sorter" in sort and "mountainsort5" in sort and "--scratch-dir" in sort
     export = commands[2][1]
     assert export[export.index("--output-format") + 1] == "dh5" and "--no-lfp" in export and "--bids" in export
     assert export[export.index("--config") + 1] == str(tmp_path / "w" / "session.toml")
@@ -74,9 +74,9 @@ def test_step_commands(tmp_path):
 def test_work_dir_summary(tmp_path):
     (tmp_path / "trials").mkdir()
     pd.DataFrame({"start_time": [1.0, 2.0]}).to_csv(tmp_path / "trials" / "run_RF.csv", index=False)
-    (tmp_path / "sorting" / "imec0").mkdir(parents=True)
+    (tmp_path / "spike_sorting" / "imec0").mkdir(parents=True)
     pd.DataFrame({"unit_id": [1, 2, 3], "KSLabel": ["good", "mua", "good"]}).to_csv(
-        tmp_path / "sorting" / "imec0" / "units.csv", index=False)
+        tmp_path / "spike_sorting" / "imec0" / "units.csv", index=False)
     assert work_dir_summary(tmp_path, "s") == [("trials/run_RF.csv", "2 trials"), ("sorting/imec0", "3 units, 2 good")]
 
 
@@ -94,14 +94,14 @@ def test_load_edit_and_save_recording_session_config(app, page, tmp_path):
     assert [r.name for r in config.runs] == ["3_rfmappingFine_g0"] and set(config.probes) == {"imec0", "imec1"}
     config.probes["imec0"].area = "V1"
     config.probes["imec0"].bad_channels = [1]
-    config.sorting.sorter = "mountainsort5"
+    config.spike_sorting.sorter = "mountainsort5"
     config.subject.species = "Mus musculus"
     page._editor.set_config(config)
     assert page.save_config()
 
     saved = load_recording_session_config(tmp_path / "work" / "session.toml")
     assert saved.probes["imec0"].area == "V1" and saved.probes["imec0"].bad_channels == [1]
-    assert saved.sorting.sorter == "mountainsort5" and saved.subject.species == "Mus musculus"
+    assert saved.spike_sorting.sorter == "mountainsort5" and saved.subject.species == "Mus musculus"
     assert saved.probes["imec1"].serial_number == config.probes["imec1"].serial_number
 
 
@@ -154,14 +154,14 @@ def test_apply_to_recording_sessions(app, page, tmp_path):
     page._work_edit.setText(str(tmp_path / "{session}"))
     page.add_recording_sessions([DATA_FOLDER], show=False)
     config = page._editor.config()
-    config.sorting.sorter = "mountainsort5"
+    config.spike_sorting.sorter = "mountainsort5"
     config.events.exclude_roles = ["sync"]
     config.probes["imec0"].area = "V1"  # probes are not copied
     page._editor.set_config(config)
-    [written] = page.apply_to_recording_sessions(["sorting", "events"], [SPIKEGLX_CROP_RECORDING_SESSION, DATA_FOLDER])
+    [written] = page.apply_to_recording_sessions(["spike_sorting", "events"], [SPIKEGLX_CROP_RECORDING_SESSION, DATA_FOLDER])
     assert written == tmp_path / DATA_FOLDER.name / "session.toml"
     other = load_recording_session_config(written)
-    assert other.sorting.sorter == "mountainsort5" and other.events.exclude_roles == ["sync"]
+    assert other.spike_sorting.sorter == "mountainsort5" and other.events.exclude_roles == ["sync"]
     assert [r.name for r in other.runs] == ["experiment1_recording1"] and other.probes == {}
     assert page._find_config(DATA_FOLDER) == written
 

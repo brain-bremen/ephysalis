@@ -44,9 +44,9 @@ RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
 # steps in pipeline order, as replayed by ``ephysalis reproduce``
 CLOCK_AND_EXTRACT_STEPS = ("align-clocks", "extract-trials", "extract-events", "extract-behavior")
-REPLAY_STEPS = (*CLOCK_AND_EXTRACT_STEPS, "lfp", "mua", "sort", "export")
+REPLAY_STEPS = (*CLOCK_AND_EXTRACT_STEPS, "lfp", "mua", "spike-sort", "export")
 # all steps in pipeline order: orders step invocations recorded within the same second
-STEP_ORDER = (*CLOCK_AND_EXTRACT_STEPS, "calibrate", "lfp", "quality", "csd", "mua", "sort", "export")
+STEP_ORDER = (*CLOCK_AND_EXTRACT_STEPS, "calibrate", "lfp", "quality", "csd", "mua", "spike-sort", "export")
 # options not replayed: outputs and caches outside the work dir
 _NOT_REPLAYED = {"output", "bids", "existing", "cache_dir", "subject", "session_label", "dataset_name"}
 NWB_SCRATCH_NAME = "ephysalis_processing"
@@ -188,7 +188,7 @@ def processing_record(work_dir: Path, export: dict[str, Any]) -> dict[str, Any]:
     sorting = {}
     from ephysalis.filesystem import glob_in_work_folder
 
-    for segments in glob_in_work_folder(work_dir / "sorting", "*/segments.json"):
+    for segments in glob_in_work_folder(work_dir / "spike_sorting", "*/segments.json"):
         info = json.loads(segments.read_text(encoding="utf-8"))
         sorting[segments.parent.name] = {k: info.get(k) for k in ("sorter", "sorter_params", "channel_ids")}
     return {
@@ -196,7 +196,7 @@ def processing_record(work_dir: Path, export: dict[str, Any]) -> dict[str, Any]:
         "work_dir": str(work_dir),
         "export": export,
         "steps": step_records(work_dir),
-        "sorting": sorting,
+        "spike_sorting": sorting,
     }
 
 

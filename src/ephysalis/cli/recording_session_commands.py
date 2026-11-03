@@ -234,10 +234,10 @@ def _included_run_syncs(recording_session: RecordingSession, config: RecordingSe
     return syncs
 
 
-def _sort(args: argparse.Namespace) -> int:
+def _spike_sort(args: argparse.Namespace) -> int:
     import tempfile
 
-    from ephysalis.sorting.spikes import sort_probe
+    from ephysalis.spike_sorting.spikes import spike_sort_probe
     from ephysalis.timeline.steps import default_work_dir
 
     recording_session = open_recording_session(args.recording_session, args.format)
@@ -249,14 +249,14 @@ def _sort(args: argparse.Namespace) -> int:
     params = dict(kv.split("=", 1) for kv in args.param or [])
     scratch = Path(args.scratch_dir) if args.scratch_dir else Path(tempfile.gettempdir()) / "ephysalis"
     for probe_id in args.probes or recording_session.probe_ids:
-        runs = sort_probe(
+        runs = spike_sort_probe(
             recording_session, probe_id, work_dir, scratch, config, syncs,
             sorter_params={k: _parse_value(v) for k, v in params.items()},
-            n_jobs=args.n_jobs, keep_binary=args.keep_binary, sorter=args.sorter,
+            n_jobs=args.n_jobs, keep_binary=args.keep_binary, sorter=args.spike_sorter,
         )
         for run_name, spikes in runs.items():
             print(f"{probe_id} {run_name}: {len(spikes)} spikes, {spikes.unit_id.nunique()} units")
-    _record_step("sort", args, recording_session, work_dir, config, config_path)
+    _record_step("spike-sort", args, recording_session, work_dir, config, config_path)
     print(f"Output: {work_dir}")
     return 0
 
@@ -640,8 +640,8 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=per_recording_session(_align_clocks))
 
     p = sub.add_parser(
-        "sort",
-        help="Spike sort each probe over all included runs ([sorting] in session.toml, default Kilosort4) "
+        "spike-sort",
+        help="Spike sort each probe over all included runs ([spike_sorting] in session.toml, default Kilosort4) "
         "and cut the spikes into runs",
     )
     p.add_argument("recording_sessions", nargs="+", type=Path, metavar="recording_session")
@@ -650,11 +650,11 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--work-dir", help="Output folder with sync/, sorting/, spikes/ (default: <session>/ephysalis)")
     p.add_argument("--scratch-dir", help="Fast local folder for the concatenated binary (default: system temp)")
     p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
-    p.add_argument("--sorter", help="spikeinterface sorter, e.g. kilosort4, mountainsort5 (default: session.toml)")
+    p.add_argument("--spike-sorter", help="spikeinterface sorter, e.g. kilosort4, mountainsort5 (default: session.toml)")
     p.add_argument("--param", nargs="+", metavar="KEY=VALUE", help="Sorter parameters, e.g. batch_size=30000")
     p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs for copying and waveforms")
     p.add_argument("--keep-binary", action="store_true", help="Keep the local binary copy (e.g. for Phy)")
-    p.set_defaults(func=per_recording_session(_sort))
+    p.set_defaults(func=per_recording_session(_spike_sort))
 
     for name, func, help_text, outputs in (
         ("extract-trials", _extract_trials, "Write the trial tables of all experimental protocols of the metadata plugin and the "

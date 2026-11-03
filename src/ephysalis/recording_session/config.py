@@ -17,6 +17,9 @@ Schema versions (``schema_version``, see :mod:`ephysalis.recording_session.schem
    probes: ``quality`` (channel selection); ``task`` of the session and of the runs (BIDS ``task`` entity)
 6. ``[events] lines_without_role``
 7. probes: ``reference_channels`` (re-reference to the mean of other channels of the stream)
+8. runs: ``stimulus_system`` renamed to ``metadata_plugin``; ``[events] network_events_offset`` renamed to
+   ``event_word_offset``
+9. ``[sorting]`` and probes: ``sorting`` renamed to ``[spike_sorting]`` / ``spike_sorting`` (not the sorting of files)
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ from pydantic import BaseModel, Field
 from ephysalis.recording_session.schema import Migration, migrate
 from ephysalis.recording_session.model import RecordingSession
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 RECORDING_SESSION_CONFIG_FILENAME = "session.toml"
 # MIGRATIONS[n]: raw data of schema version n -> n + 1
 MIGRATIONS: dict[int, Migration] = {
@@ -43,6 +46,7 @@ MIGRATIONS: dict[int, Migration] = {
     5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
     6: lambda data: data,  # 7 added probes.reference_channels (default none: no re-reference)
     7: lambda data: _schema_8(data),  # 8: runs[].stimulus_system -> metadata_plugin, events.network_events_offset -> event_word_offset
+    8: lambda data: _schema_9(data),  # 9: [sorting] and probes.<id>.sorting -> spike_sorting
 }
 
 
@@ -51,6 +55,15 @@ def _schema_8(data: dict) -> dict:
     events = data.get("events", {})
     if "network_events_offset" in events:
         events["event_word_offset"] = events.pop("network_events_offset")
+    return data
+
+
+def _schema_9(data: dict) -> dict:
+    if "sorting" in data:
+        data["spike_sorting"] = data.pop("sorting")
+    for probe in (data.get("probes") or {}).values():
+        if isinstance(probe, dict) and "sorting" in probe:
+            probe["spike_sorting"] = probe.pop("sorting")
     return data
 
 
@@ -71,7 +84,7 @@ class RunConfig(BaseModel):
     notes: str = ""
 
 
-class SortingConfig(BaseModel):
+class SpikeSortingConfig(BaseModel):
     """Spike sorter and its parameters (any sorter of ``spikeinterface.sorters``)."""
 
     sorter: str = Field(
@@ -142,8 +155,8 @@ class ProbeConfig(BaseModel):
         default_factory=list, description="0-based channel indices excluded from sorting"
     )
     serial_number: str | None = None
-    sorting: SortingConfig | None = Field(
-        default=None, description="Sorter for this probe, instead of the session's [sorting]"
+    spike_sorting: SpikeSortingConfig | None = Field(
+        default=None, description="Sorter for this probe, instead of the session's [spike_sorting]"
     )
     csd: CsdConfig | None = Field(default=None, description="Compute the CSD of this probe (ephysalis csd); "
                                   "needs the probe geometry")
@@ -282,7 +295,7 @@ class RecordingSessionConfig(BaseModel):
     subject: SubjectConfig = Field(default_factory=SubjectConfig)
     runs: list[RunConfig] = Field(default_factory=list)
     probes: dict[str, ProbeConfig] = Field(default_factory=dict)
-    sorting: SortingConfig = Field(default_factory=SortingConfig)
+    spike_sorting: SpikeSortingConfig = Field(default_factory=SpikeSortingConfig)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
     events: EventsConfig = Field(default_factory=EventsConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)

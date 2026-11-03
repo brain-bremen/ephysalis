@@ -45,12 +45,12 @@ def test_schema_migration(tmp_path):
     path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n'
                     'stimulus_system = "vstim"\n')
     config = load_recording_session_config(path)
-    assert config.schema_version == SCHEMA_VERSION == 8 and config.runs[0].name == "r"
+    assert config.schema_version == SCHEMA_VERSION == 9 and config.runs[0].name == "r"
     assert config.runs[0].metadata_plugin == "vstim"  # renamed in schema 8
     assert config.events.exclude_roles == ["sync", "wheel"]
     assert config.calibration.run is None and not config.line_noise.enabled
     save_recording_session_config(config, path)
-    assert "schema_version = 8" in path.read_text()
+    assert "schema_version = 9" in path.read_text()
 
     migrations = {1: lambda d: {k: v for k, v in d.items() if k != "a"} | {"b": d["a"]}, 2: lambda d: {**d, "b": d["b"] * 2}}
     assert migrate({"schema_version": 1, "a": 3}, 3, migrations) == {"schema_version": 3, "b": 6}
@@ -59,3 +59,13 @@ def test_schema_migration(tmp_path):
         migrate({"schema_version": 1, "a": 1}, 4, migrations)
     with pytest.raises(ValueError, match="invalid"):
         migrate({"schema_version": "2"}, 2, migrations)
+
+
+def test_schema_9_spike_sorting():
+    """Schema 9: [sorting] and probes.<id>.sorting are [spike_sorting] / spike_sorting."""
+    from ephysalis.recording_session.config import recording_session_config_from_dict
+
+    config = recording_session_config_from_dict({
+        "schema_version": 8, "session_id": "s", "subject_id": "m", "sorting": {"sorter": "mountainsort5"},
+        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"], "sorting": {"sorter": "kilosort4"}}}})
+    assert config.spike_sorting.sorter == "mountainsort5" and config.probes["v4"].spike_sorting.sorter == "kilosort4"

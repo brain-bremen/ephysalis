@@ -38,8 +38,8 @@ def processed(tmp_path_factory):
     for step in CLOCK_AND_EXTRACT_STEPS:
         assert main([step, str(SPIKEGLX_CROP_RECORDING_SESSION), *common]) == 0
     assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), *common, "--n-jobs", "1", "--rate", "500"]) == 0
-    (work / "sorting" / "imec0").mkdir(parents=True)
-    (work / "sorting" / "imec0" / "segments.json").write_text(json.dumps(
+    (work / "spike_sorting" / "imec0").mkdir(parents=True)
+    (work / "spike_sorting" / "imec0" / "segments.json").write_text(json.dumps(
         {"runs": [], "sorter": "kilosort4", "sorter_params": {"clear_cache": True, "nearest_chans": 8}}))
     files = {}
     for fmt in FORMATS:
@@ -60,7 +60,7 @@ def test_record_in_output(processed, fmt):
     assert record_config(record, "extract-trials") == config and record_config(record, "lfp") == config
     assert export["argv"][:2] == ["ephysalis", "export"] and export["options"]["output_format"] == fmt
     assert record["steps"]["lfp"][-1]["options"]["rate"] == 500
-    assert record["sorting"]["imec0"]["sorter_params"]["nearest_chans"] == 8
+    assert record["spike_sorting"]["imec0"]["sorter_params"]["nearest_chans"] == 8
     assert export["environment"]["packages"]["numpy"] == np.__version__
     meta = [p for p in export["inputs"] if p.endswith(".ap.meta")]
     assert meta and all("sha256" in export["inputs"][p] for p in meta)

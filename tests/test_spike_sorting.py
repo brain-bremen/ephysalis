@@ -6,7 +6,7 @@ from spikeinterface.core import NumpySorting
 
 from ephysalis.formats.input.base import open_recording_session
 from ephysalis.recording_session.config import ProbeConfig
-from ephysalis.sorting.spikes import RunSegment, concatenate_runs, cut_spikes, load_run_spikes, save_run_spikes, sorting_channels
+from ephysalis.spike_sorting.spikes import RunSegment, concatenate_runs, cut_spikes, load_run_spikes, save_run_spikes, sorting_channels
 from ephysalis.recording_session.model import StreamKind
 from ephysalis.timeline.clocks import ClockMap, RunSync
 from conftest import SPIKEGLX_CROP_RECORDING_SESSION
@@ -63,12 +63,12 @@ def test_run_spikes_roundtrip(tmp_path):
 
 
 def test_sorter_settings_precedence():
-    from ephysalis.recording_session.config import RecordingSessionConfig, SortingConfig
-    from ephysalis.sorting.spikes import sorter_settings
+    from ephysalis.recording_session.config import RecordingSessionConfig, SpikeSortingConfig
+    from ephysalis.spike_sorting.spikes import sorter_settings
 
     assert sorter_settings(None, "p0") == ("kilosort4", {"clear_cache": True})
-    config = RecordingSessionConfig(session_id="s", subject_id="m", sorting=SortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
-    config.probes["p1"] = ProbeConfig(sorting=SortingConfig(sorter="mountainsort5", params={"detect_threshold": 6}))
+    config = RecordingSessionConfig(session_id="s", subject_id="m", spike_sorting=SpikeSortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
+    config.probes["p1"] = ProbeConfig(spike_sorting=SpikeSortingConfig(sorter="mountainsort5", params={"detect_threshold": 6}))
     assert sorter_settings(config, "p0") == ("kilosort4", {"clear_cache": True, "Th_universal": 8})
     assert sorter_settings(config, "p1") == ("mountainsort5", {"detect_threshold": 6})
     # command line over config; the configured parameters belong to the configured sorter
@@ -77,7 +77,7 @@ def test_sorter_settings_precedence():
 
 
 def test_kilosort_neighbourhoods_limited_to_channel_count():
-    from ephysalis.sorting.spikes import adapt_sorter_params
+    from ephysalis.spike_sorting.spikes import adapt_sorter_params
 
     assert adapt_sorter_params("kilosort4", {}, 8) == {"nearest_chans": 8, "nearest_templates": 8}
     assert adapt_sorter_params("kilosort4", {"nearest_chans": 4}, 32) == {"nearest_chans": 4, "nearest_templates": 32}

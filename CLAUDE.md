@@ -17,14 +17,14 @@ uv run ephysalis inspect <session> --conditions
 uv run ephysalis align-clocks <session> --work-dir <dir>      # sync edges (cached; reads the AP files) -> clocks/
 uv run ephysalis extract-trials|extract-events|extract-behavior <session> --work-dir <dir>
 uv run ephysalis calibrate|lfp|quality|csd|mua <session> --work-dir <dir>
-uv run ephysalis sort <session> --work-dir <dir> --scratch-dir <fast local disk>   # needs `uv sync --extra sorting`
+uv run ephysalis spike-sort <session> --work-dir <dir> --scratch-dir <fast local disk>   # needs `uv sync --extra sorting`
 uv run ephysalis export <session> --work-dir <dir> [--output-format nwb|dh5] [--per-run] [--raw] [--bids <root>]
 uv run ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--recording-session <path>] [--run]
 
-# A dataset (dataset.toml: defaults, per-session overrides, steps and their options)
-uv run ephysalis run dataset.toml [--recording-sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
-uv run ephysalis status dataset.toml
-uv run ephysalis pause dataset.toml        # running steps finish, then the runners stop; `run` resumes
+# A conversion batch (conversion_batch.toml: defaults, per-recording-session overrides, steps and their options)
+uv run ephysalis run conversion_batch.toml [--recording-sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
+uv run ephysalis status conversion_batch.toml
+uv run ephysalis pause conversion_batch.toml   # running steps finish, then the runners stop; `run` resumes
 ```
 
 The documentation (`docs/`) has only the overview and the roadmap while the design is in its alpha stage (no
@@ -69,18 +69,20 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
 - `processing/` — `lfp.py`, `mua.py`, `csd.py` (port of Borisov's `dh_csd`), `linenoise.py` (port of
   `dh_remove_50hz`), `quality.py` (channel selection). All filters are acausal; `docs/filters.md` and
   `lfp.LFP_FILTERING` / `mua.MUA_FILTERING` describe them — update together.
-- `sorting/` — `spikes.py` (sorting per probe over the concatenated runs, resumable from its outputs, `cut_spikes`),
+- `spike_sorting/` — `spikes.py` (spike sorting per probe over the concatenated runs, `[spike_sorting]` in session.toml,
+  work dir `spike_sorting/<probe>`, resumable from its outputs, `cut_spikes`),
   `kilosort_checkpoints.py`.
 - `filesystem.py` — `remove_folder`: the only way to delete folders (NFS servers whose directory listing skips
   entries during deletion make `shutil.rmtree` fail); call it before spikeinterface overwrites a folder.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
-- `dataset/` — `config.py` (`dataset.toml`: `[[recording_sessions]]`, defaults < recording session file < inline
+- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch` of `[[recording_session_jobs]]`
+  (`RecordingSessionJob`), defaults < recording session file < inline
   overrides, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
   graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
   stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
   `state_dir`).
-- `cli/` — `main.py`, `recording_session_commands.py` (the steps; `per_recording_session` for several), `dataset_commands.py`
+- `cli/` — `main.py`, `recording_session_commands.py` (the steps; `per_recording_session` for several), `conversion_batch_commands.py`
   (`run`, `status`, `pause`). GUI (`gui/`, PySide6) runs each step as `python -m ephysalis.cli.main <step>`.
 
 ### Tests

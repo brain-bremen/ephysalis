@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 
-from ephysalis.cli.dataset_commands import add_dataset_commands
+from ephysalis.cli.conversion_batch_commands import add_conversion_batch_commands
 from ephysalis.cli.recording_session_commands import add_recording_session_commands
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
     add_recording_session_commands(sub)
-    add_dataset_commands(sub)
+    add_conversion_batch_commands(sub)
 
     args = parser.parse_args(argv)
     if not logging.getLogger().handlers:

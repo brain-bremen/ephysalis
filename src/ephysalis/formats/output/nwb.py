@@ -55,7 +55,7 @@ from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
 from ephysalis.processing.mua import MUA_FILTERING, mua_folder
 from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
 from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
-from ephysalis.sorting.spikes import load_run_spikes, sorting_channels
+from ephysalis.spike_sorting.spikes import load_run_spikes, sorting_channels
 
 if TYPE_CHECKING:
     from pynwb import NWBFile
@@ -149,7 +149,7 @@ def sorting_info(work_dir: Path, probe_id: str) -> dict:
     before the sorter was recorded there are Kilosort4)."""
     import json
 
-    path = work_dir / "sorting" / probe_id / "segments.json"
+    path = work_dir / "spike_sorting" / probe_id / "segments.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
@@ -288,14 +288,14 @@ def _add_units(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[
                electrode_rows: dict, channel_index: dict[str, dict[str, int]]) -> None:
     from pynwb.misc import Units
 
-    probes = [p for p in channel_index if (work_dir / "sorting" / p / "units.csv").exists()]
+    probes = [p for p in channel_index if (work_dir / "spike_sorting" / p / "units.csv").exists()]
     if not probes:
         return
     tables, waveforms, fs, sorters = {}, {}, None, set()
     for probe_id in probes:
-        tables[probe_id] = pd.read_csv(work_dir / "sorting" / probe_id / "units.csv")
+        tables[probe_id] = pd.read_csv(work_dir / "spike_sorting" / probe_id / "units.csv")
         sorters.add(sorting_info(work_dir, probe_id).get("sorter", "kilosort4"))
-        waveforms[probe_id], rate, _ = peak_waveforms(work_dir / "sorting" / probe_id / "analyzer", tables[probe_id])
+        waveforms[probe_id], rate, _ = peak_waveforms(work_dir / "spike_sorting" / probe_id / "analyzer", tables[probe_id])
         fs = fs or rate
     nwbfile.units = Units(
         name="units", description=f"{', '.join(sorted(sorters))} units (uncurated), all probes; spike times on the "

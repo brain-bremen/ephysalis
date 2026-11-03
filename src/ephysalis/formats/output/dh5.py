@@ -66,7 +66,7 @@ from ephysalis.formats.output.nwb import (
 )
 from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
 from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
-from ephysalis.sorting.spikes import load_run_spikes
+from ephysalis.spike_sorting.spikes import load_run_spikes
 from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
@@ -481,13 +481,13 @@ def _write_spikes(file: h5py.File, recording_session: RecordingSession, work_dir
 
     tables = []
     for probe_index, probe_id in enumerate(recording_session.probe_ids):
-        units_csv = work_dir / "sorting" / probe_id / "units.csv"
+        units_csv = work_dir / "spike_sorting" / probe_id / "units.csv"
         if not units_csv.exists():
             continue
         units = pd.read_csv(units_csv)
         if (units.unit_id >= SPIKE_IDS_PER_PROBE).any():
             raise ValueError(f"{probe_id}: unit ids >= {SPIKE_IDS_PER_PROBE} do not fit the SPIKE block ids")
-        waveforms, fs, nbefore = peak_waveforms(work_dir / "sorting" / probe_id / "analyzer", units)
+        waveforms, fs, nbefore = peak_waveforms(work_dir / "spike_sorting" / probe_id / "analyzer", units)
         sorter = sorting_info(work_dir, probe_id).get("sorter", "kilosort4")
         ap = next(r for r in runs if probe_id in r.probes).get_recording(StreamKind.AP, probe_id)
         channel_index = {str(c): i for i, c in enumerate(ap.channel_ids)}
@@ -574,7 +574,7 @@ def step_operation_details(processing: dict[str, Any]) -> dict[str, dict[str, st
         "mua": {"Filtering": MUA_FILTERING},
         "csd": {"CSD parameters": probe_settings("csd", "csd")},
         "quality": {"Quality parameters": probe_settings("quality", "quality")},
-        "sort": {"Sorting": json.dumps(processing.get("sorting") or {}, sort_keys=True, default=str)},
+        "spike-sort": {"Sorting": json.dumps(processing.get("spike_sorting") or {}, sort_keys=True, default=str)},
     }
 
 
