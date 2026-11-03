@@ -396,6 +396,9 @@ def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_di
         old.unlink()
     trials, run_start = extract_run_trials(run, sync, config)
     for paradigm, table in trials.items():
+        if table.columns.empty:  # no trials matched (e.g. no trial of the .tdr inside the run)
+            print(f"{run.name} {paradigm}: no trials")
+            continue
         table.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
         print(f"{run.name} {paradigm}: {len(table)} trials")
     write_run_start(work_dir, run.name, run.recorded_start_time or run.start_time, run_start)

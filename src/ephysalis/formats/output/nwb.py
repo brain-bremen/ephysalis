@@ -162,7 +162,10 @@ def session_trials(work_dir: Path, runs: list[Run], offsets: dict[str, float]) -
     tables = []
     for run in runs:
         for csv in sorted((work_dir / "trials").glob(f"{run.name}_*.csv")):
-            trials = pd.read_csv(csv)
+            try:
+                trials = pd.read_csv(csv)
+            except pd.errors.EmptyDataError:  # a paradigm without trials
+                continue
             trials.insert(0, "paradigm", _paradigm(csv, run.name))
             trials.insert(0, "run", run.name)
             trials[["start_time", "stop_time"]] += offsets[run.name]
