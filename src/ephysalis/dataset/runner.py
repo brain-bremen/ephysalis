@@ -57,17 +57,17 @@ def _sha256(data: bytes) -> str:
 
 
 def code_versions() -> dict[str, Any]:
-    """ephysalis (version, git commit when installed from a checkout) and the plugin packages' versions."""
+    """Versions of ephysalis and the plugin packages, with their git commits when installed from checkouts."""
     from importlib import metadata
 
-    from ephysalis.provenance import ephysalis_source, plugin_packages
+    from ephysalis.provenance import package_source, plugin_packages
 
-    versions: dict[str, Any] = {"ephysalis": metadata.version("ephysalis")}
-    source = ephysalis_source()
-    if source and source.get("commit"):
-        versions["ephysalis_commit"] = source["commit"] + ("+dirty" if source.get("dirty") else "")
-    for package in plugin_packages():
+    versions: dict[str, Any] = {}
+    for package in ("ephysalis", *plugin_packages()):
         versions[package] = metadata.version(package)
+        source = package_source(package)  # installed from a checkout: its commit (fixes without a new version)
+        if source and source.get("commit"):
+            versions[f"{package}_commit"] = source["commit"] + ("+dirty" if source.get("dirty") else "")
     return versions
 
 
@@ -356,6 +356,8 @@ class Runner:
             t0 = time.time()
             result = self.run_session(session)
             results[session.id] = result
+            if self.dry_run:
+                return
             if result not in ("paused", "interrupted", "locked") or time.time() - t0 > 1:
                 self._say(f"{session.id}: {result} ({(time.time() - t0) / 60:.0f} min)")
             if not self.dry_run:
@@ -363,6 +365,9 @@ class Runner:
 
         with ThreadPoolExecutor(max(1, parallel)) as pool:
             list(pool.map(one, sessions))
+        if self.dry_run:
+            self._say("dry run: nothing was run")
+            return results
         counts = {r: list(results.values()).count(r) for r in sorted(set(results.values()))}
         self._say(", ".join(f"{n} {r}" for r, n in counts.items()) or "no sessions")
         if pause_requested(self.dataset):

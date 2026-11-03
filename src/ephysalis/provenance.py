@@ -80,8 +80,14 @@ def software_versions() -> dict[str, str]:
 
 def ephysalis_source() -> dict[str, Any] | None:
     """Git commit (and uncommitted changes) of ephysalis when installed from a checkout."""
+    return package_source("ephysalis")
+
+
+def package_source(distribution: str) -> dict[str, Any] | None:
+    """Git commit (and uncommitted changes) of an installed package when installed from a checkout (e.g. a plugin
+    package installed editable); None otherwise."""
     try:
-        direct_url = json.loads(metadata.distribution("ephysalis").read_text("direct_url.json") or "{}")
+        direct_url = json.loads(metadata.distribution(distribution).read_text("direct_url.json") or "{}")
     except (metadata.PackageNotFoundError, json.JSONDecodeError):
         return None
     if not direct_url.get("url", "").startswith("file:"):
@@ -114,7 +120,8 @@ def environment() -> dict[str, Any]:
         if name:
             packages[name.lower()] = dist.version
     return {"python": sys.version.split()[0], "platform": platform.platform(),
-            "packages": dict(sorted(packages.items())), "ephysalis_source": ephysalis_source()}
+            "packages": dict(sorted(packages.items())), "ephysalis_source": ephysalis_source(),
+            "plugin_sources": {p: s for p in plugin_packages() if (s := package_source(p)) is not None}}
 
 
 def input_fingerprint(session_path: Path, exclude: list[Path] | None = None) -> dict[str, dict[str, Any]]:
