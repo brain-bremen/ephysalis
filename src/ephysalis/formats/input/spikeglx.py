@@ -26,7 +26,7 @@ import re
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ from ephysalis.session.model import ProbeInfo, Run, Session, StreamKind
 from ephysalis.timeline.clocks import SyncSource
 
 if TYPE_CHECKING:
+    from ephysalis.plugins import InputFormat
     from spikeinterface.core import BaseRecording
 
     from ephysalis.session.config import AuxChannelMap
@@ -81,6 +82,12 @@ def _num_neural_channels(meta: dict[str, str]) -> int:
 
 
 # --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
+def _this_format() -> InputFormat:
+    """This module as the input format of its sessions and runs (checked against the Protocols by
+    the plugin registry)."""
+    return cast("InputFormat", sys.modules[__name__])
+
+
 
 name = 'spikeglx'
 plugin_api_version = 1
@@ -130,7 +137,7 @@ def open_session(session_path: Path) -> Session:
     runs.sort(key=lambda r: (r.start_time or datetime.max, r.name))
     for i, run in enumerate(runs):
         run.index = i
-    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
+    return Session(name=session_path.name, path=session_path, format=_this_format(), runs=runs)
 
 
 def _open_run(run_path: Path) -> Run | None:
@@ -193,7 +200,7 @@ def _open_run(run_path: Path) -> Run | None:
         name=run_name,
         path=run_path,
         index=-1,
-        format=sys.modules[__name__],
+        format=_this_format(),
         start_time=start_time,
         duration_s=duration,
         probes=probe_infos,

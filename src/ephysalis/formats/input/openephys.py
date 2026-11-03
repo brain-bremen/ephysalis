@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -55,6 +55,7 @@ from ephysalis.formats.input.base import keep_lines
 from ephysalis.session.model import ProbeInfo, Run, Session, StreamKind
 
 if TYPE_CHECKING:
+    from ephysalis.plugins import InputFormat
     from open_ephys.analysis.recording import Recording as OERecording
 
     from ephysalis.session.config import AuxChannelMap
@@ -314,6 +315,12 @@ def recording_start_time(recording: OERecording) -> datetime | None:
 
 
 # --- the input format (ephysalis.plugins.InputFormat and capabilities) ---
+def _this_format() -> InputFormat:
+    """This module as the input format of its sessions and runs (checked against the Protocols by
+    the plugin registry)."""
+    return cast("InputFormat", sys.modules[__name__])
+
+
 
 name = 'openephys'
 plugin_api_version = 1
@@ -356,7 +363,7 @@ def open_session(session_path: Path) -> Session:
                 name=f"experiment{recording.experiment_index + 1}_recording{recording.recording_index + 1}",
                 path=session_path,
                 index=len(runs),
-                format=sys.modules[__name__],
+                format=_this_format(),
                 start_time=recording_start_time(recording),
                 duration_s=duration,
                 probes={pid: ProbeInfo(probe_id=pid, has_lf=StreamKind.LF in kinds, streams=dict(kinds))
@@ -371,7 +378,7 @@ def open_session(session_path: Path) -> Session:
                 },
             )
         )
-    return Session(name=session_path.name, path=session_path, format=sys.modules[__name__], runs=runs)
+    return Session(name=session_path.name, path=session_path, format=_this_format(), runs=runs)
 
 
 def _node(run: Run) -> str:
