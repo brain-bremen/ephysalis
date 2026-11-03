@@ -7,74 +7,87 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This project uses `uv` for environment and dependency management.
 
 ```bash
-# Install dependencies
-uv sync
+uv sync                                    # install (entry points only change on reinstall)
+uv run pytest                              # all tests; single: uv run pytest tests/test_dh5.py::test_lfp_blocks
+uv run mypy src/                           # type checking
+uv run --group docs sphinx-build docs docs/_build   # documentation (CI builds it with -W)
 
-# Run all tests
-uv run pytest
-
-# Run a single test file / test
-uv run pytest tests/test_dh5.py
-uv run pytest tests/test_dh5.py::test_lfp_blocks
-
-# Inspect a (SpikeGLX or Open Ephys) session
-uv run ephysalis inspect <session_path> --conditions
-
-# Extract and cache sync edges once (slow: reads the AP files), then show trial timing
-uv run ephysalis sync <session_path>
-uv run ephysalis inspect <session_path> --timing
-
-# Full preprocessing into a work dir (default <session>/ephysalis); sorting needs `uv sync --extra sorting` and a CUDA GPU.
-# Every step takes several sessions; per-session paths then need {session}, e.g. --work-dir D:/work/{session}
-uv run ephysalis timing <session_path> [<session_path> ...] --work-dir <dir>
-uv run ephysalis lfp <session_path> --work-dir <dir>
-uv run ephysalis mua <session_path> --work-dir <dir>
-uv run ephysalis sort <session_path> --work-dir <dir> --scratch-dir <fast local disk>
-uv run ephysalis export <session_path> --work-dir <dir> [--output-format nwb|dh5] [--raw] [--bids <root>]   # one file from the outputs above
-
-# Redo the processing of an output file from its embedded processing record (dry run without --run)
+# One session (every step also takes several; per-session paths then need {session}, e.g. --work-dir D:/work/{session})
+uv run ephysalis inspect <session> --conditions
+uv run ephysalis align-clocks <session> --work-dir <dir>      # sync edges (cached; reads the AP files) -> clocks/
+uv run ephysalis extract-trials|extract-events|extract-behavior <session> --work-dir <dir>
+uv run ephysalis calibrate|lfp|quality|csd|mua <session> --work-dir <dir>
+uv run ephysalis sort <session> --work-dir <dir> --scratch-dir <fast local disk>   # needs `uv sync --extra sorting`
+uv run ephysalis export <session> --work-dir <dir> [--output-format nwb|dh5] [--per-run] [--raw] [--bids <root>]
 uv run ephysalis reproduce <file.nwb|file.dh5> --work-dir <new dir> [--session <path>] [--run]
 
-# Type checking
-uv run mypy src/
-
-# Documentation (Sphinx + MyST, docs/; CI builds it with -W)
-uv run --group docs sphinx-build docs docs/_build
+# A dataset (dataset.toml: defaults, per-session overrides, steps and their options)
+uv run ephysalis run dataset.toml [--sessions a,b] [--steps lfp,export] [--parallel N] [--dry-run]
+uv run ephysalis status dataset.toml
+uv run ephysalis pause dataset.toml        # running steps finish, then the runners stop; `run` resumes
 ```
 
-User documentation lives in `docs/` (the README is only a short entry point). The file formats of the legacy readers are specified in `docs/legacy/<format>.md`; keep them in sync when a reader changes.
+The documentation (`docs/`) has only the overview and the roadmap while the design is in its alpha stage (no
+user guide yet). Lab-specific readers and metadata plugins live in their own repositories:
+[ephysalis-bremen](https://github.com/brain-bremen/ephysalis-bremen) (DAQ with calibration, MC_Rack, UFF; VStim,
+VStim 1.x trials; the historic formats' documentation) and
+[ephysalis-freiburg](https://github.com/brain-bremen/ephysalis-freiburg) (`psychtoolbox_neuropixels_freiburg`).
+Nothing in the core may know about them.
 
 ## Architecture
 
-**ephysalis** (formerly oecon) converts extracellular electrophysiology sessions (SpikeGLX, Open Ephys) into one NWB or DH5 (the lab's DAQ-HDF5 format) file per session, optionally inside a BIDS dataset. The former Open Ephys → DH5 converter (`ephysalis convert`) was replaced by this pipeline; `tests/data/Test_2026-03-12_16-32-08_exp1_rec1.dh5` (and its `.config.json`) is its output, kept as reference for the raw data and EV02 of the new DH5 writer (`tests/test_raw_mua_events.py`).
+**ephysalis** (formerly oecon) converts extracellular electrophysiology sessions into one NWB or DH5 (the lab's
+DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
+
+- `plugins.py` — the plugin interface (`PLUGIN_API_VERSION`): runtime-checkable Protocols. Input formats
+  (`ephysalis.input_formats` entry points) have a required core (`can_read_session_folder`, `open_session`,
+  `get_stream_recording`, `default_auxiliary_channel_roles`) and optional capabilities (`ReadsDigitalLineEdges`,
+  `ReadsAuxiliaryAnalogInputs`, `LocatesSyncPulseChannels`, `HasSynchronisedTimestamps`, `ReadsEventWords`,
+  `ReadsTextMessages`, `ReadsTrialDescriptorEvents`, `ListsStreamChannelIds`, `ComputesChannelGainCalibration`).
+  Metadata plugins (`ephysalis.metadata_plugins`) have `name`/`plugin_api_version` and `ExtractsTrialTables`,
+  `EstimatesRunStartTime`, `AddsSessionConfigFromMetadataFiles`, `NamesEventWords`. Plugins are usually modules of
+  functions; loading checks them (`plugin_problems`) and skips misfits with a warning; `require` before using a
+  capability. `registry.py` gives typed entry point targets, so pyright checks a module against the Protocols.
+  Use long, explicit names for plugin functions.
+- `session/` — `model.py` (format-independent Session → Run → ProbeInfo/streams, `StreamKind`; `Run.extra` is
+  private to the format), `config.py` (`SessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 8 + `MIGRATIONS`),
+  `schema.py` (`migrate`; raise the version and add a migration whenever a config format changes), `probes.py`
+  (probes defined in `session.toml`, geometry files relative to the config).
+- `formats/input/` — `spikeglx.py`, `openephys.py` (Binary, NWB, legacy Open Ephys via open-ephys-python-tools, own
+  lazy extractor for `.continuous`), `base.py` (`open_session`). `formats/output/` — `nwb.py`, `dh5.py` (CONT
+  ranges from `dhspec`, SPIKE blocks need dh5io with SPIKE writing), `bids.py` (BEP032 `ecephys`; validate with
+  `bids-validator-deno --schema https://bids-specification.readthedocs.io/en/bep032/schema.json`). `matfile.py`.
+- `metadata/` — `base.py` (`run_trial_tables`: the run's `metadata_plugin` or the first plugin that recognises it;
+  `Paradigm`), `runstart.py` (better run start times, `<work>/run_start/`, applied in `_configure`).
+- `timeline/` — `clocks.py` (sync edges → `ClockMap` per stream on the reference clock, `RunSync`, `SyncEdgeCache`
+  in `<work>/sync`), `steps.py` (the align-clocks and extract steps), `events.py` (digital line edges and event
+  words per run, `events/<run>.csv`; DH5 codes made at export), `annotations.py`, `auxsignals.py` (photodiode,
+  wheel, eye; role access via `AuxChannelMap`). Don't name a module `aux.py` (reserved on Windows).
+- `processing/` — `lfp.py`, `mua.py`, `csd.py` (port of Borisov's `dh_csd`), `linenoise.py` (port of
+  `dh_remove_50hz`), `quality.py` (channel selection). All filters are acausal; `docs/filters.md` and
+  `lfp.LFP_FILTERING` / `mua.MUA_FILTERING` describe them — update together.
+- `sorting/` — `spikes.py` (sorting per probe over the concatenated runs, resumable from its outputs, `cut_spikes`),
+  `kilosort_checkpoints.py`.
+- `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
+  in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
+- `dataset/` — `config.py` (`dataset.toml`: defaults < session file < inline overrides, `STEP_INPUTS` = the step
+  graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
+  stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
+  `state_dir`).
+- `cli/` — `main.py`, `session_commands.py` (the steps; `per_session` for several sessions), `dataset_commands.py`
+  (`run`, `status`, `pause`). GUI (`gui/`, PySide6) runs each step as `python -m ephysalis.cli.main <step>`.
 
 ### Tests
 
-The Open Ephys tests use `tests/data/Test_2026-03-12_16-32-08` (NI-DAQ aux stream, VStim). `tests/test_openephys_formats.py` runs the Open Ephys reader on one recording in each of the three formats from the open-ephys-python-tools repository (set `OPEN_EPHYS_TOOLS_TEST_DATA` to its `tests/data`; CI clones it at a fixed commit) and on a synthetic Neuropixels Binary recording (`tests/data/openephys_np1_settings.xml` from the probeinterface test data). `tests/test_realdata_spikeglx.py` runs only when `EPHYSALIS_TEST_SESSION` points to a SpikeGLX session processed by the MATLAB pipeline. `tests/data/SOMxCD1_172_20250109_crop` is a 5 s real SpikeGLX crop (made with `tools/make_spikeglx_test_dataset.py`) with MATLAB reference output, used by `tests/test_spikeglx_crop.py` and most pipeline tests. All other tests use synthetic data.
-
-The `pytest-plt` fixture (`plt`) is available in tests for inline plotting during development — tests using it will generate plot files when run with `--plt`.
-
-## Pipeline
-
-This is the new architecture that replaces the lab's MATLAB Neuropixels pipeline (see `docs/roadmap.md`):
-
-- `session.py` — format-independent model: Session → Run → ProbeInfo/streams (`StreamKind`); core code uses only the typed fields (`streams`, `clock_start_s`, `start_time_method`, ...), `Run.extra` is private to the format that wrote it
-- `io/` — `InputFormat` readers (`spikeglx.py`, `openephys.py`) registered under the `ephysalis.input_formats` entry point group. They return lazy spikeinterface recordings, and discovery parses metadata only. Readers detect Neuropixels probes; other probes are defined in `session.toml` (`io/probes.py`, `configure_probes` after loading the config; `Run.get_recording` selects their channels and attaches the probeinterface geometry). Formats with synchronised timestamps (Open Ephys, DAQ) provide `clock_maps` instead of sync pulses; `default_aux_channels` gives the aux roles used without `session.toml`. `openephys.py` reads the Binary, NWB and legacy Open Ephys formats with open-ephys-python-tools (format and recording detection, stream metadata, TTL events, messages) and its own lazy `OpenEphysRecordingExtractor` for the samples (the package's legacy loader copies whole channels into memory, so legacy `.continuous` records are memory-mapped directly); Network Events words are rebuilt from the TTL line states in file order (Binary events are loaded unsorted, `sort_events = False`).
-- `stimulus/` — `StimulusSystem` plugins (`ephysalis.stimulus_systems`). `vstim.py` reads VStim TDR files (vstim package) and times trials with the trial start trigger line (role `trial_start`) matched to the Open Ephys `TRIAL_START` messages. `stimstage.py` ports the lab's MATLAB `getStimFromIndex.m`, whose conditions are enumerated column-major (MATLAB `ind2sub`), so the field order of `params` matters.
-- `legacy/` — readers and plugins for the lab's historic recordings, to be removed once those datasets are converted; nothing outside `legacy/` and `tests/legacy/` may import it (`tests/test_legacy_isolation.py`), it plugs in only through entry points and the generic interfaces. `daq.py` reads the lab's `.daq` files (versions 1.0-3.3; one run per file or per contiguous part, one stream per board, channels `AI<n>`, probes only from `session.toml`; boards synchronised from the copied trigger lines, `board_fit`; record index cached on disk, `cache_dir`). `uff.py` reads DataWave UFF files (Eddi 1999; M/P block pairs, P mapped onto M from the pulses on channel 15). `mcd.py` reads MC_Rack files (Iris 2010-2011; chunks `tag[8] + int64 size`, index from `IDXIDX`, recordings split over several files joined into one run, trigger events with trial/stimulus numbers as `read_trial_descriptors`); it was checked against the 32-bit MCS Neuroshare DLL (`nsMCDLibrary.dll` via ctypes from a 32-bit Python, not part of the repo; note that the DLL mixes up files with the same name in different folders). `vstim_td01.py` gives the trials of DAQ runs: `TD01` records (`DaqFormat.read_trial_descriptors`) + the day's `.tdr` (start = last `trial_start` edge, end from a `trial_end` line, the `.tdr` virtual trigger 11 or the outcome pulse + 335 ms; frozen `TD01` matched by time), and its `run_start` on the VStim PC's clock (`pcclock.py`). The real DAQ/UFF data may not be published: `tests/legacy/` writes synthetic files; the readers were checked against the BIDS conversions' code on real files. Tests of format-independent steps use synthetic Open Ephys sessions (`tests/synthetic.py`), never the legacy formats.
-- `sync.py` — sync edges → `ClockMap` per stream onto the reference probe's clock (`RunSync`). `auxsignals.py` — photodiode pulses, wheel speed, `AuxSignals` (role access via `AuxChannelMap`). `timing.py` — `extract_run_timing` (sync, trials of all paradigms, running speed). Formats provide `sync_source` (channel + bit) and `read_aux_*` on `InputFormat`. Sync edges are cached per run by `SyncEdgeCache` (default `<session>/ephysalis/sync/<run>.npz`, filled by `ephysalis sync`), because reading a probe's sync channel reads its whole AP file; code that reads AP data anyway should feed an `EdgeAccumulator` and `SyncEdgeCache.store` the result. Don't name a module `aux.py` (reserved on Windows).
-- `sorting.py` — spike sorting per probe over the concatenated runs (sorter from `[sorting]` in `session.toml`, default Kilosort4, via spikeinterface `run_sorter`; SortingAnalyzer on the 300–6000 Hz band-pass filtered copy) (`concatenate_runs`, `sort_probe`), `cut_spikes` back into runs on the reference clock. Steps reuse existing outputs (local copy, sorter folder) so a crashed run can be resumed; inside Kilosort, `kilosort_checkpoints.py` checkpoints the long steps by temporarily replacing `datashift.run`, `spikedetect.run` and `template_matching.extract` (checked against Kilosort 4.1.7). `lfp.py` — per-run LFP at 1 kHz (spikeinterface polyphase `resample`). `nwb.py` — session NWB file from the work-dir outputs; session time 0 is 1 s before the first run, runs are placed by their start times (SpikeGLX `fileCreateTime`, 1 s resolution). `dh5.py` — session DH5 file (raw (`--raw`), LFP and MUA CONT blocks per channel with extra INDEX regions for drifting clocks and for sample periods that are not whole ns (30 kHz), one timestamps-only SPIKE block per unit with `MEAN_WAVEFORM`, TRIALMAP; parameters and unit metrics in `_trials.csv`/`_units.csv` next to it); needs dh5io with SPIKE writing (branch `add-spike-blocks`). `export --per-run` writes one file per run on its own clock (`nwb.time_axis`, `Run.clock_start_s`, e.g. the DAQ clock; BIDS `run-<n>`, n = position among the included runs). `bids.py` — BIDS `ecephys` dataset around the NWB files (sidecars read from the NWB file); DH5 files get a BIDS-like layout with sidecars from `nwb.session_metadata_nwbfile`. `ecephys` is only in BEP032 (unreleased), so validate with the BEP032 schema: `uv run bids-validator-deno <root> --schema https://bids-specification.readthedocs.io/en/bep032/schema.json` (`tests/test_bids.py` does this). The packaged validator lacks permissions for UNC paths (X: share); there, run `deno run -A <venv>/Lib/site-packages/bids_validator_deno/bids-validator.js <root> --schema ...`.
-- `matfile.py` — MAT v5/v7.3 reader that keeps struct field order (`MATLAB_fields`)
-- `provenance.py` — reproducibility: every step appends its invocation (argv, options, `session.toml`, all installed package versions, ephysalis git commit, input file sizes and SHA-256 of the metadata files) to `<work>/provenance/<step>.json`; `export` embeds all of it as JSON in the output (NWB `scratch/ephysalis_processing`, DH5 attribute `Processing` of `/Operations/nnn_ephysalis_export`); `ephysalis reproduce` replays it. Keep new processing deterministic (fixed seeds, e.g. `sorting.ANALYZER_SEED`); Kilosort on a GPU is not bit-exact.
-- `schema.py` — schema versions of the config files (`session.toml`: `schema_version`, `session_config.SCHEMA_VERSION`; conversion JSON: `config_version`, `config.VERSION`). Raise the version and add a migration (`MIGRATIONS[n]`: raw data n → n+1) whenever a config format changes (fields added, removed, renamed, or meanings changed), and list the change in the `session_config` docstring; newer files are rejected.
-- `session_config.py` — `SessionConfig` ↔ `session.toml`; `migrate.py` migrates the legacy Excel/txt files.
-- `events.py` — TTL edges of the aux stream (`InputFormat.read_ttl_events`, optionally only some `lines`: `[events] lines_without_role = false`) and network events (`read_network_events`, Open Ephys Network Events from VStim) per run on the reference clock (`events/<run>.csv`, written by `timing`); DH5 codes `+line`/`-line` and `word + 1000` as in the old converter. `calibration.py` — `ephysalis calibrate`: gains from a calibration-sine run (`fit_sine`), `<work>/calibration.json`, applied as `ProbeInfo.gain_factors` in every step (`_configure` in the CLI). `linenoise.py` — port of Borisov's MATLAB `dh_remove_50hz` (recorded mains, `[line_noise]`), in place on the 1 kHz LFP by `ephysalis lfp`. `csd.py` — port of Borisov's C++ `dh_csd` V3.1 [RBF] as one operator matrix (`ephysalis csd`, `[probes.<id>.csd]`); DH5 CONT 8001… with `dh_csd`'s int16 scaling. `tests/test_preprocessing_lab.py` checks both against literal ports of the MATLAB/C++ code. `quality.py` — `ephysalis quality`: channel selection per run on the LFP (port of the BIDS conversions' `channel_quality`), `<work>/quality/<run>_<probe>.json`; the CSD takes the good channels, so CSD channels can differ between runs (DH5 blocks then have the regions of their runs only). `annotations.py` — pulses of the trigger lines (active level from `[events.lines]`) and markers (`[[events.markers]]`) for DH5 `/Intervals`/`/Markers`, NWB `trigger_pulses`/`markers`, BIDS `events.tsv`. `runstart.py` — better run start times from the stimulus system (`StimulusSystem.run_start`), written by `timing` to `<work>/run_start/`, applied to `Run.start_time` in `_configure` (`Run.recorded_start_time` keeps the recording's; BIDS `acq_time`, `scans.tsv`). `mua.py` — MUA envelope like `lfp.py` (300 Hz Butterworth high-pass forward-backward, rectified, resampled to 1 kHz). All filters are acausal (zero phase); `docs/filters.md` lists each one with its reach into the future (checked by `tests/test_filters.py`), and the descriptions written to NWB/DH5/BIDS come from `lfp.LFP_FILTERING` / `mua.MUA_FILTERING`; update all three when a filter changes.
-- CLI: `cli/main.py` (subcommand dispatcher), `cli/session_commands.py` (`inspect`, `init`, `sync`, `timing`, `calibrate`, `lfp`, `quality`, `csd`, `mua`, `sort`, `export`, `reproduce`); `per_session` runs a step for several sessions (placeholder `{session}` in per-session paths, failures don't stop the others).
-
-GUI (`gui/`, PySide6): `main_window.py` shows the converter page (`session_page.py`): a session list with a work dir template, the `session.toml` of the selected session ("Apply to sessions…" copies sorting, aux channels, events etc. to the others), and the steps for all sessions. Each step runs as `python -m ephysalis.cli.main <step>` in a `QProcess` (`pipeline.step_commands`), so sorting cannot take the GUI down; a failing session is skipped and the rest continue; `config_widget.ConfigStepWidget` generates forms from pydantic models (used for `session.toml`). GUI tests run offscreen (`tests/test_gui_session.py`).
-
-Entry points only change when the package is reinstalled (`uv sync`).
+`tests/data/SOMxCD1_172_20250109_crop` is a 5 s real SpikeGLX crop with MATLAB reference output (most pipeline
+tests); its trials come from the test metadata plugin `tests/support/trial_table_plugin.py` (registered by a
+conftest fixture; subprocesses do not see it). `tests/data/Test_2026-03-12_16-32-08` is an Open Ephys session
+(NI-DAQ aux, VStim); `tests/test_openephys_formats.py` also uses open-ephys-python-tools' test data
+(`OPEN_EPHYS_TOOLS_TEST_DATA`). `tests/synthetic.py` writes synthetic Open Ephys sessions. The plugin
+repositories run their tests against this repository's `tests/data` (`EPHYSALIS_TEST_DATA`).
 
 ### Local setup notes
 
-The working copy lives on a network share (`X:`). Installing into a `.venv` there fails with file locks, so keep the venv local, e.g. `UV_PROJECT_ENVIRONMENT=C:/Users/<you>/.venvs/ephysalis UV_LINK_MODE=copy`. Git needs `-c safe.directory=*` (or a `safe.directory` entry) on that share.
+Working copies on a network share: keep the venv on a local disk (`UV_PROJECT_ENVIRONMENT`, `UV_LINK_MODE=copy`),
+git needs `safe.directory`. A stale `src/ephysalis.egg-info` (from an old install) shadows the entry points of the
+current code: delete it.
