@@ -493,12 +493,12 @@ def _add_events(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict
         "line": "TTL line (1-based), -1 for network events",
         "state": "TTL level after the edge (1 rising, 0 falling), -1 for network events",
         "word": "network event word (VStim event code), -1 for TTL edges",
-        "code": "DH5 event code (+line / -line, word + offset)", "label": "role of the TTL line or VStim event name",
+        "label": "role of the TTL line or VStim event name",
     }
     values = {
         "timestamp": events.time.to_numpy(float), "run": events.run.to_numpy(str),
         "source": events.source.to_numpy(str), "label": events["name"].fillna("").to_numpy(str),
-        **{c: events[c].fillna(-1).to_numpy(np.int64) for c in ("line", "state", "word", "code")},
+        **{c: events[c].fillna(-1).to_numpy(np.int64) for c in ("line", "state", "word")},
     }
     table = DynamicTable(
         name="events", description="TTL edges of the aux stream and network events (see ephysalis.events)",

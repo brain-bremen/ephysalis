@@ -27,7 +27,7 @@ of the BIDS schema are written for images (they require ``SpatialReference`` for
 With ``task`` (``session.toml`` ``task``, per run or per session) the files get the
 ``task-<label>`` entity, with one file per run (``export --per-run``) the ``run-<n>`` entity
 (``n``: position of the run among the included runs).
-``acq_time`` is the start of the first run of the file (after ``ephysalis timing`` the better
+``acq_time`` is the start of the first run of the file (after ``ephysalis extract-trials`` the better
 start time a stimulus system gives, :mod:`ephysalis.runstart`).
 
 Labels are the subject and session

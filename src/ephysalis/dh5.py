@@ -355,7 +355,7 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
     from dhspec.event_triggers import EV_DATASET_NAME
 
     from ephysalis.annotations import active_state, event_code_names as line_code_names
-    from ephysalis.events import event_code_names, load_run_events
+    from ephysalis.events import dh5_event_codes, event_code_names, load_run_events
     from ephysalis.session_config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
@@ -367,7 +367,7 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
             continue
         events = load_run_events(path)
         times.append(_ns(events.time.to_numpy(float) + offsets[run.name]))
-        codes.append(events.code.to_numpy(np.int32))
+        codes.append(dh5_event_codes(events, events_config.network_events_offset))
         ttl = events[(events.source == "ttl") & (events.name != "")]
         for line, name in ttl.groupby("line").name.first().items():
             on = int(line) if active_state(name, events_config) else -int(line)

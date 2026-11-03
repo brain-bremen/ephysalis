@@ -30,7 +30,10 @@ uv tool install git+https://github.com/brain-bremen/ephysalis.git
 ephysalis-gui                                          # GUI: sessions, session.toml, steps
 ephysalis inspect <session> --conditions               # runs, probes, streams, paradigms
 ephysalis init <session>                               # create session.toml
-ephysalis timing <session> --work-dir D:/work/{session}
+ephysalis align-clocks     <session> --work-dir D:/work/{session}   # all streams on one clock
+ephysalis extract-trials   <session> --work-dir D:/work/{session}   # trial tables (stimulus system)
+ephysalis extract-events   <session> --work-dir D:/work/{session}   # digital lines, network events
+ephysalis extract-behavior <session> --work-dir D:/work/{session}   # eye position, running speed
 ephysalis lfp    <session> --work-dir D:/work/{session}
 ephysalis sort   <session> --work-dir D:/work/{session} --scratch-dir <fast local disk>
 ephysalis export <session> --work-dir D:/work/{session} --output-format nwb|dh5 [--bids <root>]

@@ -11,12 +11,12 @@ BIDS `events.tsv`.
 Behavioural signals such as running speed, eye position and lever presses do not come from these
 plugins. They come from the roles of the aux channels (see [Behaviour signals](#behaviour-signals)).
 
-## How `ephysalis timing` uses a plugin
+## How `ephysalis extract-trials` uses a plugin
 
-For each included run, `ephysalis timing` (`ephysalis.timing.extract_run_timing`) does this:
+For each included run, `ephysalis extract-trials` (`ephysalis.timing.extract_run_trials`) does this:
 
-1. **Clocks.** It synchronises the run's streams, which gives a `RunSync`: clock maps from every
-   stream onto the reference clock.
+1. **Clocks.** It takes the run's clock alignment (`ephysalis align-clocks`), a `RunSync`: clock
+   maps from every stream onto the reference clock.
 2. **Aux signals.** It opens the aux channels with their roles from `[aux_channels]`, which gives
    `AuxSignals`.
 3. **Choosing the system.**
@@ -192,8 +192,9 @@ day's `.tdr`. It is described in {doc}`legacy/vstim-td01`. It is also the only p
 (behaviour-signals)=
 ## Behaviour signals
 
-These signals are decoded from aux channel roles by `ephysalis.timing`, `ephysalis.auxsignals` and
-`ephysalis.annotations`, independent of the stimulus system:
+These signals are decoded from aux channel roles by `ephysalis extract-behavior` and
+`extract-events` (`ephysalis.timing`, `ephysalis.auxsignals`) and the export (`ephysalis.annotations`),
+independent of the stimulus system:
 
 | Role(s) | Output |
 |---|---|

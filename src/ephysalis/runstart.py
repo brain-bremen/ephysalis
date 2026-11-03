@@ -2,7 +2,7 @@
 that runs minutes off), provided by the stimulus system from its own clock
 (:meth:`ephysalis.stimulus.base.StimulusSystem.run_start`).
 
-``ephysalis timing`` writes ``<work>/run_start/<run>.json`` for every run the stimulus system
+``ephysalis extract-trials`` writes ``<work>/run_start/<run>.json`` for every run the stimulus system
 gives a start for; every step then uses these start times (:func:`apply_run_starts`:
 ``Run.start_time``, the NWB / DH5 time axis of a session file, BIDS ``acq_time``). A run without
 one, recorded on the same day as runs with one, is shifted by the median difference between the

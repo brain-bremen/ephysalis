@@ -171,9 +171,9 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _sync(args: argparse.Namespace) -> int:
-    from ephysalis.sync import load_or_extract_edges
-    from ephysalis.timing import default_work_dir, aux_channel_map
+def _align_clocks(args: argparse.Namespace) -> int:
+    from ephysalis.sync import load_or_extract_edges, synchronize_run
+    from ephysalis.timing import aux_channel_map, default_work_dir, write_clock_report
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -188,11 +188,18 @@ def _sync(args: argparse.Namespace) -> int:
             continue
         if args.force and cache.path(run.name).exists():
             cache.path(run.name).unlink()
-        edges = load_or_extract_edges(run, aux_channel_map(run, config), cache)
-        counts = ", ".join(f"{stream} {e.samples.size}" for stream, e in edges.items())
-        print(f"{run.name}: sync edges {counts}")
-    _record_step("sync", args, session, work_dir, config, config_path)
-    print(f"Cache: {cache.directory}")
+        if run.format.clock_maps(run, None) is None:  # formats with synchronised timestamps have no edges
+            edges = load_or_extract_edges(run, aux_channel_map(run, config), cache)
+            counts = ", ".join(f"{stream} {e.samples.size}" for stream, e in edges.items())
+            print(f"{run.name}: sync edges {counts}")
+        sync = synchronize_run(run, aux_channel_map(run, config), cache=cache)
+        write_clock_report(work_dir, run.name, sync)
+        for stream, clock in sync.maps.items():
+            if stream != sync.reference:
+                print(f"{run.name}: {stream} -> {sync.reference} {clock.effective_sampling_frequency:.4f} Hz, "
+                      f"max residual {clock.max_residual_s() * 1e3:.3f} ms")
+    _record_step("align-clocks", args, session, work_dir, config, config_path)
+    print(f"Sync edge cache: {cache.directory}, clock alignment: {work_dir / 'clocks'}")
     return 0
 
 
@@ -362,42 +369,91 @@ def _load_config_for(session_path: Path, work_dir: Path, config: str | None) -> 
     return (load_session_config(path) if path else None), path
 
 
-def _timing(args: argparse.Namespace) -> int:
-    import numpy as np
-
-    from ephysalis.runstart import write_run_start
-
-    from ephysalis.timing import default_work_dir, extract_run_timing
+def _extract_step(args: argparse.Namespace, step: str, extract: Callable[[Run, RunSync, SessionConfig | None, Path], None]
+                  ) -> int:
+    """Run ``extract(run, sync, config, work_dir)`` for every selected run on its clock alignment
+    (from the sync edge cache, extracted on demand) and record ``step``."""
+    from ephysalis.timing import align_run_clocks, default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
     config, config_path = _load_config_for(session.path, work_dir, args.config)
     _configure(session, config, config_path, work_dir, calibration=False)
     cache = SyncEdgeCache(work_dir / "sync")
-    (work_dir / "trials").mkdir(parents=True, exist_ok=True)
-    (work_dir / "running_speed").mkdir(exist_ok=True)
-    (work_dir / "eye").mkdir(exist_ok=True)
-    (work_dir / "events").mkdir(exist_ok=True)
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
             continue
-        timing = extract_run_timing(run, config, cache)
-        for paradigm, trials in timing.trials.items():
-            trials.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
-            print(f"{run.name} {paradigm}: {len(trials)} trials")
-        write_run_start(work_dir, run.name, run.recorded_start_time or run.start_time, timing.run_start)
-        if timing.run_start is not None:
-            print(f"{run.name}: start {timing.run_start.start_time.isoformat()} ({timing.run_start.method})")
-        if timing.running_speed is not None:
-            np.save(work_dir / "running_speed" / f"{run.name}.npy", timing.running_speed.astype(np.float32))
-        if timing.eye_position is not None:
-            np.save(work_dir / "eye" / f"{run.name}.npy", timing.eye_position)
-        if timing.events is not None:
-            timing.events.to_csv(work_dir / "events" / f"{run.name}.csv", index=False)
-            print(f"{run.name}: {len(timing.events)} events")
-    _record_step("timing", args, session, work_dir, config, config_path)
+        extract(run, align_run_clocks(run, config, cache), config, work_dir)
+    _record_step(step, args, session, work_dir, config, config_path)
     print(f"Output: {work_dir}")
+    return 0
+
+
+def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
+    from ephysalis.runstart import write_run_start
+    from ephysalis.timing import extract_run_trials
+
+    (work_dir / "trials").mkdir(parents=True, exist_ok=True)
+    for old in (work_dir / "trials").glob(f"{run.name}_*.csv"):
+        old.unlink()
+    _, trials, run_start = extract_run_trials(run, sync, config)
+    for paradigm, table in trials.items():
+        table.to_csv(work_dir / "trials" / f"{run.name}_{paradigm}.csv", index=False)
+        print(f"{run.name} {paradigm}: {len(table)} trials")
+    write_run_start(work_dir, run.name, run.recorded_start_time or run.start_time, run_start)
+    if run_start is not None:
+        print(f"{run.name}: start {run_start.start_time.isoformat()} ({run_start.method})")
+
+
+def _write_events(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
+    from ephysalis.timing import extract_run_events
+
+    (work_dir / "events").mkdir(parents=True, exist_ok=True)
+    events = extract_run_events(run, sync, config)
+    events.to_csv(work_dir / "events" / f"{run.name}.csv", index=False)
+    print(f"{run.name}: {len(events)} events")
+
+
+def _write_behavior(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
+    import numpy as np
+
+    from ephysalis.timing import extract_run_behavior
+
+    running_speed, eye_position = extract_run_behavior(run, sync, config)
+    for folder, signal, what in (("running_speed", running_speed, "running speed"), ("eye", eye_position, "eye position")):
+        path = work_dir / folder / f"{run.name}.npy"
+        path.unlink(missing_ok=True)
+        if signal is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(path, signal.astype(np.float32))
+            print(f"{run.name}: {what}, {len(signal)} samples")
+
+
+def _extract_trials(args: argparse.Namespace) -> int:
+    return _extract_step(args, "extract-trials", _write_trials)
+
+
+def _extract_events(args: argparse.Namespace) -> int:
+    return _extract_step(args, "extract-events", _write_events)
+
+
+def _extract_behavior(args: argparse.Namespace) -> int:
+    return _extract_step(args, "extract-behavior", _write_behavior)
+
+
+def _timing(args: argparse.Namespace) -> int:
+    """Deprecated: align-clocks, extract-trials, extract-events and extract-behavior in a row."""
+    import copy
+
+    logger.warning("`ephysalis timing` is deprecated: it runs align-clocks, extract-trials, extract-events "
+                   "and extract-behavior")
+    first = copy.copy(args)
+    first.cache_dir, first.force = None, False
+    for func in (_align_clocks, _extract_trials, _extract_events, _extract_behavior):
+        code = func(first if func is _align_clocks else args)
+        if code:
+            return code
     return 0
 
 
@@ -580,8 +636,9 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=per_session(_inspect))
 
     p = sub.add_parser(
-        "sync",
-        help="Extract the sync edges of all streams once and cache them (reads the full AP files)",
+        "align-clocks", aliases=["sync"],
+        help="Put every stream of a run on the reference clock: extract the sync-pulse edges of all streams "
+        "(cached; reads the full AP files) and match them; writes <work-dir>/clocks/<run>.json",
     )
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")
     p.add_argument("--format", help="Input format (default: auto-detect)")
@@ -590,7 +647,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
     p.add_argument("--cache-dir", help="Sync edge cache (default: <work-dir>/sync)")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
-    p.set_defaults(func=per_session(_sync))
+    p.set_defaults(func=per_session(_align_clocks))
 
     p = sub.add_parser(
         "sort",
@@ -609,16 +666,23 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--keep-binary", action="store_true", help="Keep the local binary copy (e.g. for Phy)")
     p.set_defaults(func=per_session(_sort))
 
-    p = sub.add_parser(
-        "timing",
-        help="Write trial tables (reference clock), running speed (1 kHz, cm/s) and eye position (1 kHz, V) of every run",
-    )
-    p.add_argument("sessions", nargs="+", type=Path, metavar="session")
-    p.add_argument("--format", help="Input format (default: auto-detect)")
-    p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
-    p.add_argument("--work-dir", help="Output folder with sync/, trials/, running_speed/ (default: <session>/ephysalis)")
-    p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.set_defaults(func=per_session(_timing))
+    for name, func, help_text, outputs in (
+        ("extract-trials", _extract_trials, "Write the trial tables of all paradigms of the stimulus system and the "
+         "run start times from its clock (on the reference clock)", "trials/, run_start/"),
+        ("extract-events", _extract_events, "Write the edges of the digital lines and the network events of every run "
+         "(on the reference clock)", "events/"),
+        ("extract-behavior", _extract_behavior, "Write the eye position (1 kHz, V) and running speed (1 kHz, cm/s) of "
+         "every run (on the reference clock)", "eye/, running_speed/"),
+        ("timing", _timing, "Deprecated: align-clocks, extract-trials, extract-events and extract-behavior in a row",
+         "sync/, clocks/, trials/, run_start/, events/, eye/, running_speed/"),
+    ):
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("sessions", nargs="+", type=Path, metavar="session")
+        p.add_argument("--format", help="Input format (default: auto-detect)")
+        p.add_argument("--config", help=f"Session config (default: {SESSION_CONFIG_FILENAME} in the session or work dir)")
+        p.add_argument("--work-dir", help=f"Output folder with {outputs} (default: <session>/ephysalis)")
+        p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+        p.set_defaults(func=per_session(func))
 
     p = sub.add_parser("lfp", help="Write the LFP of every run and probe, downsampled with an anti-alias filter")
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")

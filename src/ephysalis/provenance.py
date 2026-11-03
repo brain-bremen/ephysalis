@@ -20,7 +20,7 @@ embeds it as JSON in the output file:
 that redo the processing (``ephysalis reproduce``) and :func:`compare_environment` /
 :func:`compare_inputs` what differs from the recorded environment and inputs.
 
-Reproducible are: sync, timing, LFP, the SortingAnalyzer (fixed seeds) and the export.
+Reproducible are: the clock alignment, trials, events, behaviour signals, LFP, the SortingAnalyzer (fixed seeds) and the export.
 Kilosort on a GPU is not bit-exact between runs (nor between GPUs and CUDA versions).
 """
 
@@ -43,9 +43,13 @@ if TYPE_CHECKING:
 RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
 # steps in pipeline order, as replayed by ``ephysalis reproduce``
-REPLAY_STEPS = ("sync", "timing", "lfp", "mua", "sort", "export")
+# (``sync`` and ``timing``: records of work dirs from before the split of ``timing`` into
+# align-clocks and the extract steps)
+CLOCK_AND_EXTRACT_STEPS = ("align-clocks", "extract-trials", "extract-events", "extract-behavior")
+REPLAY_STEPS = ("sync", "timing", *CLOCK_AND_EXTRACT_STEPS, "lfp", "mua", "sort", "export")
 # all steps in pipeline order: orders step invocations recorded within the same second
-STEP_ORDER = ("sync", "timing", "calibrate", "lfp", "quality", "csd", "mua", "sort", "export")
+STEP_ORDER = ("sync", "timing", *CLOCK_AND_EXTRACT_STEPS, "calibrate", "lfp", "quality", "csd", "mua", "sort",
+              "export")
 # options not replayed: outputs and caches outside the work dir
 _NOT_REPLAYED = {"output", "bids", "existing", "cache_dir", "subject", "session_label", "dataset_name"}
 NWB_SCRATCH_NAME = "ephysalis_processing"
@@ -202,7 +206,7 @@ def step_operations(processing: dict[str, Any],
                  "Options": json.dumps(record.get("options") or {}, sort_keys=True, default=str),
                  "Config file": record.get("config_file") or ""}
         attrs.update((details or {}).get(step, {}))
-        operations.append((f"ephysalis_{step}", date, attrs))
+        operations.append((f"ephysalis_{step.replace('-', '_')}", date, attrs))
     return operations
 
 
@@ -241,7 +245,7 @@ def record_config(record: dict[str, Any], step: str = "export") -> SessionConfig
 
 def replay_invocations(record: dict[str, Any]) -> list[dict[str, Any]]:
     """The step invocations that made an output, in the order they ran: all recorded
-    invocations of sync, timing, lfp and sort, then the export of the file."""
+    invocations of the clock alignment, extract steps, lfp, mua and sort, then the export of the file."""
     steps = [r for step in REPLAY_STEPS[:-1] for r in record["steps"].get(step, [])]
     return sorted(steps, key=lambda r: r["time"]) + [record["export"]]
 

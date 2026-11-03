@@ -12,8 +12,10 @@ import pandas as pd
 
 # (step, label, description) in pipeline order
 STEPS = [
-    ("sync", "Sync", "extract the sync edges of all streams once (reads the AP files)"),
-    ("timing", "Timing", "trial times of all paradigms, running speed and eye position"),
+    ("align-clocks", "Clock alignment", "every stream on the reference clock, from the sync-pulse edges (reads the AP files)"),
+    ("extract-trials", "Trials", "trial tables of all paradigms of the stimulus system, run start times"),
+    ("extract-events", "Events", "edges of the digital lines and network events"),
+    ("extract-behavior", "Behaviour", "eye position and running speed at 1 kHz"),
     ("calibrate", "Calibration", "channel gains from the calibration-sine run ([calibration] in session.toml)"),
     ("lfp", "LFP", "LFP of every run and probe at 1 kHz (mains removal with [line_noise])"),
     ("quality", "Channel selection", "good channels of the probes with [probes.<id>.quality] (CSD uses them)"),
@@ -76,6 +78,9 @@ def work_dir_summary(work_dir: Path, session_name: str) -> list[tuple[str, str]]
     sync = sorted((work_dir / "sync").glob("*.npz"))
     if sync:
         rows.append(("sync", f"sync edges of {len(sync)} runs"))
+    clocks = sorted((work_dir / "clocks").glob("*.json"))
+    if clocks:
+        rows.append(("clocks", f"clock alignment of {len(clocks)} runs"))
     for csv in sorted((work_dir / "trials").glob("*.csv")):
         trials = pd.read_csv(csv)
         rows.append((f"trials/{csv.name}", f"{len(trials)} trials"))

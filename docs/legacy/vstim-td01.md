@@ -98,7 +98,7 @@ the trial start on the run's clock:
 4. **Jitter:** if no rate gives a common window (the stamps jitter by about 0.2 s in some 2004
    runs), the windows are widened by up to 0.5 s.
 
-`ephysalis timing` stores this start in `<work>/run_start/<run>.json`. It places the runs of a
+`ephysalis extract-trials` stores this start in `<work>/run_start/<run>.json`. It places the runs of a
 session file and becomes the BIDS `acq_time`, and the method text goes into `scans.tsv`.
 
 ## API

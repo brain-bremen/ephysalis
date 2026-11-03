@@ -46,10 +46,10 @@ def _wait(app, condition, timeout_s=120.0):
 
 def test_step_commands(tmp_path):
     options = PipelineOptions(session=tmp_path / "s", work_dir=tmp_path / "w", config=tmp_path / "w" / "session.toml",
-                              steps=["export", "sort", "sync"], sorter="mountainsort5", output_format="dh5",
+                              steps=["export", "sort", "align-clocks"], sorter="mountainsort5", output_format="dh5",
                               bids_root=tmp_path / "bids", export_lfp=False, scratch_dir=tmp_path / "scratch")
     commands = step_commands(options)
-    assert [step for step, _ in commands] == ["sync", "sort", "export"]  # pipeline order
+    assert [step for step, _ in commands] == ["align-clocks", "sort", "export"]  # pipeline order
     assert all(argv[:4] == [sys.executable, "-u", "-m", "ephysalis.cli.main"] for _, argv in commands)
     sort = commands[1][1][4:]
     assert sort[:2] == ["sort", str(tmp_path / "s")]
@@ -122,11 +122,11 @@ def test_save_as_and_open_config(app, page, tmp_path):
     assert page.pipeline_options().config == elsewhere
 
 
-def test_run_timing_step(app, page, tmp_path):
+def test_run_trials_step(app, page, tmp_path):
     page.load_session()
     _wait(app, lambda: page._overview is not None)
     for step, box in page._step_boxes.items():
-        box.setChecked(step == "timing")
+        box.setChecked(step == "extract-trials")
     page._run_or_cancel()
     assert page._process is not None
     _wait(app, lambda: page._process is None and page._run_btn.text().startswith("▶"), timeout_s=300)
@@ -161,13 +161,13 @@ def test_run_several_sessions(app, page, tmp_path):
     missing.mkdir()
     page.add_sessions([missing, DATA_FOLDER], show=False)
     for step, box in page._step_boxes.items():
-        box.setChecked(step == "timing")
+        box.setChecked(step in ("extract-trials", "extract-events"))
     page._run_or_cancel()
     _wait(app, lambda: page._process is None and page._run_btn.text().startswith("▶"), timeout_s=300)
     log = page._log.toPlainText()
     assert "failed: missing_session" in log, log[-2000:]
     status = {page.sessions()[r].name: page._sessions.item(r, 3).text() for r in range(page._sessions.rowCount())}
-    assert status == {SPIKEGLX_CROP_SESSION.name: "done", "missing_session": "failed in timing",
+    assert status == {SPIKEGLX_CROP_SESSION.name: "done", "missing_session": "failed in extract-trials",
                       DATA_FOLDER.name: "done"}
     assert (tmp_path / DATA_FOLDER.name / "events" / "experiment1_recording1.csv").exists()
     assert (tmp_path / SPIKEGLX_CROP_SESSION.name / "trials").is_dir()

@@ -23,7 +23,7 @@ with trial records inside the data file.
 
 ## Stimulus systems
 
-See {doc}`stimulus-systems`: how `timing` uses a plugin, the trial table, and a minimal example.
+See {doc}`stimulus-systems`: how `extract-trials` uses a plugin, the trial table, and a minimal example.
 
 ## Development
 

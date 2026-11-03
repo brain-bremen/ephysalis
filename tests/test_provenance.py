@@ -9,6 +9,7 @@ import pytest
 from conftest import SPIKEGLX_CROP_SESSION
 from ephysalis.cli.main import main
 from ephysalis.provenance import (
+    CLOCK_AND_EXTRACT_STEPS,
     compare_environment,
     compare_inputs,
     environment,
@@ -25,7 +26,7 @@ FORMATS = ["nwb", "dh5"] if hasattr(__import__("dh5io"), "Spike") else ["nwb"]
 
 @pytest.fixture(scope="module")
 def processed(tmp_path_factory):
-    """Work dir of timing, lfp and both exports with an edited session.toml."""
+    """Work dir of the clock alignment, the extract steps, lfp and both exports with an edited session.toml."""
     work = tmp_path_factory.mktemp("work")
     config_path = work / "session.toml"
     assert main(["init", str(SPIKEGLX_CROP_SESSION), "-o", str(config_path)]) == 0
@@ -34,7 +35,8 @@ def processed(tmp_path_factory):
     config.probes["imec0"].bad_channels = [1]
     save_session_config(config, config_path)
     common = ["--work-dir", str(work), "--config", str(config_path)]
-    assert main(["timing", str(SPIKEGLX_CROP_SESSION), *common]) == 0
+    for step in CLOCK_AND_EXTRACT_STEPS:
+        assert main([step, str(SPIKEGLX_CROP_SESSION), *common]) == 0
     assert main(["lfp", str(SPIKEGLX_CROP_SESSION), *common, "--n-jobs", "1", "--rate", "500"]) == 0
     (work / "sorting" / "imec0").mkdir(parents=True)
     (work / "sorting" / "imec0" / "segments.json").write_text(json.dumps(
@@ -55,7 +57,7 @@ def test_record_in_output(processed, fmt):
     export = record["export"]
     assert export["config"]["schema_version"] == SCHEMA_VERSION
     assert record_config(record) == config
-    assert record_config(record, "timing") == config and record_config(record, "lfp") == config
+    assert record_config(record, "extract-trials") == config and record_config(record, "lfp") == config
     assert export["argv"][:2] == ["ephysalis", "export"] and export["options"]["output_format"] == fmt
     assert record["steps"]["lfp"][-1]["options"]["rate"] == 500
     assert record["sorting"]["imec0"]["sorter_params"]["nearest_chans"] == 8
@@ -76,8 +78,10 @@ def test_dh5_step_operations(processed):
     with h5py.File(files["dh5"], "r") as f:
         ops = f["Operations"]
         names = sorted(ops)
-        assert [n[4:] for n in names] == ["create_file", "ephysalis_timing", "ephysalis_lfp", "ephysalis_export"]
-        lfp = ops[names[2]].attrs
+        assert [n[4:] for n in names] == ["create_file", "ephysalis_align_clocks", "ephysalis_extract_trials",
+                                          "ephysalis_extract_events", "ephysalis_extract_behavior", "ephysalis_lfp",
+                                          "ephysalis_export"]
+        lfp = ops[names[5]].attrs
         assert lfp["Tool"].decode().startswith("ephysalis") and "Date" in lfp
         assert lfp["Command"].decode().startswith("ephysalis lfp")
         assert json.loads(lfp["Options"])["rate"] == 500
@@ -116,7 +120,8 @@ def test_reproduce(processed, tmp_path, capsys):
     new = tmp_path / "again"
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new)]) == 0  # dry run
     out = capsys.readouterr().out
-    assert [line.split()[1] for line in out.splitlines() if line.startswith("ephysalis ")] == ["timing", "lfp", "export"]
+    assert [line.split()[1] for line in out.splitlines() if line.startswith("ephysalis ")] == [
+        *CLOCK_AND_EXTRACT_STEPS, "lfp", "export"]
     assert load_session_config(new / "session.toml") == config
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(work)]) == 1  # same work dir
 

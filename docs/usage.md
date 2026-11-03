@@ -21,12 +21,17 @@ ephysalis-inspect   # Open Ephys session inspector
 ## Steps
 
 Each step is optional. Its outputs go into a work dir per session, and `export` writes the final
-file from what is there.
+file from what is there. The steps are independent of the output format: only `export` makes
+DH5 or NWB representations (e.g. the DH5 event codes, int16 scaling). The three extract steps
+need the clock alignment; without `align-clocks` they extract the sync edges themselves. The
+former `timing` step (all four) and `sync` (now `align-clocks`) still work but are deprecated.
 
 | Step | Output |
 |---|---|
-| `sync` | sync edges of all streams (clock maps between probes and the aux stream) |
-| `timing` | trials of all paradigms (stimulus system plugins), running speed, eye position, events (TTL lines, VStim network events), better run start times from the stimulus system |
+| `align-clocks` | every stream of a run on the reference clock: the sync-pulse edges of all streams (cached in `sync/`, read by every later step) and the fit per stream (`clocks/<run>.json`: rate, offset, drift, residuals) |
+| `extract-trials` | trial tables of all paradigms (stimulus system plugins) and better run start times from the stimulus system's clock |
+| `extract-events` | edges of the digital lines and VStim network events (`events/<run>.csv`, independent of the output format) |
+| `extract-behavior` | eye position and running speed at 1 kHz |
 | `calibrate` | channel gains from a calibration-sine recording (`[calibration]`) |
 | `lfp` | LFP per run and probe, 1 kHz; mains removal with the recorded mains (`[line_noise]`) |
 | `quality` | good/bad channels per run from the LFP (`[probes.<id>.quality]`); the CSD then uses the good ones |
@@ -48,8 +53,10 @@ Every step takes one or more sessions. With several sessions, per-session paths 
 ephysalis inspect <session> --conditions             # runs, probes, streams, paradigms
 ephysalis init <session> [--excel CR_Experiments25.xlsx]   # create session.toml
 
-ephysalis sync    <session> [<session> ...] --work-dir D:/work/{session}
-ephysalis timing  <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis align-clocks     <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis extract-trials   <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis extract-events   <session> [<session> ...] --work-dir D:/work/{session}
+ephysalis extract-behavior <session> [<session> ...] --work-dir D:/work/{session}
 ephysalis lfp     <session> [<session> ...] --work-dir D:/work/{session}
 ephysalis mua     <session> [<session> ...] --work-dir D:/work/{session}
 ephysalis sort    <session> [<session> ...] --work-dir D:/work/{session} --scratch-dir <fast local disk>
