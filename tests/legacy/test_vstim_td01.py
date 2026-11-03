@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.stimulus.base import detect_stimulus_system
@@ -61,7 +62,7 @@ def test_trials_from_td01_and_tdr(tmp_path):
     run = open_session(session).runs[0]
     assert detect_stimulus_system(run).name == "vstim_td01"
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("*.csv")))
     assert trials.vstim_trial.tolist() == [11, 12, 13] and trials.condition.tolist() == [6, 5, 4]
     assert trials.outcome.tolist() == [7, 1, 1]  # EyeErr, Hit (.tdr); Hit (reward pulse)
@@ -82,7 +83,7 @@ def test_trial_end_line_and_no_tdr(tmp_path):
         'schema_version = 4\nsession_id = "s"\nsubject_id = "fritz"\n'
         '[aux_channels.digital]\ntrial_start = 0\ntrial_end = 11\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("*.csv")))
     assert trials.vstim_trial.tolist() == [40, 41]
     assert trials.outcome.tolist() == [-1, -1] and trials.stop_source.tolist() == ["trial_end line", "start"]

@@ -10,6 +10,7 @@ import spikeinterface.core as si
 
 import dh5io
 from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_SESSION, skip_if_no_data
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
 from ephysalis.events import load_run_events
@@ -24,7 +25,7 @@ needs_dh5_spikes = pytest.mark.skipif(not hasattr(dh5io, "Spike"), reason="needs
 @pytest.fixture(scope="module")
 def oe_dh5(tmp_path_factory):
     work = tmp_path_factory.mktemp("oe")
-    assert main(["timing", str(DATA_FOLDER), "--work-dir", str(work)]) == 0
+    assert extract_all([str(DATA_FOLDER), "--work-dir", str(work)]) == 0
     path = work / "oe.dh5"
     assert main(["export", str(DATA_FOLDER), "--work-dir", str(work), "--output-format", "dh5", "--raw",
                  "-o", str(path)]) == 0
@@ -71,7 +72,7 @@ def test_aux_raw_as_legacy_raw(oe_dh5):
 @pytest.fixture(scope="module")
 def crop_work(tmp_path_factory):
     work = tmp_path_factory.mktemp("crop")
-    assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
+    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
     assert main(["mua", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work), "--n-jobs", "1",
                  "--probes", "imec0"]) == 0
     return work
@@ -130,12 +131,12 @@ def test_mua_in_dh5(crop_work):
 @skip_if_no_data
 def test_several_sessions(tmp_path):
     sessions = [str(SPIKEGLX_CROP_SESSION), str(DATA_FOLDER)]
-    assert main(["timing", *sessions, "--work-dir", str(tmp_path / "w")]) == 2  # needs {session}
-    assert main(["timing", *sessions, "--work-dir", str(tmp_path / "{session}")]) == 0
+    assert extract_all([*sessions, "--work-dir", str(tmp_path / "w")]) == 2  # needs {session}
+    assert extract_all([*sessions, "--work-dir", str(tmp_path / "{session}")]) == 0
     for session in (SPIKEGLX_CROP_SESSION, DATA_FOLDER):
         assert (tmp_path / session.name / "trials").is_dir()
         assert len(pd.read_csv(next((tmp_path / session.name / "events").glob("*.csv"))))
     # a failing session does not stop the others
-    assert main(["timing", str(tmp_path / "missing"), str(SPIKEGLX_CROP_SESSION),
+    assert extract_all([str(tmp_path / "missing"), str(SPIKEGLX_CROP_SESSION),
                  "--work-dir", str(tmp_path / "again_{session}")]) == 1
     assert (tmp_path / f"again_{SPIKEGLX_CROP_SESSION.name}" / "trials").is_dir()

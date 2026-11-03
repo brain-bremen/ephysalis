@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.legacy.daq import DaqFormat, board_fit, daq_file, read_index
@@ -246,7 +247,7 @@ def test_pipeline(tmp_path):
         '[probes.v4]\nstream = "ADC64 F/H - Board 1"\nchannels = ["AI0", "AI1"]\n'
         '[aux_channels.digital]\ntrial_start = 0\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["lfp", str(session), *common, "--n-jobs", "1"]) == 0
     assert main(["mua", str(session), *common, "--n-jobs", "1"]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "--raw", "-o", str(tmp_path / "out.dh5")]) == 0
@@ -274,7 +275,7 @@ def test_export_per_run_on_the_daq_clock(tmp_path):
     (tmp_path / "session.toml").write_text('schema_version = 4\nsession_id = "s"\nsubject_id = "fritz"\n'
                                            '[probes.p]\nstream = "ADC64 Rev F"\nchannels = ["AI0", "AI1"]\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "--raw", "--per-run",
                  "--bids", str(tmp_path / "bids")]) == 0
     folder = tmp_path / "bids" / "sub-fritz" / "ses-s" / "ecephys"

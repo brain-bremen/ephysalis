@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.legacy.uff import NOMINAL_P_RATE, UffFile, p_clock_fit
@@ -82,7 +83,7 @@ def test_uff_session_and_p_clock(tmp_path):
         '[probes.arrayM]\nstream = "M"\nchannels = ["M0", "M1"]\n'
         f'[probes.arrayP]\nstream = "P"\nchannels = [{channels}]\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["lfp", str(session), *common, "--n-jobs", "1"]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "--per-run", "-o", str(tmp_path / "o.dh5")]) == 0
     with h5py.File(tmp_path / "o_ED12021.dh5") as f:

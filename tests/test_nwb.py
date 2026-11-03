@@ -7,6 +7,7 @@ import spikeinterface.core as si
 from pynwb import NWBHDF5IO
 
 from conftest import SPIKEGLX_CROP_SESSION
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.nwb import SESSION_START_MARGIN_S, write_session_nwb
@@ -21,7 +22,7 @@ RUN = "3_rfmappingFine_g0"
 @pytest.fixture(scope="module")
 def work_dir(tmp_path_factory):
     work = tmp_path_factory.mktemp("work")
-    assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
+    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work)]) == 0
     assert main(["lfp", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(work), "--n-jobs", "1"]) == 0
     # sorting outputs of imec0: units 3 (peak channel AP84) and 7 (AP89)
     (work / "sorting" / "imec0").mkdir(parents=True)

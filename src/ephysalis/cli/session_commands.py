@@ -442,21 +442,6 @@ def _extract_behavior(args: argparse.Namespace) -> int:
     return _extract_step(args, "extract-behavior", _write_behavior)
 
 
-def _timing(args: argparse.Namespace) -> int:
-    """Deprecated: align-clocks, extract-trials, extract-events and extract-behavior in a row."""
-    import copy
-
-    logger.warning("`ephysalis timing` is deprecated: it runs align-clocks, extract-trials, extract-events "
-                   "and extract-behavior")
-    first = copy.copy(args)
-    first.cache_dir, first.force = None, False
-    for func in (_align_clocks, _extract_trials, _extract_events, _extract_behavior):
-        code = func(first if func is _align_clocks else args)
-        if code:
-            return code
-    return 0
-
-
 def _lfp(args: argparse.Namespace) -> int:
     from ephysalis.lfp import extract_lfp
     from ephysalis.timing import default_work_dir
@@ -636,7 +621,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=per_session(_inspect))
 
     p = sub.add_parser(
-        "align-clocks", aliases=["sync"],
+        "align-clocks",
         help="Put every stream of a run on the reference clock: extract the sync-pulse edges of all streams "
         "(cached; reads the full AP files) and match them; writes <work-dir>/clocks/<run>.json",
     )
@@ -673,8 +658,6 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
          "(on the reference clock)", "events/"),
         ("extract-behavior", _extract_behavior, "Write the eye position (1 kHz, V) and running speed (1 kHz, cm/s) of "
          "every run (on the reference clock)", "eye/, running_speed/"),
-        ("timing", _timing, "Deprecated: align-clocks, extract-trials, extract-events and extract-behavior in a row",
-         "sync/, clocks/, trials/, run_start/, events/, eye/, running_speed/"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("sessions", nargs="+", type=Path, metavar="session")

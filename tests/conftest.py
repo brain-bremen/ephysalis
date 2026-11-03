@@ -129,3 +129,12 @@ def write_stimstage_paradigm(
 def real_session_path() -> Path | None:
     path = os.environ.get("EPHYSALIS_TEST_SESSION")
     return Path(path) if path else None
+
+
+def extract_all(argv: list[str]) -> int:
+    """``ephysalis align-clocks``, ``extract-trials``, ``extract-events`` and ``extract-behavior``
+    with the same arguments (sessions and options); the largest exit code."""
+    from ephysalis.cli.main import main
+    from ephysalis.provenance import CLOCK_AND_EXTRACT_STEPS
+
+    return max(main([step, *argv]) for step in CLOCK_AND_EXTRACT_STEPS)

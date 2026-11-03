@@ -11,6 +11,7 @@ import probeinterface
 import pytest
 
 from conftest import OE_TOOLS_DATA, skip_if_no_oe_tools_data
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.io.openephys import OpenEphysFormat
@@ -107,7 +108,7 @@ def test_pipeline(fmt, tmp_path):
         '[probes.probe0]\nstream = "File_Reader-100.example_data"\ngeometry = { file = "probe.json" }\n')
     session = str(OE_TOOLS_DATA / fmt / NODE)
     common = ["--work-dir", str(tmp_path), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", session, *common]) == 0
+    assert extract_all([session, *common]) == 0
     assert main(["lfp", session, *common, "--n-jobs", "1"]) == 0
     assert main(["mua", session, *common, "--n-jobs", "1"]) == 0
     assert main(["export", session, *common, "-o", str(tmp_path / "out.nwb")]) == 0

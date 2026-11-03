@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from ephysalis.annotations import event_code_names, line_pulses, markers
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.session_config import EventsConfig, MarkerConfig, TriggerLineConfig
 from synthetic import write_openephys
@@ -79,7 +80,7 @@ role = "interval2"
 offset_ms = 650
 """)
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "--per-run", "-o",
                  str(tmp_path / "out.dh5")]) == 0
     with h5py.File(next(tmp_path.glob("out_*.dh5"))) as f:  # on the run's clock: 0 = first sample

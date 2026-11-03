@@ -202,18 +202,20 @@ def test_sync_edge_cache(run, tmp_path, monkeypatch):
     assert calls == [5]
 
 
-def test_cli_sync(tmp_path, capsys):
+def test_cli_align_clocks(tmp_path, capsys):
     from ephysalis.cli.main import main
 
-    assert main(["sync", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path), "--work-dir", str(tmp_path / "work")]) == 0
+    assert main(["align-clocks", str(SPIKEGLX_CROP_SESSION), "--cache-dir", str(tmp_path),
+                 "--work-dir", str(tmp_path / "work")]) == 0
     assert "imec0 10, imec1 10, aux 10" in capsys.readouterr().out
-    assert (tmp_path / f"{RUN}.npz").exists()
+    assert (tmp_path / f"{RUN}.npz").exists() and (tmp_path / "work" / "clocks" / f"{RUN}.json").exists()
 
 
-def test_cli_timing_and_lfp(tmp_path, capsys):
+def test_cli_extract_and_lfp(tmp_path, capsys):
+    from conftest import extract_all
     from ephysalis.cli.main import main
 
-    assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
+    assert extract_all([str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
     assert "RF: 23 trials" in capsys.readouterr().out
     assert (tmp_path / "trials" / f"{RUN}_RF.csv").exists()
     assert np.load(tmp_path / "running_speed" / f"{RUN}.npy").shape == (5000,)

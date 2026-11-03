@@ -16,41 +16,11 @@ trials, LFP, MUA and CSD, and sorts spikes with
 ephysalis is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
 MATLAB Neuropixels preprocessing scripts.
 
-## Installation
-
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
-
-```bash
-uv tool install git+https://github.com/brain-bremen/ephysalis.git
-```
-
-## Usage
-
-```bash
-ephysalis-gui                                          # GUI: sessions, session.toml, steps
-ephysalis inspect <session> --conditions               # runs, probes, streams, paradigms
-ephysalis init <session>                               # create session.toml
-ephysalis align-clocks     <session> --work-dir D:/work/{session}   # all streams on one clock
-ephysalis extract-trials   <session> --work-dir D:/work/{session}   # trial tables (stimulus system)
-ephysalis extract-events   <session> --work-dir D:/work/{session}   # digital lines, network events
-ephysalis extract-behavior <session> --work-dir D:/work/{session}   # eye position, running speed
-ephysalis lfp    <session> --work-dir D:/work/{session}
-ephysalis sort   <session> --work-dir D:/work/{session} --scratch-dir <fast local disk>
-ephysalis export <session> --work-dir D:/work/{session} --output-format nwb|dh5 [--bids <root>]
-```
+> **Alpha.** ephysalis is in an early development stage. Its design (the pipeline steps, the
+> `session.toml` schema, the work dir and the output layouts) is still changing, without regard
+> for compatibility, and it is not ready for use outside the lab's conversion projects.
+> Instructions for installing and using it will follow once the design is settled.
 
 ## Documentation
 
-The documentation is at https://brain-bremen.github.io/ephysalis/: steps, `session.toml`, output
-layouts, filters, and plugins. It is built from `docs/`; build it locally with:
-
-```bash
-uv run --group docs sphinx-build docs docs/_build
-```
-
-## Development
-
-```bash
-uv sync
-uv run pytest
-```
+https://brain-bremen.github.io/ephysalis/ (for now only the historic recording formats)

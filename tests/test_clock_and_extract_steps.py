@@ -1,4 +1,4 @@
-"""align-clocks, extract-trials / -events / -behavior, and the deprecated timing that runs all four."""
+"""align-clocks and extract-trials / -events / -behavior: each writes only its own outputs."""
 
 import json
 
@@ -32,17 +32,11 @@ def test_steps_write_their_own_outputs(tmp_path):
     assert {p.stem for p in (tmp_path / "provenance").glob("*.json")} == set(CLOCK_AND_EXTRACT_STEPS)
 
 
-def test_deprecated_timing_runs_all_four(tmp_path):
-    assert main(["timing", str(SPIKEGLX_CROP_SESSION), "--work-dir", str(tmp_path)]) == 0
-    assert {p.stem for p in (tmp_path / "provenance").glob("*.json")} == set(CLOCK_AND_EXTRACT_STEPS)
-    assert (tmp_path / "clocks" / f"{RUN}.json").exists() and (tmp_path / "trials" / f"{RUN}_RF.csv").exists()
-
-
-def test_dh5_event_codes_and_old_events_tables(tmp_path):
+def test_dh5_event_codes(tmp_path):
     events = pd.DataFrame({"time": [0.1, 0.2, 0.3], "source": ["ttl", "ttl", "network"],
                            "line": [3, 3, None], "state": [1, 0, None], "word": [None, None, 7],
-                           "code": [3, -3, 1007], "name": ["a", "a", "x"]})
-    events.to_csv(tmp_path / "old.csv", index=False)  # work dir from before: with the DH5 codes
-    loaded = load_run_events(tmp_path / "old.csv")
+                           "name": ["a", "a", "x"]})
+    events.to_csv(tmp_path / "events.csv", index=False)
+    loaded = load_run_events(tmp_path / "events.csv")
     assert list(loaded.columns) == COLUMNS
     np.testing.assert_array_equal(dh5_event_codes(loaded, 1000), [3, -3, 1007])

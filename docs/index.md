@@ -18,16 +18,11 @@ DataWave UFF, Multi Channel Systems MC_Rack). They are described in {doc}`legacy
 ephysalis is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
 MATLAB Neuropixels preprocessing scripts.
 
-```{toctree}
-:maxdepth: 2
-:caption: User guide
-
-usage
-session-config
-stimulus-systems
-preprocessing
-output
-filters
+```{note}
+**Alpha.** ephysalis is in an early development stage. Its design (the pipeline steps, the
+`session.toml` schema, the work dir and the output layouts) is still changing, without regard for
+compatibility, and it is not ready for use outside the lab's conversion projects. Instructions for
+installing and using it will follow once the design is settled.
 ```
 
 ```{toctree}
@@ -45,6 +40,5 @@ legacy/vstim-td01
 :maxdepth: 2
 :caption: Development
 
-extending
 roadmap
 ```

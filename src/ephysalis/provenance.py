@@ -43,13 +43,10 @@ if TYPE_CHECKING:
 RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
 # steps in pipeline order, as replayed by ``ephysalis reproduce``
-# (``sync`` and ``timing``: records of work dirs from before the split of ``timing`` into
-# align-clocks and the extract steps)
 CLOCK_AND_EXTRACT_STEPS = ("align-clocks", "extract-trials", "extract-events", "extract-behavior")
-REPLAY_STEPS = ("sync", "timing", *CLOCK_AND_EXTRACT_STEPS, "lfp", "mua", "sort", "export")
+REPLAY_STEPS = (*CLOCK_AND_EXTRACT_STEPS, "lfp", "mua", "sort", "export")
 # all steps in pipeline order: orders step invocations recorded within the same second
-STEP_ORDER = ("sync", "timing", *CLOCK_AND_EXTRACT_STEPS, "calibrate", "lfp", "quality", "csd", "mua", "sort",
-              "export")
+STEP_ORDER = (*CLOCK_AND_EXTRACT_STEPS, "calibrate", "lfp", "quality", "csd", "mua", "sort", "export")
 # options not replayed: outputs and caches outside the work dir
 _NOT_REPLAYED = {"output", "bids", "existing", "cache_dir", "subject", "session_label", "dataset_name"}
 NWB_SCRATCH_NAME = "ephysalis_processing"

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.io.base import open_session
 from ephysalis.legacy.mcd import (EPOCH, McdRecordingExtractor, group_files, local_time, parse_streams, read_index,
@@ -150,7 +151,7 @@ def test_split_recording_and_pipeline(tmp_path):
         '[probes.v1]\nstream = "elec0001"\nchannels = ["01A", "02A", "03A"]\n'
         '[aux_channels]\nanalog = {}\n[aux_channels.digital]\ntrial_start = 0\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("*.csv")))
     assert trials.vstim_trial.tolist() == [7, 8] and trials.condition.tolist() == [3, 4]
     assert trials.outcome.tolist() == [1, 7] and trials.start_time.tolist() == pytest.approx([0.08, 1.08])

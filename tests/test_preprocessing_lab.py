@@ -11,6 +11,7 @@ import pytest
 from scipy import signal
 
 from ephysalis.calibration import fit_sine
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.csd import DH5_FULL_SCALE, c_round, csd_operator
 from ephysalis.linenoise import A, B, N_POINTS, line_noise_templates, matlab_int16, reference_quality, zero_crossings
@@ -181,7 +182,7 @@ def test_pipeline_calibration_mains_csd(tmp_path):
     csd = si.load(tmp_path / "work" / "csd" / f"{TASK}_epidural")
     info = json.loads((tmp_path / "work" / "csd" / f"{TASK}_epidural" / "csd.json").read_text())
     assert "AI20" not in info["inputs"] and len(info["outputs"]) == 37
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
     with h5py.File(tmp_path / "out.dh5") as f:
         block = f["CONT8001"]
@@ -247,7 +248,7 @@ def test_quality_restricts_csd(tmp_path):
     assert "AI5" not in info[CAL]["outputs"] and "AI5" in info[TASK]["outputs"]
     assert "AI17" in info[CAL]["inputs"] and "AI17" not in info[TASK]["inputs"]
     assert len(info[CAL]["outputs"]) == len(channels) - 1
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     assert main(["export", str(session), *common, "--output-format", "dh5", "-o", str(tmp_path / "out.dh5")]) == 0
     index5, index17 = channels.index(5), channels.index(17)
     with h5py.File(tmp_path / "out.dh5") as f:

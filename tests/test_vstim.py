@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from conftest import DATA_FOLDER, skip_if_no_data
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.dh5 import EYE_CONT_IDS
 from ephysalis.io.base import open_session
@@ -49,7 +50,7 @@ def test_eye_position(timing):
 def test_timing_and_export(tmp_path, output_format):
     pytest.importorskip("dh5io")
     work = tmp_path / "work"
-    assert main(["timing", str(DATA_FOLDER), "--work-dir", str(work)]) == 0
+    assert extract_all([str(DATA_FOLDER), "--work-dir", str(work)]) == 0
     assert len(pd.read_csv(work / "trials" / f"{RUN}_Test.csv")) == 13
     assert (work / "eye" / f"{RUN}.npy").exists()
     if output_format == "dh5":

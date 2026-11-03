@@ -99,11 +99,11 @@ def run_events(run: Run, sync: RunSync, aux_channels: AuxChannelMap, config: Eve
 
 
 def load_run_events(path) -> pd.DataFrame:
-    """``events/<run>.csv`` (the ``code`` column of older work dirs is dropped)."""
-    events = pd.read_csv(path, keep_default_na=False, na_values={c: [""] for c in (*INT_COLUMNS, "code")})
+    """``events/<run>.csv``."""
+    events = pd.read_csv(path, keep_default_na=False, na_values={c: [""] for c in INT_COLUMNS})
     for column in INT_COLUMNS:
         events[column] = events[column].astype("Int64")
-    return events.drop(columns="code", errors="ignore")
+    return events
 
 
 def dh5_event_codes(events: pd.DataFrame, network_events_offset: int) -> np.ndarray:

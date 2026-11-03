@@ -15,7 +15,7 @@
 The three extract steps use the clock alignment (from the cached edges, extracted on demand
 when ``align-clocks`` has not run) and are independent of each other. Everything is expressed
 on the run's reference clock (the first probe unless configured otherwise) in seconds from the
-start of that probe's recording. ``ephysalis timing`` (deprecated) runs all four.
+start of that probe's recording.
 """
 
 from __future__ import annotations
@@ -165,7 +165,7 @@ def extract_run_timing(
     run: Run, config: SessionConfig | None = None, sync_cache: SyncEdgeCache | None = None
 ) -> RunTiming:
     """Clock alignment, trials, events and behaviour signals of a run in one go (``ephysalis
-    inspect --timing``, the deprecated ``ephysalis timing``)."""
+    inspect --timing``)."""
     sync = align_run_clocks(run, config, sync_cache)
     timing = RunTiming(run_name=run.name, sync=sync)
     timing.running_speed, timing.eye_position = extract_run_behavior(run, sync, config)

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.legacy.pcclock import PRIOR_PPM, pc_fit
 from test_vstim_td01 import MS, T0, _session, write_tdr
@@ -46,7 +47,7 @@ def test_run_start_task_and_scans(tmp_path):
         'schema_version = 5\nsession_id = "20050330"\nsubject_id = "fritz"\ntask = "shape tracking"\n'
         '[aux_channels.digital]\ntrial_start = 0\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     bids = tmp_path / "bids"
     assert main(["export", str(session), *common, "--per-run", "--output-format", "dh5", "--bids", str(bids)]) == 0
     data = next(bids.rglob("*_ecephys.dh5"))
@@ -93,7 +94,7 @@ def test_frozen_td01_matched_by_time(tmp_path):
         'schema_version = 5\nsession_id = "20050330"\nsubject_id = "fritz"\n'
         '[aux_channels.digital]\ntrial_start = 0\neye_error = 10\nreward = 13\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["timing", str(session), *common]) == 0
+    assert extract_all([str(session), *common]) == 0
     trials = pd.read_csv(next((tmp_path / "work" / "trials").glob("fritz_2005_03_30_task_b_*.csv")))
     assert trials.vstim_trial.tolist() == list(range(13, 25))
     assert trials.condition.tolist() == [1 + j % 4 for j in range(12)] and trials.outcome_source.eq("tdr").all()
