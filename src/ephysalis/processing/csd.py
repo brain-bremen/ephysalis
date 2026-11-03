@@ -12,7 +12,7 @@ with ``sigma = grid spacing x RBF parameter``, exactly through the LFP of the in
 literal port of the per-sample C++ code. Input in V and positions in m give A/m^3.
 
 Inputs: the probe's channels without ``exclude_inputs`` and without calibration (NaN gain,
-:mod:`ephysalis.formats.input.legacy.daq.calibration`); outputs: all channels of the probe. After channel selection
+the input format's channel gain calibration (:class:`~ephysalis.plugins.ComputesChannelGainCalibration`)); outputs: all channels of the probe. After channel selection
 (``ephysalis quality``, :mod:`ephysalis.processing.quality`) only the good channels of the run, as inputs
 and outputs (as the Fritz/Mini BIDS conversions). The CSD is computed from the
 LFP in the work dir (after mains removal, as in the lab: ``dh_remove_50hz`` before ``dh_csd``),

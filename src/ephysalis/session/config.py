@@ -236,9 +236,8 @@ class EventsConfig(BaseModel):
 
 
 class CalibrationConfig(BaseModel):
-    """Channel gains from a recording of a calibration sine on all inputs (``ephysalis calibrate``);
-    only the DAQ format has it (:mod:`ephysalis.formats.input.legacy.daq.calibration`, through
-    ``InputFormat.calibrate`` / ``apply_calibration``). Without ``run`` and ``file`` the gains of the
+    """Channel gains from a recording of a calibration sine on all inputs (``ephysalis calibrate``),
+    by the input format's channel gain calibration (:class:`~ephysalis.plugins.ComputesChannelGainCalibration`), e.g. the DAQ format of ephysalis-bremen. Without ``run`` and ``file`` the gains of the
     recording are used."""
 
     run: str | None = Field(default=None, description="Calibration run of this session, e.g. 15hz_after_2005_03_30")

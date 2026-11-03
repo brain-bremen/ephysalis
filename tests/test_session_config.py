@@ -1,17 +1,12 @@
-import openpyxl
 import pytest
-from openpyxl.styles import Font
 
 from ephysalis.session.config import (
     AuxChannelMap,
-    SessionConfig,
     default_session_config,
     load_session_config,
     save_session_config,
 )
 from ephysalis.formats.input.base import open_session
-from ephysalis.cli.main import main
-from ephysalis.metadata.psychtoolbox_neuropixels_freiburg.pipeline import apply_pipeline_metadata
 
 RUNS = [("3_rfmapping_g0", "2025-01-09T13:27:45"), ("5_DoseResponse_g0", "2025-01-09T13:58:53")]
 
@@ -40,54 +35,6 @@ def test_newer_schema_is_rejected(tmp_path):
 def test_legacy_aux_defaults():
     assert AuxChannelMap.legacy_default(8).analog["photodiode"] == 2
     assert AuxChannelMap.legacy_default(4).analog["photodiode"] == 1
-
-
-def _workbook(path, sheet, serial):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet
-    rows = {
-        33: ["SpikeGLXProbeNr", 0],
-        34: ["ProbeArea", "V1"],
-        35: ["ProbeNumber", serial],
-        39: ["ProbeDepth", 2000],
-        40: ["ShankDepth", 1794],
-    }
-    for r, values in rows.items():
-        for c, v in enumerate(values, start=1):
-            ws.cell(row=r, column=c, value=v)
-    ws.cell(row=54, column=1, value="3_rfmapping_g0").font = Font(color="FF000000")
-    ws.cell(row=54, column=3, value="centered on 3,7")
-    ws.cell(row=71, column=1, value="5_DoseResponse_g0").font = Font(color="FFFF0000")  # red: excluded
-    ws.cell(row=90, column=1, value="7_Missing_g0")
-    wb.save(path)
-
-
-def test_excel_migration(make_spikeglx_session, tmp_path):
-    session_path = make_spikeglx_session(runs=RUNS)
-    (session_path / "BrokenChannelsProbe0_0Index.txt").write_text("12\n5\n")
-    session = open_session(session_path)
-    meta_serial = session.runs[0].probes["imec0"].serial_number
-    excel = tmp_path / "experiments.xlsx"
-    _workbook(excel, session.name, serial=12345)
-
-    config: SessionConfig = default_session_config(session)
-    warnings = apply_pipeline_metadata(config, session, excel)
-
-    assert config.run_config("3_rfmapping_g0").include
-    assert config.run_config("3_rfmapping_g0").notes == "centered on 3,7"
-    assert not config.run_config("5_DoseResponse_g0").include
-    probe = config.probes["imec0"]
-    assert (probe.area, probe.insertion_depth_um, probe.shank_depth_um) == ("V1", 2000, 1794)
-    assert probe.serial_number == meta_serial
-    assert probe.bad_channels == [5, 12]
-    assert any("differs from serial number" in w for w in warnings)
-    assert any("7_Missing_g0" in w for w in warnings)
-
-    # ephysalis init: the psychtoolbox_neuropixels_freiburg plugin's suggestions with the workbook given as --metadata
-    assert main(["init", str(session_path), "--metadata", str(excel), "-o", str(tmp_path / "s.toml")]) == 0
-    written = load_session_config(tmp_path / "s.toml")
-    assert written.probes["imec0"].area == "V1" and not written.run_config("5_DoseResponse_g0").include
 
 
 def test_schema_migration(tmp_path):

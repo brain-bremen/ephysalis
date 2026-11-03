@@ -13,7 +13,6 @@ from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_SESSION, skip_i
 from conftest import extract_all
 from ephysalis.cli.main import main
 from ephysalis.formats.output.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
-from ephysalis.timeline.events import load_run_events
 from ephysalis.formats.input.base import open_session
 from ephysalis.processing.mua import mua_folder
 
@@ -30,26 +29,6 @@ def oe_dh5(tmp_path_factory):
     assert main(["export", str(DATA_FOLDER), "--work-dir", str(work), "--output-format", "dh5", "--raw",
                  "-o", str(path)]) == 0
     return work, path
-
-
-@skip_if_no_data
-@needs_dh5_spikes
-def test_events_as_legacy_ev02(oe_dh5):
-    work, path = oe_dh5
-    events = load_run_events(work / "events" / f"{OE_RUN}.csv")
-    assert set(events.source) == {"ttl", "word"}
-    with h5py.File(path, "r") as new, h5py.File(LEGACY_DH5_PATH, "r") as legacy:
-        ev, old = new["EV02"][:], legacy["EV02"][:]
-        network = ev[ev["event"] >= 1000]  # the old converter found no TTL lines (it looked for a PXIe-6341)
-        np.testing.assert_array_equal(network["event"], old["event"])
-        shift = network["time"] - old["time"]  # other time axis: session start instead of acquisition start
-        assert np.ptp(shift) <= 1
-        ttl = ev[ev["event"] < 1000]
-        assert set(np.unique(ttl["event"])) == {1, -1, 2, -2, 3, -3, 4, -4, 8, -8}
-        assert len(ttl) == (events.source == "ttl").sum()
-        attrs = new["EV02"].attrs
-        assert attrs["TrialStarted"] == old["event"][0] + 10 and attrs["VtlOn"] == 2000
-        assert attrs["trial_startOn"] == 1 and attrs["frameOff"] == -8
 
 
 @skip_if_no_data

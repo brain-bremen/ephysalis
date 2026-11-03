@@ -12,8 +12,12 @@ trials, LFP, MUA and CSD, select channels, remove mains noise, and sort spikes w
 [spikeinterface](https://spikeinterface.readthedocs.io) (Kilosort4 by default).
 
 Input formats: SpikeGLX (Neuropixels) and Open Ephys (Binary, NWB and the legacy Open Ephys
-format). Readers for the lab's historic recordings are also included (the lab's DAQ program,
-DataWave UFF, Multi Channel Systems MC_Rack). They are described in {doc}`legacy/index`.
+format). Further input formats and the metadata plugins (trials, run start times and config
+suggestions from the files of a lab setup) are separate packages that register through entry
+points (`ephysalis.plugins`):
+[ephysalis-bremen](https://github.com/brain-bremen/ephysalis-bremen) (the lab's DAQ files, MC_Rack,
+DataWave UFF, VStim) and [ephysalis-freiburg](https://github.com/brain-bremen/ephysalis-freiburg)
+(the Freiburg Neuropixels setup).
 
 ephysalis is the successor of [oecon](https://github.com/brain-bremen/oecon) and replaces the lab's
 MATLAB Neuropixels preprocessing scripts.
@@ -23,17 +27,6 @@ MATLAB Neuropixels preprocessing scripts.
 `session.toml` schema, the work dir and the output layouts) is still changing, without regard for
 compatibility, and it is not ready for use outside the lab's conversion projects. Instructions for
 installing and using it will follow once the design is settled.
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: Historic formats
-
-legacy/index
-legacy/daq
-legacy/uff
-legacy/mcd
-legacy/vstim-td01
 ```
 
 ```{toctree}

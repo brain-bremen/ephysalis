@@ -46,7 +46,7 @@ class ProbeInfo:
     # re-reference (session.toml probes.<id>.reference_channels): the mean of these channels of the same stream is
     # subtracted from the probe's channels
     reference_channel_ids: tuple[str, ...] | None = None
-    # calibration (ephysalis.formats.input.legacy.daq.calibration): factors on the recorded gains of the probe's channels
+    # calibration (input formats with ephysalis.plugins.ComputesChannelGainCalibration): factors on the recorded gains of the probe's channels
     # (AP and LF streams), NaN for channels without calibration
     gain_factors: tuple[float, ...] | None = None
 

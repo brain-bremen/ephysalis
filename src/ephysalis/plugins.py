@@ -204,8 +204,9 @@ class ExtractsTrialTables(Protocol):
     def extract_trial_tables(self, run: Run, clock_alignment: RunSync | None,
                              auxiliary_signals: AuxSignals | None) -> dict[str, pd.DataFrame] | None:
         """One table per paradigm presented in the run, in presentation order: one row per trial
-        (``trial``, ``condition`` and the stimulus parameters) and, with ``clock_alignment``,
-        ``start_time`` / ``stop_time`` in s on the reference clock. None: not a run of this setup."""
+        (``trial``, ``condition``, optionally ``trial_number``, the stimulus software's own trial
+        number, and the stimulus parameters) and, with ``clock_alignment``, ``start_time`` /
+        ``stop_time`` in s on the reference clock. None: not a run of this setup."""
         ...
 
 

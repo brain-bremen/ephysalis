@@ -533,10 +533,10 @@ def _write_spikes(file: h5py.File, session: Session, work_dir: Path, runs: list[
 
 
 def trial_numbers(trials: pd.DataFrame) -> np.ndarray:
-    """TRIALMAP ``TrialNo``: VStim's trial numbers if every trial has one (as the lab's
-    converters), else the position in the session."""
-    if "vstim_trial" in trials and trials["vstim_trial"].notna().all():
-        return trials["vstim_trial"].to_numpy().astype(np.int64)
+    """TRIALMAP ``TrialNo``: the stimulus software's trial numbers (column ``trial_number`` of the
+    metadata plugin's trial tables) if every trial has one, else the position in the session."""
+    if "trial_number" in trials and trials["trial_number"].notna().all():
+        return trials["trial_number"].to_numpy().astype(np.int64)
     return np.arange(len(trials))
 
 

@@ -10,7 +10,6 @@ from ephysalis.timeline.auxsignals import AuxSignals, wheel_speed
 from ephysalis.formats.input.base import open_session
 from ephysalis.session.model import StreamKind
 from ephysalis.session.config import AuxChannelMap, default_session_config
-from ephysalis.metadata.base import run_trial_tables
 from ephysalis.timeline.clocks import AUX
 from ephysalis.timeline.steps import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
@@ -67,20 +66,6 @@ def test_default_aux_roles_match_recording(run):
     assert edges((word >> roles.digital["wheel"]) & 1) > 10
 
 
-def test_conditions_and_legacy_reference(run):
-    _, tables = run_trial_tables(run, None, None)
-    (conditions,) = tables.values()
-    assert conditions.attrs["stimulusCount"] == 6707
-    assert len(conditions) == 6707
-
-    reference = np.load(run.path / conditions.attrs["folder"] / "legacy_reference_imec0.npz")
-    starts = reference["trial_start_samples"]
-    assert len(starts) == 23
-    assert starts[0] / 30000 == pytest.approx(0.605, abs=0.01)  # 17.105 s in the full run
-    assert reference["running_velocity_1kHz"].shape == (5000,)
-    assert reference["lfp_1kHz"].shape == (5000, 8)
-
-
 @pytest.mark.parametrize("probe_id", ["imec0", "imec1"])
 def test_contains_spikes(run, probe_id):
     """The kept channels were chosen for their spiking; legacy Kilosort spikes are visible."""
@@ -124,26 +109,6 @@ def test_sync(timing):
         assert clock.source_samples.size == 10
         assert clock.max_residual_s() < 50e-6
     assert timing.sync.maps[AUX].effective_sampling_frequency == pytest.approx(26041.3, abs=0.5)
-
-
-@pytest.mark.parametrize("probe_id", ["imec0", "imec1"])
-def test_trial_times_match_legacy(run, timing, probe_id):
-    """Photodiode trial on/offsets agree with the MATLAB pipeline within 5 samples (0.17 ms).
-
-    The remaining difference (about 1 sample for imec0, 4 for imec1) is consistent with the
-    MATLAB sync: it smooths the sync offset over 100 edges (~50 s), which near the start of a
-    run averages in later clock drift. ephysalis maps every pulse with its neighbouring edges.
-    MATLAB reports the first sample above threshold; ephysalis the interpolated crossing.
-    """
-    (trials,) = timing.trials.values()
-    assert len(trials) == 23
-    assert trials.attrs["photodiode_mode"] == "square"
-    assert list(trials.columns[:4]) == ["trial", "start_time", "stop_time", "condition"]
-
-    reference = np.load(run.path / "1_stimulusStageRF" / f"legacy_reference_{probe_id}.npz")
-    for column, legacy in (("start_time", "trial_start_samples"), ("stop_time", "trial_stop_samples")):
-        samples = timing.trial_samples("RF", probe_id, column)
-        np.testing.assert_allclose(samples, reference[legacy], atol=5)
 
 
 def test_running_speed(run, timing):

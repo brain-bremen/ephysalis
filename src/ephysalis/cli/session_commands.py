@@ -759,7 +759,7 @@ def add_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("sessions", nargs="+", type=Path, metavar="session")
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--metadata", help="Metadata file outside the session folder for the metadata plugins, e.g. the lab "
-                   "workbook of the psychtoolbox_neuropixels_freiburg setup (its sheet is the session folder name)")
+                   "workbook of a lab setup")
     p.add_argument("-o", "--output", help=f"Output path (default: <session>/{SESSION_CONFIG_FILENAME})")
     p.add_argument("--force", action="store_true", help="Overwrite an existing config")
     p.set_defaults(func=per_session(_init))

@@ -9,15 +9,13 @@ pipeline (`ephysalis convert`) was replaced by the session pipeline; its raw dat
 
 ## Decisions
 
-- **Inputs**: pluggable readers (`ephysalis.input_formats` entry points) returning
-  spikeinterface recordings. SpikeGLX (spikeinterface/neo), Open Ephys (all three formats:
-  Binary, NWB, legacy; open-ephys-python-tools) and the lab's DAQ files (`.daq`, file versions
-  1.0-3.3, 1999-2006; probes defined in `session.toml`), DataWave UFF (1999) and Multi Channel
-  Systems MC_Rack (`.mcd`, 2010-2011); the historic formats are in `ephysalis.formats.input.legacy` and `ephysalis.metadata.legacy`, to be
-  removed once their datasets are converted.
-- **Metadata plugins**: pluggable (`ephysalis.metadata_plugins`). The current MATLAB
-  "stimulusStage" system is one plugin. A VStim plugin (Open Ephys network messages,
-  wrapping the existing `trialmap.py`) and future systems are added the same way.
+- **Plugins**: input formats (`ephysalis.input_formats`) and metadata plugins
+  (`ephysalis.metadata_plugins`) are entry points to modules of functions, checked against the
+  Protocols of `ephysalis.plugins`. ephysalis comes with SpikeGLX (spikeinterface/neo) and Open
+  Ephys (all three formats: Binary, NWB, legacy; open-ephys-python-tools). Lab-specific plugins
+  are separate packages: ephysalis-bremen (the lab's DAQ files, MC_Rack, DataWave UFF; VStim and
+  VStim 1.x trials) and ephysalis-freiburg (the Freiburg Neuropixels setup: stimulusStage trials,
+  MATLAB pipeline metadata).
 - **Spike sorting**: spikeinterface + Kilosort4, sorted per probe over the concatenated runs.
 - **Output**: one NWB file per session (all probes; paradigms as epochs plus a trials
   table). NWB first, DH5 second. BIDS microephys layout on top of the NWB files.

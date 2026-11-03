@@ -126,8 +126,8 @@ def test_reproduce(processed, tmp_path, capsys):
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(work)]) == 1  # same work dir
 
     assert main(["reproduce", str(files[FORMATS[-1]]), "--work-dir", str(new), "--run"]) == 0
-    pd.testing.assert_frame_equal(pd.read_csv(new / "trials" / f"{RUN}_RF.csv"),
-                                  pd.read_csv(work / "trials" / f"{RUN}_RF.csv"))
+    # the replay runs the steps in a subprocess, without the tests' metadata plugin: compare the events
+    pd.testing.assert_frame_equal(pd.read_csv(new / "events" / f"{RUN}.csv"), pd.read_csv(work / "events" / f"{RUN}.csv"))
     lfp_files = sorted((work / "lfp").rglob("*.raw"))
     assert len(lfp_files) == 2  # imec0, imec1
     for original in lfp_files:

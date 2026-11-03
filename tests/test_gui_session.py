@@ -75,7 +75,7 @@ def test_load_edit_and_save_session_config(app, page, tmp_path):
     run = page._tree.topLevelItem(0)
     assert run.text(0) == "3_rfmappingFine_g0"
     children = [run.child(i).text(1) for i in range(run.childCount())]
-    assert any(c.startswith("imec0") for c in children) and any(c.startswith("psychtoolbox_neuropixels_freiburg: RF") for c in children)
+    assert any(c.startswith("imec0") for c in children) and any(c.startswith("trial_table: RF") for c in children)
     assert page._run_btn.isEnabled()
 
     config = page._editor.config()  # defaults from the recording: no session.toml yet
@@ -122,19 +122,19 @@ def test_save_as_and_open_config(app, page, tmp_path):
     assert page.pipeline_options().config == elsewhere
 
 
-def test_run_trials_step(app, page, tmp_path):
+def test_run_events_step(app, page, tmp_path):
     page.load_session()
     _wait(app, lambda: page._overview is not None)
     for step, box in page._step_boxes.items():
-        box.setChecked(step == "extract-trials")
+        box.setChecked(step == "extract-events")  # steps run in a subprocess: no test metadata plugin there
     page._run_or_cancel()
     assert page._process is not None
     _wait(app, lambda: page._process is None and page._run_btn.text().startswith("▶"), timeout_s=300)
     log = page._log.toPlainText()
     assert "all steps done" in log, log[-2000:]
-    assert len(pd.read_csv(tmp_path / "work" / "trials" / "3_rfmappingFine_g0_RF.csv")) == 23
+    assert len(pd.read_csv(tmp_path / "work" / "events" / "3_rfmappingFine_g0.csv"))
     outputs = [page._results.topLevelItem(i).text(0) for i in range(page._results.topLevelItemCount())]
-    assert "trials/3_rfmappingFine_g0_RF.csv" in outputs
+    assert "events" in outputs
 
 
 def test_apply_to_sessions(app, page, tmp_path):

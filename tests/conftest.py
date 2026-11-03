@@ -8,7 +8,6 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-import scipy.io
 
 _DATA_DIR = Path(__file__).parent / "data"
 _SESSION_NAME = "Test_2026-03-12_16-32-08"
@@ -31,6 +30,25 @@ skip_if_no_oe_tools_data = pytest.mark.skipif(
     reason="set OPEN_EPHYS_TOOLS_TEST_DATA to the tests/data folder of open-ephys-python-tools",
 )
 
+
+@pytest.fixture(autouse=True, scope="session")
+def _trial_table_plugin():
+    """The core tests' metadata plugin (tests/support/trial_table_plugin.py), added to the installed
+    ones in this process (steps run in a subprocess do not see it)."""
+    from ephysalis import plugins
+    from support import trial_table_plugin
+
+    original = plugins._load_group
+
+    def load(group: str) -> dict:
+        loaded = dict(original(group))
+        if group == plugins.METADATA_PLUGIN_GROUP:
+            loaded[trial_table_plugin.name] = trial_table_plugin
+        return loaded
+
+    plugins._load_group = load
+    yield
+    plugins._load_group = original
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -100,35 +118,6 @@ def write_v73(path: Path, groups: dict[str, dict[str, np.ndarray]]) -> None:
                 ds.attrs["MATLAB_class"] = np.bytes_("double")
     with open(path, "r+b") as f:
         f.write(b"MATLAB 7.3 MAT-file, created by ephysalis tests".ljust(128))
-
-
-def write_stimulus_stage_paradigm(
-    run_dir: Path, folder: str, params: list[dict], stimulus_order: Sequence[float]
-) -> Path:
-    paradigm = run_dir / folder
-    paradigm.mkdir(parents=True)
-    cell = np.empty((1, len(params)), dtype=object)
-    for i, p in enumerate(params):
-        cell[0, i] = p
-    scipy.io.savemat(paradigm / "params.mat", {"params": cell})
-    order = np.asarray(stimulus_order, float)
-    write_v73(
-        paradigm / "stimulation.mat",
-        {
-            "stimResults": {
-                "stimulusOrder": order,
-                "stimulusCount": np.array([np.sum(~np.isnan(order))]),
-                "repetition": np.array([1.0]),
-            },
-            "screenInfo": {"FrameRate": np.array([60.0])},
-        },
-    )
-    return paradigm
-
-
-def real_session_path() -> Path | None:
-    path = os.environ.get("EPHYSALIS_TEST_SESSION")
-    return Path(path) if path else None
 
 
 def extract_all(argv: list[str]) -> int:

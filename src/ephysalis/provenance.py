@@ -55,14 +55,22 @@ DH5_ATTRIBUTE_NAME = "Processing"
 DH5_OPERATION_NAME = "ephysalis_export"
 PACKAGES = (
     "ephysalis", "spikeinterface", "probeinterface", "kilosort", "torch", "numpy", "scipy", "pynwb", "hdmf",
-    "dh5io", "vstim", "open-ephys-python-tools",
-)
+    "dh5io", "open-ephys-python-tools",
+)  # plus the packages of the installed plugins (plugin_packages)
+
+
+def plugin_packages() -> list[str]:
+    """Distributions that provide ephysalis plugins (entry points), e.g. a lab's plugin package."""
+    from ephysalis.plugins import INPUT_FORMAT_GROUP, METADATA_PLUGIN_GROUP
+
+    return sorted({ep.dist.name for group in (INPUT_FORMAT_GROUP, METADATA_PLUGIN_GROUP)
+                   for ep in metadata.entry_points(group=group) if ep.dist is not None} - {"ephysalis"})
 
 
 def software_versions() -> dict[str, str]:
     """Versions of Python and of the installed :data:`PACKAGES`."""
     versions = {"python": sys.version.split()[0]}
-    for package in PACKAGES:
+    for package in (*PACKAGES, *plugin_packages()):
         try:
             versions[package] = metadata.version(package)
         except metadata.PackageNotFoundError:
