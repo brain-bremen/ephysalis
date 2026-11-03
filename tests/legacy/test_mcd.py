@@ -1,4 +1,4 @@
-"""The MC_Rack reader (ephysalis.legacy.mcd) on synthetic files: header, samples, digital lines,
+"""The MC_Rack reader (ephysalis.formats.input.legacy.mcd) on synthetic files: header, samples, digital lines,
 trigger events with trial synchronisation, a recording split over two files, the index with and
 without trigger events, and the pipeline (trials of VStim 1.x through vstim_td01)."""
 
@@ -12,10 +12,10 @@ import pytest
 
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.io.base import open_session
-from ephysalis.legacy.mcd import (EPOCH, McdRecordingExtractor, group_files, local_time, parse_streams, read_index,
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.legacy.mcd import (EPOCH, McdRecordingExtractor, group_files, local_time, parse_streams, read_index,
                                   scan_file)
-from ephysalis.session import StreamKind
+from ephysalis.session.model import StreamKind
 
 PER_BLOCK = 2500  # 100 ms at 25 kHz
 RESOLUTION = 1.25e-7  # V per count
@@ -166,8 +166,8 @@ def test_split_recording_and_pipeline(tmp_path):
 def test_probe_left_out_of_runs_without_its_channels(tmp_path, caplog):
     """A probe whose channels a run does not record (electrodes connected only in some runs) is
     not added to that run; the other runs keep it."""
-    from ephysalis.io.probes import configure_probes
-    from ephysalis.session_config import load_session_config
+    from ephysalis.session.probes import configure_probes
+    from ephysalis.session.config import load_session_config
 
     session = tmp_path / "20101110"
     session.mkdir()
@@ -198,7 +198,7 @@ def test_header_parsing():
 
 def test_index_cached_on_disk(tmp_path, monkeypatch):
     """The index of a file is kept on disk for later processes (the walk is slow on a network share)."""
-    from ephysalis.legacy import mcd
+    from ephysalis.formats.input.legacy import mcd
 
     monkeypatch.setenv("EPHYSALIS_CACHE_DIR", str(tmp_path / "cache"))
     path = tmp_path / "20101110_task.mcd"

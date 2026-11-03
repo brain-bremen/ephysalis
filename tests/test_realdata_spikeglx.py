@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
-from ephysalis.io.base import open_session
+from ephysalis.formats.input.base import open_session
 from ephysalis.stimulus.base import detect_stimulus_system
 from conftest import real_session_path
 

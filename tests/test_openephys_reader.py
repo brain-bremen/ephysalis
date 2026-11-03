@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from ephysalis.io.base import open_session
-from ephysalis.io.openephys import OpenEphysFormat
-from ephysalis.session import StreamKind
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.openephys import OpenEphysFormat
+from ephysalis.session.model import StreamKind
 from conftest import DATA_FOLDER, skip_if_no_data
 
 
@@ -29,7 +29,7 @@ def test_open_ephys_session_discovery():
 
 @skip_if_no_data
 def test_open_ephys_clock_maps_from_timestamps():
-    from ephysalis.sync import AUX, synchronize_run
+    from ephysalis.timeline.clocks import AUX, synchronize_run
 
     run = open_session(DATA_FOLDER).runs[0]
     sync = synchronize_run(run)  # no probes and no sync pulses needed: Open Ephys timestamps
@@ -45,9 +45,9 @@ def test_probe_defined_in_session_config(tmp_path):
     """A non-Neuropixels probe on a stream the reader does not detect (here the two NI-DAQ inputs)."""
     import probeinterface
 
-    from ephysalis.io.probes import configure_probes
-    from ephysalis.session_config import ProbeConfig, ProbeGeometry, SessionConfig
-    from ephysalis.sync import synchronize_run
+    from ephysalis.session.probes import configure_probes
+    from ephysalis.session.config import ProbeConfig, ProbeGeometry, SessionConfig
+    from ephysalis.timeline.clocks import synchronize_run
 
     probe = probeinterface.generate_linear_probe(num_elec=2, ypitch=50)
     probeinterface.write_probeinterface(tmp_path / "probe.json", probe)

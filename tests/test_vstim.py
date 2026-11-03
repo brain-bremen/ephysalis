@@ -7,10 +7,10 @@ import pytest
 from conftest import DATA_FOLDER, skip_if_no_data
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.dh5 import EYE_CONT_IDS
-from ephysalis.io.base import open_session
+from ephysalis.formats.output.dh5 import EYE_CONT_IDS
+from ephysalis.formats.input.base import open_session
 from ephysalis.stimulus.base import detect_stimulus_system
-from ephysalis.timing import extract_run_timing
+from ephysalis.timeline.steps import extract_run_timing
 
 
 pytestmark = skip_if_no_data

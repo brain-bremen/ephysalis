@@ -3,7 +3,7 @@
 A stimulus system knows (1) which paradigms were presented in a run, (2) which condition
 was shown in each trial and (3) how trial times are marked in the recording (photodiode,
 TTL words, network events). Trial times are resolved against the synchronised streams of
-the run (:class:`~ephysalis.sync.RunSync`), so they end up on the reference clock.
+the run (:class:`~ephysalis.timeline.clocks.RunSync`), so they end up on the reference clock.
 
 Implementations register under the ``ephysalis.stimulus_systems`` entry point group. To
 support a new stimulus system, implement :class:`StimulusSystem` and register it in the
@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pandas as pd
 
 from ephysalis.plugins import STIMULUS_SYSTEM_GROUP, available, get_plugin
-from ephysalis.session import Run
+from ephysalis.session.model import Run
 
 if TYPE_CHECKING:
-    from ephysalis.auxsignals import AuxSignals
-    from ephysalis.runstart import RunStart
-    from ephysalis.sync import RunSync
+    from ephysalis.timeline.auxsignals import AuxSignals
+    from ephysalis.stimulus.runstart import RunStart
+    from ephysalis.timeline.clocks import RunSync
 
 
 @dataclass
@@ -67,7 +67,7 @@ class StimulusSystem(ABC):
     def run_start(self, run: Run, trials: dict[str, pd.DataFrame]) -> RunStart | None:
         """A better start time of the run than the recording's, from the stimulus system's own
         clock and the run's trials (:meth:`load_trials` of its paradigms), or None
-        (:mod:`ephysalis.runstart`)."""
+        (:mod:`ephysalis.stimulus.runstart`)."""
         return None
 
 

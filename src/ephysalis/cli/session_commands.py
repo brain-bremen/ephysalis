@@ -15,17 +15,17 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from ephysalis.session import Run, Session
-from ephysalis.session_config import (
+from ephysalis.session.model import Run, Session
+from ephysalis.session.config import (
     SESSION_CONFIG_FILENAME,
     SessionConfig,
     default_session_config,
     load_session_config,
     save_session_config,
 )
-from ephysalis.io.base import open_session
-from ephysalis.io.probes import configure_probes
-from ephysalis.sync import RunSync, SyncEdgeCache
+from ephysalis.formats.input.base import open_session
+from ephysalis.session.probes import configure_probes
+from ephysalis.timeline.clocks import RunSync, SyncEdgeCache
 from ephysalis.stimulus.base import detect_stimulus_system, get_stimulus_system
 
 logger = logging.getLogger(__name__)
@@ -123,13 +123,13 @@ def _inspect(args: argparse.Namespace) -> int:
 
 
 def _sync_cache(session_path: Path, cache_dir: str | None) -> SyncEdgeCache:
-    from ephysalis.timing import default_sync_cache
+    from ephysalis.timeline.steps import default_sync_cache
 
     return SyncEdgeCache(cache_dir) if cache_dir else default_sync_cache(session_path)
 
 
 def _print_timing(run: Run, config: SessionConfig | None, cache: SyncEdgeCache) -> None:
-    from ephysalis.timing import extract_run_timing
+    from ephysalis.timeline.steps import extract_run_timing
 
     timing = extract_run_timing(run, config, cache)
     for stream, clock in timing.sync.maps.items():
@@ -157,7 +157,7 @@ def _init(args: argparse.Namespace) -> int:
         return 1
 
     if args.excel or (session.path / "Depths.txt").exists():
-        from ephysalis.migrate import migrate_session
+        from ephysalis.session.migrate import migrate_session
 
         result = migrate_session(session, Path(args.excel) if args.excel else None, args.sheet)
         config, warnings = result.config, result.warnings
@@ -172,8 +172,8 @@ def _init(args: argparse.Namespace) -> int:
 
 
 def _align_clocks(args: argparse.Namespace) -> int:
-    from ephysalis.sync import load_or_extract_edges, synchronize_run
-    from ephysalis.timing import aux_channel_map, default_work_dir, write_clock_report
+    from ephysalis.timeline.clocks import load_or_extract_edges, synchronize_run
+    from ephysalis.timeline.steps import aux_channel_map, default_work_dir, write_clock_report
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -226,8 +226,8 @@ def _parse_value(text: str) -> object:
 
 def _included_run_syncs(session: Session, config: SessionConfig | None, work_dir: Path) -> dict[str, RunSync]:
     """RunSync of every included run, from the sync edge cache in the work dir."""
-    from ephysalis.sync import synchronize_run
-    from ephysalis.timing import aux_channel_map
+    from ephysalis.timeline.clocks import synchronize_run
+    from ephysalis.timeline.steps import aux_channel_map
 
     cache = SyncEdgeCache(work_dir / "sync")
     syncs = {}
@@ -241,8 +241,8 @@ def _included_run_syncs(session: Session, config: SessionConfig | None, work_dir
 def _sort(args: argparse.Namespace) -> int:
     import tempfile
 
-    from ephysalis.sorting import sort_probe
-    from ephysalis.timing import default_work_dir
+    from ephysalis.sorting.spikes import sort_probe
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -267,22 +267,20 @@ def _sort(args: argparse.Namespace) -> int:
 
 def _configure(session: Session, config: SessionConfig | None, config_path: Path | None, work_dir: Path,
                calibration: bool = True) -> None:
-    """Probes from session.toml, the calibration (``[calibration]``, ``ephysalis calibrate``) and the
-    better run start times from the stimulus system (``ephysalis timing``, :mod:`ephysalis.runstart`)."""
-    from ephysalis.calibration import apply_calibration, load_calibration
-
-    from ephysalis.runstart import apply_run_starts
+    """Probes from session.toml, the calibration of the input format (``[calibration]``, ``ephysalis
+    calibrate``) and the better run start times from the stimulus system (``ephysalis extract-trials``,
+    :mod:`ephysalis.stimulus.runstart`)."""
+    from ephysalis.stimulus.runstart import apply_run_starts
 
     config_dir = config_path.parent if config_path else None
     configure_probes(session, config, config_dir)
-    if calibration:  # not needed by steps that use no gains (timing)
-        apply_calibration(session, load_calibration(config, config_dir, work_dir))
+    if calibration:  # not needed by steps that use no gains (clock alignment, extract steps)
+        session.format.apply_calibration(session, config, config_dir, work_dir)
     apply_run_starts(session, work_dir)
 
 
 def _calibrate(args: argparse.Namespace) -> int:
-    from ephysalis.calibration import compute_calibration, write_calibration
-    from ephysalis.timing import default_work_dir
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -291,21 +289,23 @@ def _calibrate(args: argparse.Namespace) -> int:
         print("Nothing to do: [calibration] run is not set in session.toml")
         return 0
     configure_probes(session, config, config_path.parent if config_path else None)
-    calibration = compute_calibration(session, config)
-    path = write_calibration(calibration, work_dir)
+    calibration = session.format.calibrate(session, config, work_dir)
+    if calibration is None:
+        print(f"Nothing to do: the {session.format.name} format has no calibration")
+        return 0
     for probe_id, entry in calibration["probes"].items():
         gains = [g for g in entry["gains_uv"] if g is not None]
         print(f"{probe_id}: sine {entry['frequency_hz']:.3f} Hz in {entry['run']}, {len(gains)} channels calibrated "
               f"(median {sorted(gains)[len(gains) // 2] if gains else float('nan'):.4f} uV per count), "
               f"without signal: {', '.join(entry['without_signal']) or 'none'}")
     _record_step("calibrate", args, session, work_dir, config, config_path)
-    print(f"Output: {path}")
+    print(f"Output: {work_dir}")
     return 0
 
 
 def _quality(args: argparse.Namespace) -> int:
-    from ephysalis.quality import GOOD, assess_run
-    from ephysalis.timing import default_work_dir
+    from ephysalis.processing.quality import GOOD, assess_run
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -333,8 +333,8 @@ def _quality(args: argparse.Namespace) -> int:
 def _csd(args: argparse.Namespace) -> int:
     import shutil
 
-    from ephysalis.csd import TooFewCsdInputs, csd_folder, extract_csd
-    from ephysalis.timing import default_work_dir
+    from ephysalis.processing.csd import TooFewCsdInputs, csd_folder, extract_csd
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -373,7 +373,7 @@ def _extract_step(args: argparse.Namespace, step: str, extract: Callable[[Run, R
                   ) -> int:
     """Run ``extract(run, sync, config, work_dir)`` for every selected run on its clock alignment
     (from the sync edge cache, extracted on demand) and record ``step``."""
-    from ephysalis.timing import align_run_clocks, default_work_dir
+    from ephysalis.timeline.steps import align_run_clocks, default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -391,8 +391,8 @@ def _extract_step(args: argparse.Namespace, step: str, extract: Callable[[Run, R
 
 
 def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
-    from ephysalis.runstart import write_run_start
-    from ephysalis.timing import extract_run_trials
+    from ephysalis.stimulus.runstart import write_run_start
+    from ephysalis.timeline.steps import extract_run_trials
 
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
     for old in (work_dir / "trials").glob(f"{run.name}_*.csv"):
@@ -407,7 +407,7 @@ def _write_trials(run: Run, sync: RunSync, config: SessionConfig | None, work_di
 
 
 def _write_events(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
-    from ephysalis.timing import extract_run_events
+    from ephysalis.timeline.steps import extract_run_events
 
     (work_dir / "events").mkdir(parents=True, exist_ok=True)
     events = extract_run_events(run, sync, config)
@@ -418,7 +418,7 @@ def _write_events(run: Run, sync: RunSync, config: SessionConfig | None, work_di
 def _write_behavior(run: Run, sync: RunSync, config: SessionConfig | None, work_dir: Path) -> None:
     import numpy as np
 
-    from ephysalis.timing import extract_run_behavior
+    from ephysalis.timeline.steps import extract_run_behavior
 
     running_speed, eye_position = extract_run_behavior(run, sync, config)
     for folder, signal, what in (("running_speed", running_speed, "running speed"), ("eye", eye_position, "eye position")):
@@ -443,8 +443,8 @@ def _extract_behavior(args: argparse.Namespace) -> int:
 
 
 def _lfp(args: argparse.Namespace) -> int:
-    from ephysalis.lfp import extract_lfp
-    from ephysalis.timing import default_work_dir
+    from ephysalis.processing.lfp import extract_lfp
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -458,10 +458,10 @@ def _lfp(args: argparse.Namespace) -> int:
             lfp = extract_lfp(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
             print(f"{run.name} {probe_id}: LFP {lfp.get_num_channels()} channels, {lfp.get_total_duration():.0f} s")
             if config is not None and config.line_noise.enabled:
-                from ephysalis.linenoise import clean_lfp
-                from ephysalis.lfp import lfp_folder
-                from ephysalis.sync import synchronize_run
-                from ephysalis.timing import aux_channel_map
+                from ephysalis.processing.linenoise import clean_lfp
+                from ephysalis.processing.lfp import lfp_folder
+                from ephysalis.timeline.clocks import synchronize_run
+                from ephysalis.timeline.steps import aux_channel_map
 
                 sync = synchronize_run(run, aux_channel_map(run, config), cache=SyncEdgeCache(work_dir / "sync"))
                 status = clean_lfp(run, probe_id, lfp_folder(work_dir, run.name, probe_id), config, sync)
@@ -472,8 +472,8 @@ def _lfp(args: argparse.Namespace) -> int:
 
 
 def _mua(args: argparse.Namespace) -> int:
-    from ephysalis.mua import extract_mua
-    from ephysalis.timing import default_work_dir
+    from ephysalis.processing.mua import extract_mua
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -494,8 +494,8 @@ def _mua(args: argparse.Namespace) -> int:
 def _export(args: argparse.Namespace) -> int:
     """NWB or DH5 file of a session (or one per run, ``--per-run``), optionally in a BIDS (NWB)
     or BIDS-like (DH5) dataset."""
-    from ephysalis.nwb import included_runs, single_run_session
-    from ephysalis.timing import default_work_dir
+    from ephysalis.formats.output.nwb import included_runs, single_run_session
+    from ephysalis.timeline.steps import default_work_dir
 
     session = open_session(args.session, args.format)
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(session.path)
@@ -505,7 +505,7 @@ def _export(args: argparse.Namespace) -> int:
     extension = f".{args.output_format}"
     subject = session_label = ""
     if args.bids:
-        from ephysalis.bids import bids_labels
+        from ephysalis.formats.output.bids import bids_labels
 
         subject, session_label = bids_labels(
             config.subject_id if config else session.name, config.session_id if config else session.name)
@@ -519,7 +519,7 @@ def _export(args: argparse.Namespace) -> int:
         for number, run in enumerate(included_runs(session, config), start=1):  # BIDS run: position among the included
             task = config.task_of([run.name]) if config else None
             if args.bids:
-                from ephysalis.bids import ecephys_path
+                from ephysalis.formats.output.bids import ecephys_path
 
                 output = ecephys_path(Path(args.bids), subject, session_label, extension, run=number, task=task)
             else:
@@ -529,7 +529,7 @@ def _export(args: argparse.Namespace) -> int:
     else:
         task = config.task_of([r.name for r in included_runs(session, config)]) if config else None
         if args.bids:
-            from ephysalis.bids import ecephys_path
+            from ephysalis.formats.output.bids import ecephys_path
 
             output = ecephys_path(Path(args.bids), subject, session_label, extension, task=task)
         else:
@@ -545,19 +545,19 @@ def _export(args: argparse.Namespace) -> int:
         existing = Path(args.existing) if args.existing else None
         if existing is None:
             if args.output_format == "nwb":
-                from ephysalis.nwb import write_session_nwb
+                from ephysalis.formats.output.nwb import write_session_nwb
 
                 write_session_nwb(file_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
                                   compression=None if args.no_compression else "gzip", processing=processing,
                                   raw=args.raw, run_clock=args.per_run)
             else:
-                from ephysalis.dh5 import write_session_dh5
+                from ephysalis.formats.output.dh5 import write_session_dh5
 
                 write_session_dh5(file_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
                                   processing=processing, raw=args.raw, run_clock=args.per_run)
             existing = output
         if args.bids:
-            from ephysalis.bids import add_dh5_to_bids, add_nwb_to_bids
+            from ephysalis.formats.output.bids import add_dh5_to_bids, add_nwb_to_bids
 
             options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
             if args.output_format == "nwb":

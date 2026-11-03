@@ -9,7 +9,7 @@ from ephysalis.gui.app import _apply_dark_palette
 from ephysalis.version import get_version_from_pyproject
 from ephysalis.gui.inspector_widget import SessionInspectorWidget
 from ephysalis.gui.settings import get_last_session_dir, set_last_session_dir, pick_session_dirs
-from ephysalis.inspect import validate_session_path
+from ephysalis.formats.input.openephys_inspect import validate_session_path
 
 
 class _InspectorWindow(QMainWindow):

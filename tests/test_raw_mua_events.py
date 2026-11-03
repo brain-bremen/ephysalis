@@ -12,10 +12,10 @@ import dh5io
 from conftest import DATA_FOLDER, LEGACY_DH5_PATH, SPIKEGLX_CROP_SESSION, skip_if_no_data
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
-from ephysalis.events import load_run_events
-from ephysalis.io.base import open_session
-from ephysalis.mua import mua_folder
+from ephysalis.formats.output.dh5 import ANALOG_FIRST_CONT_ID, MUA_FIRST_CONT_ID, RAW_FIRST_CONT_ID
+from ephysalis.timeline.events import load_run_events
+from ephysalis.formats.input.base import open_session
+from ephysalis.processing.mua import mua_folder
 
 OE_RUN = "experiment1_recording1"
 CROP_RUN = "3_rfmappingFine_g0"

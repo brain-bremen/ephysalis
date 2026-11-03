@@ -13,9 +13,9 @@ import pytest
 from conftest import OE_TOOLS_DATA, skip_if_no_oe_tools_data
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.io.base import open_session
-from ephysalis.io.openephys import OpenEphysFormat
-from ephysalis.session import StreamKind
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.openephys import OpenEphysFormat
+from ephysalis.session.model import StreamKind
 
 FORMATS = ["v0.6.7_Binary", "v0.6.7_NWB", "v0.6.7_OpenEphys"]
 NODE = "Record Node 105"

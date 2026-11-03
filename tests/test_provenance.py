@@ -17,7 +17,7 @@ from ephysalis.provenance import (
     record_config,
     replay_argv,
 )
-from ephysalis.session_config import SCHEMA_VERSION, load_session_config, save_session_config
+from ephysalis.session.config import SCHEMA_VERSION, load_session_config, save_session_config
 
 RUN = "3_rfmappingFine_g0"
 # DH5 export needs dh5io with SPIKE block writing (dh5io PR #15)
@@ -72,7 +72,7 @@ def test_dh5_step_operations(processed):
     """One readable DH5 operation per step, in the order they ran, before the export."""
     import h5py
 
-    from ephysalis.lfp import LFP_FILTERING
+    from ephysalis.processing.lfp import LFP_FILTERING
 
     _, _, files = processed
     with h5py.File(files["dh5"], "r") as f:
@@ -139,7 +139,7 @@ def test_records_before_the_rename(tmp_path):
     """Outputs, work dirs and records made under the old name (ephyscon) are still read."""
     import h5py
 
-    from ephysalis.timing import default_work_dir
+    from ephysalis.timeline.steps import default_work_dir
 
     record = {"packages": {"ephyscon": "0.3.0.dev0"}, "ephyscon_source": {"commit": "abc", "dirty": False}}
     with h5py.File(tmp_path / "old.nwb", "w") as f:

@@ -1,15 +1,15 @@
 # Historic recording formats
 
-The package `ephysalis.legacy` reads the lab's historic recordings. It will be removed once those
+The packages `ephysalis.formats.input.legacy` and `ephysalis.stimulus.legacy` read the lab's historic recordings. They will be removed once those
 datasets are converted. These pages describe the file formats in enough detail to write another
 reader without ephysalis.
 
 | Format | Files | Years | Recordings | Reader |
 |---|---|---|---|---|
-| {doc}`daq` | `.daq` | 1999–2006 | Fritz, Mini (epidural and intracortical arrays, ADC64/MC-128 cards) | `ephysalis.legacy.daq` |
-| {doc}`uff` | `M*.UFF` + `P*.UFF` | 1999 | Eddi (Tallon-Baudry et al. 2004) | `ephysalis.legacy.uff` |
-| {doc}`mcd` | `.mcd` | 2010–2011 | Iris (USB-ME256) | `ephysalis.legacy.mcd` |
-| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephysalis.legacy.vstim_td01` |
+| {doc}`daq` | `.daq` | 1999–2006 | Fritz, Mini (epidural and intracortical arrays, ADC64/MC-128 cards) | `ephysalis.formats.input.legacy.daq.reader` |
+| {doc}`uff` | `M*.UFF` + `P*.UFF` | 1999 | Eddi (Tallon-Baudry et al. 2004) | `ephysalis.formats.input.legacy.uff` |
+| {doc}`mcd` | `.mcd` | 2010–2011 | Iris (USB-ME256) | `ephysalis.formats.input.legacy.mcd` |
+| {doc}`vstim-td01` | trial records + `.tdr` | 2000–2011 | trials of the DAQ and MC_Rack recordings | `ephysalis.stimulus.legacy.vstim_td01` |
 
 None of these formats is documented by its authors:
 - the DAQ format was reconstructed from Michael Borisov's DAQ → HDF5 converter;
@@ -56,9 +56,9 @@ All three readers fit the same model as the Open Ephys and SpikeGLX readers:
 
 ## Isolation
 
-Nothing outside `ephysalis.legacy` imports it, which `tests/test_legacy_isolation.py` checks. The
+Nothing outside these two packages imports them, which `tests/test_legacy_isolation.py` checks. The
 readers plug in only through the entry points in `pyproject.toml` (`daq`, `uff`, `mcd`,
-`vstim_td01`). Removing them means deleting the package, `tests/legacy/` and these four entry
+`vstim_td01`). Removing them means deleting the two packages, `tests/legacy/` and these four entry
 points.
 
 The real recordings may not be published. `tests/legacy/` therefore writes small synthetic files

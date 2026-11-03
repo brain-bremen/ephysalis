@@ -1,14 +1,14 @@
-"""Pulses and markers of the trigger lines (ephysalis.annotations) and their DH5 / NWB / BIDS output."""
+"""Pulses and markers of the trigger lines (ephysalis.timeline.annotations) and their DH5 / NWB / BIDS output."""
 
 import h5py
 import numpy as np
 import pandas as pd
 import pytest
 
-from ephysalis.annotations import event_code_names, line_pulses, markers
+from ephysalis.timeline.annotations import event_code_names, line_pulses, markers
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.session_config import EventsConfig, MarkerConfig, TriggerLineConfig
+from ephysalis.session.config import EventsConfig, MarkerConfig, TriggerLineConfig
 from synthetic import write_openephys
 
 MS = 1_000_000  # ns

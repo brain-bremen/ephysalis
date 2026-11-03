@@ -7,12 +7,12 @@ import spikeinterface.core as si
 
 import dh5io
 from conftest import SPIKEGLX_CROP_SESSION
-from ephysalis.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_session_dh5
-from ephysalis.io.base import open_session
-from ephysalis.nwb import SESSION_START_MARGIN_S
-from ephysalis.session_config import default_session_config
-from ephysalis.sync import synchronize_run
-from ephysalis.timing import aux_channel_map
+from ephysalis.formats.output.dh5 import LFP_FIRST_CONT_ID, RUNNING_SPEED_CONT_ID, lfp_regions, sidecar_paths, write_session_dh5
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S
+from ephysalis.session.config import default_session_config
+from ephysalis.timeline.clocks import synchronize_run
+from ephysalis.timeline.steps import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 
 if not hasattr(dh5io, "Spike"):

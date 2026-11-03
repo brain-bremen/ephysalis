@@ -7,8 +7,8 @@ from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QTree
 
 _CHANNEL_NAMES_ROLE = 257  # UserRole: stores list[str] of channel names on stream items
 
-from ephysalis.inspect import SessionInfo, inspect_session, validate_session_path
-from ephysalis.inspect import _fmt_duration, _fmt_rate, _fmt_size
+from ephysalis.formats.input.openephys_inspect import SessionInfo, inspect_session, validate_session_path
+from ephysalis.formats.input.openephys_inspect import _fmt_duration, _fmt_rate, _fmt_size
 
 
 _PATH_ROLE = 256  # UserRole: stores Path on top-level session items

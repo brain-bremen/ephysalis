@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 from scipy.signal import find_peaks, resample_poly
 
-from ephysalis.auxsignals import AuxSignals, wheel_speed
-from ephysalis.io.base import open_session
-from ephysalis.session import StreamKind
-from ephysalis.session_config import AuxChannelMap, default_session_config
+from ephysalis.timeline.auxsignals import AuxSignals, wheel_speed
+from ephysalis.formats.input.base import open_session
+from ephysalis.session.model import StreamKind
+from ephysalis.session.config import AuxChannelMap, default_session_config
 from ephysalis.stimulus.base import detect_stimulus_system
-from ephysalis.sync import AUX
-from ephysalis.timing import extract_run_timing
+from ephysalis.timeline.clocks import AUX
+from ephysalis.timeline.steps import extract_run_timing
 from conftest import SPIKEGLX_CROP_SESSION
 
 RUN = "3_rfmappingFine_g0"
@@ -174,8 +174,8 @@ def test_running_speed_legacy_artefact(run):
 
 
 def test_sync_edge_cache(run, tmp_path, monkeypatch):
-    import ephysalis.sync as sync_module
-    from ephysalis.sync import SyncEdgeCache, load_or_extract_edges
+    import ephysalis.timeline.clocks as sync_module
+    from ephysalis.timeline.clocks import SyncEdgeCache, load_or_extract_edges
 
     channels = AuxChannelMap.legacy_default(8)
     cache = SyncEdgeCache(tmp_path)

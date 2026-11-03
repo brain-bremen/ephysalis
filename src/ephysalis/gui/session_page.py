@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from ephysalis.gui.config_widget import ConfigStepWidget
 from ephysalis.gui.pipeline import STEPS, PipelineOptions, step_commands, work_dir_summary
-from ephysalis.session_config import (
+from ephysalis.session.config import (
     SESSION_CONFIG_FILENAME, AuxChannelMap, EventsConfig, ProbeConfig, RunConfig, SessionConfig, SortingConfig,
     SubjectConfig, default_session_config, load_session_config, save_session_config,
 )
@@ -82,8 +82,8 @@ class _OverviewLoader(QThread):
 
     def run(self) -> None:
         try:
-            from ephysalis.io.base import open_session
-            from ephysalis.io.probes import configure_probes
+            from ephysalis.formats.input.base import open_session
+            from ephysalis.session.probes import configure_probes
             from ephysalis.stimulus.base import detect_stimulus_system, get_stimulus_system
 
             session = open_session(self._session_path)
@@ -640,7 +640,7 @@ class SessionPipelinePage(QWidget):
         """Work dir of ``session`` (default: the shown one): the template with ``{session}``
         replaced, or ``<session>/ephysalis``."""
         from ephysalis.cli.session_commands import SESSION_PLACEHOLDER
-        from ephysalis.timing import default_work_dir
+        from ephysalis.timeline.steps import default_work_dir
 
         session = session or self._shown or self.session_path()
         text = self._work_edit.text().strip()
@@ -818,7 +818,7 @@ class SessionPipelinePage(QWidget):
         """Copy ``sections`` of the shown config into the configs of ``targets`` (their config
         file, else a new ``<work dir>/session.toml`` from the recording's defaults); returns the
         written files."""
-        from ephysalis.io.base import open_session
+        from ephysalis.formats.input.base import open_session
 
         source = self._editor.config()
         written = []

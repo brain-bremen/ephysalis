@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ephysalis.io.base import open_session
+from ephysalis.formats.input.base import open_session
 from ephysalis.stimulus.base import detect_stimulus_system
 from ephysalis.stimulus.stimstage import get_stim_from_index
 from conftest import write_stimstage_paradigm

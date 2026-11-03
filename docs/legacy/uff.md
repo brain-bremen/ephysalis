@@ -70,12 +70,12 @@ In DH5 output, P blocks get their true sample period and one INDEX region per st
 ## Reader API
 
 ```{eval-rst}
-.. autoclass:: ephysalis.legacy.uff.UffFile
+.. autoclass:: ephysalis.formats.input.legacy.uff.UffFile
    :members: traces
 
-.. autofunction:: ephysalis.legacy.uff.pair_pulses
+.. autofunction:: ephysalis.formats.input.legacy.uff.pair_pulses
 
-.. autofunction:: ephysalis.legacy.uff.p_clock_fit
+.. autofunction:: ephysalis.formats.input.legacy.uff.p_clock_fit
 
-.. autofunction:: ephysalis.legacy.uff.block_files
+.. autofunction:: ephysalis.formats.input.legacy.uff.block_files
 ```

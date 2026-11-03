@@ -37,8 +37,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 if TYPE_CHECKING:
-    from ephysalis.session import Session
-    from ephysalis.session_config import SessionConfig
+    from ephysalis.session.model import Session
+    from ephysalis.session.config import SessionConfig
 
 RECORD_SCHEMA_VERSION = 1
 HASH_MAX_BYTES = 1_000_000  # input files up to this size are hashed (metadata), larger ones by size
@@ -232,7 +232,7 @@ def read_processing_record(path: str | Path) -> dict[str, Any] | None:
 
 def record_config(record: dict[str, Any], step: str = "export") -> SessionConfig | None:
     """``session.toml`` used by ``step`` (its last invocation), upgraded to the current schema."""
-    from ephysalis.session_config import session_config_from_dict
+    from ephysalis.session.config import session_config_from_dict
 
     entry = record["export"] if step == "export" else (record["steps"].get(step) or [None])[-1]
     if entry is None or entry.get("config") is None:
@@ -290,7 +290,7 @@ def write_replay_configs(record: dict[str, Any], session: Path, work_dir: Path) 
     """Write the configs of the recorded steps to ``work_dir`` (``session.toml``, or
     ``session_<n>.toml`` when the steps used different ones) and return the commands that
     redo the processing with them."""
-    from ephysalis.session_config import save_session_config, session_config_from_dict
+    from ephysalis.session.config import save_session_config, session_config_from_dict
 
     invocations = replay_invocations(record)
     configs: list[dict] = []

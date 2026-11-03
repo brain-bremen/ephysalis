@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from spikeinterface.core import NumpyRecording
 
-from ephysalis.io.probes import apply_probe, rereference
-from ephysalis.session import ProbeInfo, StreamKind
-from ephysalis.session_config import SCHEMA_VERSION, session_config_from_dict
+from ephysalis.session.probes import apply_probe, rereference
+from ephysalis.session.model import ProbeInfo, StreamKind
+from ephysalis.session.config import SCHEMA_VERSION, session_config_from_dict
 
 
 def recording():

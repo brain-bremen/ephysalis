@@ -9,12 +9,12 @@ from pynwb import NWBHDF5IO
 from conftest import SPIKEGLX_CROP_SESSION
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.io.base import open_session
-from ephysalis.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephysalis.session_config import ProbeConfig, SubjectConfig, default_session_config
-from ephysalis.sorting import save_run_spikes
-from ephysalis.sync import synchronize_run
-from ephysalis.timing import aux_channel_map
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_session_nwb
+from ephysalis.session.config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.sorting.spikes import save_run_spikes
+from ephysalis.timeline.clocks import synchronize_run
+from ephysalis.timeline.steps import aux_channel_map
 
 RUN = "3_rfmappingFine_g0"
 

@@ -2,15 +2,15 @@ import openpyxl
 import pytest
 from openpyxl.styles import Font
 
-from ephysalis.session_config import (
+from ephysalis.session.config import (
     AuxChannelMap,
     SessionConfig,
     default_session_config,
     load_session_config,
     save_session_config,
 )
-from ephysalis.io.base import open_session
-from ephysalis.migrate import migrate_session
+from ephysalis.formats.input.base import open_session
+from ephysalis.session.migrate import migrate_session
 
 RUNS = [("3_rfmapping_g0", "2025-01-09T13:27:45"), ("5_DoseResponse_g0", "2025-01-09T13:58:53")]
 
@@ -85,8 +85,8 @@ def test_excel_migration(make_spikeglx_session, tmp_path):
 
 
 def test_schema_migration(tmp_path):
-    from ephysalis.schema import migrate
-    from ephysalis.session_config import SCHEMA_VERSION
+    from ephysalis.session.schema import migrate
+    from ephysalis.session.config import SCHEMA_VERSION
 
     path = tmp_path / "session.toml"
     path.write_text('schema_version = 1\nsession_id = "x"\nsubject_id = "y"\n[[runs]]\nname = "r"\n')

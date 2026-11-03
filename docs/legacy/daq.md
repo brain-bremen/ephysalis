@@ -149,14 +149,14 @@ Without copies, both boards are taken to share one clock.
 ## Reader API
 
 ```{eval-rst}
-.. autoclass:: ephysalis.legacy.daq.DaqFormat
+.. autoclass:: ephysalis.formats.input.legacy.daq.reader.DaqFormat
    :members: read_trial_descriptors, read_ttl_events, clock_maps
 
-.. autofunction:: ephysalis.legacy.daq.read_header
+.. autofunction:: ephysalis.formats.input.legacy.daq.reader.read_header
 
-.. autofunction:: ephysalis.legacy.daq.read_index
+.. autofunction:: ephysalis.formats.input.legacy.daq.reader.read_index
 
-.. autofunction:: ephysalis.legacy.daq.board_fit
+.. autofunction:: ephysalis.formats.input.legacy.daq.reader.board_fit
 
-.. autofunction:: ephysalis.legacy.daq.cache_dir
+.. autofunction:: ephysalis.formats.input.legacy.daq.reader.cache_dir
 ```

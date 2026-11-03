@@ -28,13 +28,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 import pandas as pd
 
-from ephysalis.session import Run
+from ephysalis.session.model import Run
 from ephysalis.stimulus.base import Paradigm, StimulusSystem
-from ephysalis.sync import AUX
+from ephysalis.timeline.clocks import AUX
 
 if TYPE_CHECKING:
-    from ephysalis.auxsignals import AuxSignals
-    from ephysalis.sync import RunSync
+    from ephysalis.timeline.auxsignals import AuxSignals
+    from ephysalis.timeline.clocks import RunSync
 
 logger = logging.getLogger(__name__)
 

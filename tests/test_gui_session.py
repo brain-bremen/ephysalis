@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from conftest import DATA_FOLDER, SPIKEGLX_CROP_SESSION  # noqa: E402
 from ephysalis.gui import session_page  # noqa: E402
 from ephysalis.gui.pipeline import PipelineOptions, step_commands, work_dir_summary  # noqa: E402
-from ephysalis.session_config import load_session_config, save_session_config  # noqa: E402
+from ephysalis.session.config import load_session_config, save_session_config  # noqa: E402
 
 
 @pytest.fixture(scope="module")

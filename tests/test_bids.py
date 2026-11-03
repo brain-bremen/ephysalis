@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 
 from conftest import SPIKEGLX_CROP_SESSION
-from ephysalis.bids import add_nwb_to_bids, bids_labels
-from ephysalis.io.base import open_session
-from ephysalis.nwb import SESSION_START_MARGIN_S, write_session_nwb
-from ephysalis.session_config import ProbeConfig, SubjectConfig, default_session_config
-from ephysalis.sync import synchronize_run
-from ephysalis.timing import aux_channel_map
+from ephysalis.formats.output.bids import add_nwb_to_bids, bids_labels
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.output.nwb import SESSION_START_MARGIN_S, write_session_nwb
+from ephysalis.session.config import ProbeConfig, SubjectConfig, default_session_config
+from ephysalis.timeline.clocks import synchronize_run
+from ephysalis.timeline.steps import aux_channel_map
 from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 
 SUBJECT, SESSION = "SOMxCD1172", "20250109crop"

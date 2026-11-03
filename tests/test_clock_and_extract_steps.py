@@ -7,7 +7,7 @@ import pandas as pd
 
 from conftest import SPIKEGLX_CROP_SESSION
 from ephysalis.cli.main import main
-from ephysalis.events import COLUMNS, dh5_event_codes, load_run_events
+from ephysalis.timeline.events import COLUMNS, dh5_event_codes, load_run_events
 from ephysalis.provenance import CLOCK_AND_EXTRACT_STEPS
 
 RUN = "3_rfmappingFine_g0"

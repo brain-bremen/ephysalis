@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from ephysalis.inspect import validate_session_path
+from ephysalis.formats.input.openephys_inspect import validate_session_path
 
 
 def test_rejects_nonexistent_path(tmp_path):

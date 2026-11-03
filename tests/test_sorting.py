@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 from spikeinterface.core import NumpySorting
 
-from ephysalis.io.base import open_session
-from ephysalis.session_config import ProbeConfig
-from ephysalis.sorting import RunSegment, concatenate_runs, cut_spikes, load_run_spikes, save_run_spikes, sorting_channels
-from ephysalis.session import StreamKind
-from ephysalis.sync import ClockMap, RunSync
+from ephysalis.formats.input.base import open_session
+from ephysalis.session.config import ProbeConfig
+from ephysalis.sorting.spikes import RunSegment, concatenate_runs, cut_spikes, load_run_spikes, save_run_spikes, sorting_channels
+from ephysalis.session.model import StreamKind
+from ephysalis.timeline.clocks import ClockMap, RunSync
 from conftest import SPIKEGLX_CROP_SESSION
 
 RUN = "3_rfmappingFine_g0"
@@ -63,8 +63,8 @@ def test_run_spikes_roundtrip(tmp_path):
 
 
 def test_sorter_settings_precedence():
-    from ephysalis.session_config import SessionConfig, SortingConfig
-    from ephysalis.sorting import sorter_settings
+    from ephysalis.session.config import SessionConfig, SortingConfig
+    from ephysalis.sorting.spikes import sorter_settings
 
     assert sorter_settings(None, "p0") == ("kilosort4", {"clear_cache": True})
     config = SessionConfig(session_id="s", subject_id="m", sorting=SortingConfig(sorter="kilosort4", params={"Th_universal": 8}))
@@ -77,7 +77,7 @@ def test_sorter_settings_precedence():
 
 
 def test_kilosort_neighbourhoods_limited_to_channel_count():
-    from ephysalis.sorting import adapt_sorter_params
+    from ephysalis.sorting.spikes import adapt_sorter_params
 
     assert adapt_sorter_params("kilosort4", {}, 8) == {"nearest_chans": 8, "nearest_templates": 8}
     assert adapt_sorter_params("kilosort4", {"nearest_chans": 4}, 32) == {"nearest_chans": 4, "nearest_templates": 32}

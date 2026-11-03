@@ -1,4 +1,4 @@
-"""The DataWave UFF reader (ephysalis.legacy.uff) on synthetic M/P files: samples, block pairing,
+"""The DataWave UFF reader (ephysalis.formats.input.legacy.uff) on synthetic M/P files: samples, block pairing,
 event pulses, the slow P clock mapped onto M (steps: :func:`p_clock_fit`), and the DH5 export of
 P with its true period."""
 
@@ -10,9 +10,9 @@ import pytest
 
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.io.base import open_session
-from ephysalis.legacy.uff import NOMINAL_P_RATE, UffFile, p_clock_fit
-from ephysalis.session import StreamKind
+from ephysalis.formats.input.base import open_session
+from ephysalis.formats.input.legacy.uff import NOMINAL_P_RATE, UffFile, p_clock_fit
+from ephysalis.session.model import StreamKind
 
 PULSE = 660
 

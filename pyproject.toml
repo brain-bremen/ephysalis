@@ -74,16 +74,16 @@ ephysalis-inspect = "ephysalis.gui.inspector_app:main"
 # Plugin registries. Other packages can register additional input formats or
 # stimulus systems under the same entry point groups.
 [project.entry-points."ephysalis.input_formats"]
-spikeglx = "ephysalis.io.spikeglx:SpikeGLXFormat"
-openephys = "ephysalis.io.openephys:OpenEphysFormat"
-daq = "ephysalis.legacy.daq:DaqFormat"
-uff = "ephysalis.legacy.uff:UffFormat"
-mcd = "ephysalis.legacy.mcd:McdFormat"
+spikeglx = "ephysalis.formats.input.spikeglx:SpikeGLXFormat"
+openephys = "ephysalis.formats.input.openephys:OpenEphysFormat"
+daq = "ephysalis.formats.input.legacy.daq.reader:DaqFormat"
+uff = "ephysalis.formats.input.legacy.uff:UffFormat"
+mcd = "ephysalis.formats.input.legacy.mcd:McdFormat"
 
 [project.entry-points."ephysalis.stimulus_systems"]
 stimstage = "ephysalis.stimulus.stimstage:StimStageSystem"
 vstim = "ephysalis.stimulus.vstim:VStimSystem"
-vstim_td01 = "ephysalis.legacy.vstim_td01:VStimTD01System"
+vstim_td01 = "ephysalis.stimulus.legacy.vstim_td01:VStimTD01System"
 
 [tool.pytest.ini_options]
 markers = [

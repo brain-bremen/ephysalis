@@ -10,11 +10,10 @@ import probeinterface
 import pytest
 from scipy import signal
 
-from ephysalis.calibration import fit_sine
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.csd import DH5_FULL_SCALE, c_round, csd_operator
-from ephysalis.linenoise import A, B, N_POINTS, line_noise_templates, matlab_int16, reference_quality, zero_crossings
+from ephysalis.processing.csd import DH5_FULL_SCALE, c_round, csd_operator
+from ephysalis.processing.linenoise import A, B, N_POINTS, line_noise_templates, matlab_int16, reference_quality, zero_crossings
 from synthetic import write_openephys
 
 FS = 1000.0
@@ -122,31 +121,18 @@ def test_csd_operator_equals_dh_csd():
     np.testing.assert_allclose(operator @ z[inputs], expected, rtol=1e-6, atol=1e-9 * np.abs(expected).max())
 
 
-def test_fit_sine():
-    t = np.arange(20_000) / FS
-    amplitudes = np.array([300.0, 150.0, 5.0])
-    x = np.sin(2 * np.pi * 15.37 * t + 0.3)[:, None] * amplitudes + np.random.default_rng(0).standard_normal((t.size, 3))
-    frequency, fitted = fit_sine(x, FS)
-    assert frequency == pytest.approx(15.37, abs=0.002)
-    np.testing.assert_allclose(fitted, amplitudes, rtol=0.01)
-
-
-def test_pipeline_calibration_mains_csd(tmp_path):
-    """15 Hz calibration run + task run with mains noise on 37 channels of the Fritz grid:
-    calibrate, LFP with mains removal, CSD, DH5 export."""
+def test_pipeline_mains_csd(tmp_path):
+    """Task run with mains noise on 37 channels of the Fritz grid (after an excluded run): LFP with
+    mains removal, CSD, DH5 export. Calibration: tests/legacy/test_daq_calibration.py."""
     channels, xy_um = fritz_grid()
     n_chan, mains_channel = 48, 46
     rng = np.random.default_rng(5)
-    true_gain_uv = 0.15 + 0.05 * rng.random(n_chan)  # µV at the electrode per count
-    t = np.arange(20_000) / FS
-    calibration = np.zeros((t.size, n_chan))
-    calibration[:, channels] = 100.0 * np.sin(2 * np.pi * 15.4 * t)[:, None] / true_gain_uv[channels]
-    calibration[:, 20] = 2.0  # E20 carries no calibration signal
+    excluded = rng.standard_normal((20_000, n_chan))
     ref, phase = mains(30_000)
     task = rng.standard_normal((ref.size, n_chan)) * 30
     task[:, channels] += 400 * np.sin(phase + 0.5)[:, None]
     task[:, mains_channel] = 3000 * ref
-    session = write_openephys(tmp_path / "ses", [{"data": calibration}, {"data": task}])
+    session = write_openephys(tmp_path / "ses", [{"data": excluded}, {"data": task}])
     geometry = probeinterface.Probe(ndim=2)
     geometry.set_contacts(positions=xy_um, shapes="circle", shape_params={"radius": 100})
     geometry.set_device_channel_indices(np.arange(len(channels)))
@@ -157,23 +143,17 @@ def test_pipeline_calibration_mains_csd(tmp_path):
         f'[[runs]]\nname = "{CAL}"\ninclude = false\n[[runs]]\nname = "{TASK}"\n'
         f'[probes.epidural]\nstream = "USB-6343"\nchannels = [{ids}]\ngeometry = {{ file = "grid.json" }}\n'
         '[probes.epidural.csd]\nexclude_inputs = ["AI20"]\n'
-        f'[calibration]\nrun = "{CAL}"\n[line_noise]\nenabled = true\n'
+        '[line_noise]\nenabled = true\n'
         f'[aux_channels.analog]\nmains = {mains_channel}\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]
-    assert main(["calibrate", str(session), *common]) == 0
-    entry = json.loads((tmp_path / "work" / "calibration.json").read_text())["probes"]["epidural"]
-    gains = np.array([np.nan if g is None else g for g in entry["gains_uv"]])
-    index20 = entry["channels"].index("AI20")
-    assert entry["without_signal"] == ["AI20"] and np.isnan(gains[index20])
-    keep = np.arange(len(channels)) != index20
-    np.testing.assert_allclose(gains[keep], true_gain_uv[channels][keep], rtol=0.01)
+    assert main(["calibrate", str(session), *common]) == 0  # nothing to do: Open Ephys has no calibration
+    assert not (tmp_path / "work" / "calibration.json").exists()
     assert main(["lfp", str(session), *common, "--n-jobs", "1"]) == 0
     status = json.loads((tmp_path / "work" / "lfp" / f"{TASK}_epidural" / "line_noise.json").read_text())
     assert status["applied"]
     import spikeinterface.core as si
 
     lfp = si.load(tmp_path / "work" / "lfp" / f"{TASK}_epidural")
-    np.testing.assert_allclose(lfp.get_channel_gains()[keep], gains[keep])  # calibrated
     cleaned = lfp.get_traces(return_in_uV=False).astype(float)[10_000:]
     expected = np.round(task[:, channels]).astype(np.int16)[10_000:].astype(float)
     residual_noise = (cleaned - (expected - 400 * np.sin(phase + 0.5)[10_000:, None])).std()
@@ -202,8 +182,8 @@ def _common_lfp(n: int, n_chan: int, rng) -> np.ndarray:
 
 
 def test_channel_quality():
-    from ephysalis.quality import channel_quality
-    from ephysalis.session_config import ChannelQualityConfig
+    from ephysalis.processing.quality import channel_quality
+    from ephysalis.session.config import ChannelQualityConfig
 
     channels, xy_um = fritz_grid()
     rng = np.random.default_rng(7)
