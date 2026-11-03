@@ -324,7 +324,9 @@ def _quality(args: argparse.Namespace) -> int:
 
 
 def _csd(args: argparse.Namespace) -> int:
-    from ephysalis.csd import extract_csd
+    import shutil
+
+    from ephysalis.csd import TooFewCsdInputs, csd_folder, extract_csd
     from ephysalis.timing import default_work_dir
 
     session = open_session(args.session, args.format)
@@ -341,7 +343,13 @@ def _csd(args: argparse.Namespace) -> int:
             continue
         for probe_id, csd_config in probes.items():
             if probe_id in run.probes and (not args.probes or probe_id in args.probes):
-                csd = extract_csd(run, probe_id, work_dir, csd_config, args.n_jobs, args.force)
+                try:
+                    csd = extract_csd(run, probe_id, work_dir, csd_config, args.n_jobs, args.force)
+                except TooFewCsdInputs as err:  # e.g. the whole array flagged bad in this run: no CSD
+                    shutil.rmtree(csd_folder(work_dir, run.name, probe_id), ignore_errors=True)
+                    logger.warning("%s %s: no CSD, %s", run.name, probe_id, err)
+                    print(f"{run.name} {probe_id}: no CSD ({err})")
+                    continue
                 print(f"{run.name} {probe_id}: CSD {csd.get_num_channels()} channels, {csd.get_total_duration():.0f} s")
     _record_step("csd", args, session, work_dir, config, config_path)
     print(f"Output: {work_dir / 'csd'}")

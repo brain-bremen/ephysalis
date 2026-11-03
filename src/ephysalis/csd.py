@@ -88,6 +88,10 @@ class CsdRecording(BasePreprocessor):
                         "outputs": outputs.tolist()}
 
 
+class TooFewCsdInputs(ValueError):
+    """Fewer than two good input channels (e.g. a run in which quality flags the whole array)."""
+
+
 def probe_operator(recording: BaseRecording, config: CsdConfig, good: set[str] | None = None
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(M, input channel indices, output channel indices)`` for the channels of an LFP
@@ -105,7 +109,7 @@ def probe_operator(recording: BaseRecording, config: CsdConfig, good: set[str] |
                        if c in good and c not in config.exclude_inputs and np.isfinite(gains[i])])
     outputs = np.array([i for i, c in enumerate(ids) if c in good])
     if inputs.size < 2:  # dh_csd: "Not enough channels available for CSD"
-        raise ValueError(f"only {inputs.size} input channels for the CSD")
+        raise TooFewCsdInputs(f"only {inputs.size} input channels for the CSD")
     operator = csd_operator(xy[inputs], xy[outputs], config.grid_spacing_m * config.rbf_parameter,
                             config.specific_resistance_ohm_m)
     return operator, inputs, outputs
