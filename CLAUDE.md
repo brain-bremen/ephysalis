@@ -44,11 +44,13 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `get_stream_recording`, `default_auxiliary_channel_roles`) and optional capabilities (`ReadsDigitalLineEdges`,
   `ReadsAuxiliaryAnalogInputs`, `LocatesSyncPulseChannels`, `HasSynchronisedTimestamps`, `ReadsEventWords`,
   `ReadsTextMessages`, `ReadsTrialDescriptorEvents`, `ListsStreamChannelIds`, `ComputesChannelGainCalibration`).
-  Metadata plugins (`ephysalis.metadata_plugins`) have `name`/`plugin_api_version` and `ExtractsTrialTables`,
+  Metadata plugins (`ephysalis.metadata_plugins`) have `metadata_plugin_name`/`plugin_api_version` (input formats:
+  `input_format_name`; both must equal the entry point name) and `ExtractsTrialTables`,
   `EstimatesRunStartTime`, `AddsSessionConfigFromMetadataFiles`, `NamesEventWords`. Plugins are usually modules of
   functions; loading checks them (`plugin_problems`) and skips misfits with a warning; `require` before using a
   capability. `registry.py` gives typed entry point targets, so pyright checks a module against the Protocols.
-  Use long, explicit names for plugin functions.
+  Use long, explicit names for everything (functions, fields, variables): `paradigm_name`, `metadata_plugin_name`,
+  `_find_paradigms_in_run`, never a bare `name`, `system`, `path` or `_discover`.
 - `session/` — `model.py` (format-independent Session → Run → ProbeInfo/streams, `StreamKind`; `Run.extra` is
   private to the format), `config.py` (`SessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 8 + `MIGRATIONS`),
   `schema.py` (`migrate`; raise the version and add a migration whenever a config format changes), `probes.py`

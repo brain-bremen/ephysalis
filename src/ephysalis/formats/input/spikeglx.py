@@ -89,8 +89,8 @@ def _this_format() -> InputFormat:
 
 
 
-name = 'spikeglx'
-plugin_api_version = 1
+input_format_name = 'spikeglx'
+plugin_api_version = 2
 
 
 def default_auxiliary_channel_roles(run: Run | None = None) -> AuxChannelMap:

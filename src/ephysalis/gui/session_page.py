@@ -87,13 +87,13 @@ class _OverviewLoader(QThread):
             from ephysalis.metadata.base import run_trial_tables
 
             session = open_session(self._session_path)
-            overview = SessionOverview(session.name, session.format.name, default_config=default_session_config(session))
+            overview = SessionOverview(session.name, session.format.input_format_name, default_config=default_session_config(session))
             configure_probes(session, self._config, self._config_dir)
             overview.probe_ids = session.probe_ids
             for run in session.runs:
                 try:
                     plugin, tables = run_trial_tables(run, None, None, self._config)
-                    paradigms = [f"{plugin.name}: {name}" for name in tables] if plugin else []
+                    paradigms = [f"{plugin.metadata_plugin_name}: {name}" for name in tables] if plugin else []
                 except Exception as exc:  # a broken stimulus folder must not hide the session
                     paradigms = [f"error: {exc}"]
                 overview.runs.append({

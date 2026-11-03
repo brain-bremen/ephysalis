@@ -6,8 +6,8 @@ import argparse
 from pathlib import Path
 
 
-def _sessions(text: str | None) -> list[str] | None:
-    return [s for s in text.split(",") if s] if text else None
+def _comma_separated(text: str | None) -> list[str] | None:
+    return [item for item in text.split(",") if item] if text else None
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -15,10 +15,10 @@ def _run(args: argparse.Namespace) -> int:
     from ephysalis.dataset.runner import Runner, install_signal_handlers
 
     dataset = load_dataset(args.dataset)
-    runner = Runner(dataset, steps=_sessions(args.steps), ignore_code_changes=args.ignore_code_changes,
+    runner = Runner(dataset, steps=_comma_separated(args.steps), ignore_code_changes=args.ignore_code_changes,
                     dry_run=args.dry_run)
     install_signal_handlers(runner)
-    results = runner.run(_sessions(args.sessions), parallel=args.parallel)
+    results = runner.run(_comma_separated(args.sessions), parallel=args.parallel)
     return 0 if all(r == "done" for r in results.values()) else 1
 
 
@@ -27,7 +27,7 @@ def _status(args: argparse.Namespace) -> int:
     from ephysalis.dataset.runner import status_table
 
     print(status_table(load_dataset(args.dataset), ignore_code_changes=args.ignore_code_changes,
-                       sessions=_sessions(args.sessions)))
+                       session_ids=_comma_separated(args.sessions)))
     return 0
 
 

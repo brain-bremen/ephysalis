@@ -9,7 +9,7 @@ from conftest import DATA_FOLDER, skip_if_no_data
 @skip_if_no_data
 def test_open_ephys_session_discovery():
     session = open_session(DATA_FOLDER)
-    assert session.format.name == "openephys"
+    assert session.format.input_format_name == "openephys"
     assert [r.name for r in session.runs] == ["experiment1_recording1"]
     run = session.runs[0]
     assert run.probes == {}

@@ -78,10 +78,10 @@ _RUNNER_OPTIONS = {"config", "work_dir", "format", "runs", "force", "sessions"}
 
 @dataclass
 class DatasetSession:
-    id: str
-    path: Path
+    session_id: str  # {session} in work_dir and in step options
+    session_path: Path  # the recording's session folder
     work_dir: Path
-    config: SessionConfig
+    session_config: SessionConfig  # defaults < session file < inline overrides
     config_files: list[Path]  # the files the config was made from (dataset file, override file)
     referenced_files: list[Path]  # files the config names (probe geometry)
     step_options: dict[str, dict[str, Any]]
@@ -90,18 +90,18 @@ class DatasetSession:
 
 @dataclass
 class Dataset:
-    path: Path
-    name: str
-    root: Path
+    dataset_file: Path  # dataset.toml
+    dataset_name: str
+    root: Path  # relative paths of the dataset file are relative to it
     state_dir: Path
     steps: list[str]
     sessions: list[DatasetSession] = field(default_factory=list)
 
     def session(self, session_id: str) -> DatasetSession:
-        for s in self.sessions:
-            if s.id == session_id:
-                return s
-        raise KeyError(f"{self.path}: no session {session_id!r}")
+        for dataset_session in self.sessions:
+            if dataset_session.session_id == session_id:
+                return dataset_session
+        raise KeyError(f"{self.dataset_file}: no session {session_id!r}")
 
 
 def merge_tables(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -175,9 +175,9 @@ def load_dataset(path: str | Path) -> Dataset:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
     steps = data.get("steps", list(STEP_INPUTS))
-    if bad := [s for s in steps if s not in STEP_INPUTS]:
-        raise ValueError(f"{path}: unknown steps {', '.join(bad)} (known: {', '.join(STEP_INPUTS)})")
-    steps = [s for s in STEP_INPUTS if s in steps]  # in dependency order
+    if unknown_steps := [step for step in steps if step not in STEP_INPUTS]:
+        raise ValueError(f"{path}: unknown steps {', '.join(unknown_steps)} (known: {', '.join(STEP_INPUTS)})")
+    steps = [step for step in STEP_INPUTS if step in steps]  # in dependency order
     step_options = data.get("step_options", {})
     for step, options in step_options.items():
         if step not in STEP_INPUTS:
@@ -187,7 +187,7 @@ def load_dataset(path: str | Path) -> Dataset:
     defaults_version = raw_defaults.get("schema_version", SCHEMA_VERSION)
     defaults = _session_part(raw_defaults, defaults_version, path.parent, f"{path} [defaults]")
     work_template = data.get("work_dir", "{session}/ephysalis")
-    dataset = Dataset(path=path, name=data.get("name", path.parent.name), root=root,
+    dataset = Dataset(dataset_file=path, dataset_name=data.get("name", path.parent.name), root=root,
                       state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps)
     seen = set()
     for entry in data.get("sessions", []):
@@ -218,11 +218,12 @@ def load_dataset(path: str | Path) -> Dataset:
             _check_step_options(step, step_opts, f"{path} session {session_id}")
         options = {step: {k: _fill(v, session_id) for k, v in opts.items()} for step, opts in options.items()}
         session_path = (root / entry["path"]).resolve()
-        referenced = [Path(p.geometry.file) for p in config.probes.values() if p.geometry and p.geometry.file]
+        referenced = [Path(probe.geometry.file) for probe in config.probes.values()
+                      if probe.geometry and probe.geometry.file]
         dataset.sessions.append(DatasetSession(
-            id=session_id, path=session_path,
+            session_id=session_id, session_path=session_path,
             work_dir=(root / _fill(work_template, session_id)).resolve(),
-            config=config, config_files=files, referenced_files=referenced, step_options=options,
+            session_config=config, config_files=files, referenced_files=referenced, step_options=options,
             include=entry.get("include", True)))
     return dataset
 

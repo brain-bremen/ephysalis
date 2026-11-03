@@ -322,8 +322,8 @@ def _this_format() -> InputFormat:
 
 
 
-name = 'openephys'
-plugin_api_version = 1
+input_format_name = 'openephys'
+plugin_api_version = 2
 
 
 def can_read_session_folder(session_path: Path) -> bool:

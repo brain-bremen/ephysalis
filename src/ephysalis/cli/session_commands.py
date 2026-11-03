@@ -81,7 +81,7 @@ def _inspect(args: argparse.Namespace) -> int:
     config = load_session_config(config_path) if config_path.exists() else None
     configure_probes(session, config, config_path.parent)
 
-    print(f"Session {session.name} ({session.format.name}), {len(session.runs)} runs")
+    print(f"Session {session.name} ({session.format.input_format_name}), {len(session.runs)} runs")
     print(f"Config: {config_path if config else 'none (run `ephysalis init`)'}")
     for run in session.runs:
         run_config = config.run_config(run.name) if config else None
@@ -108,7 +108,7 @@ def _inspect(args: argparse.Namespace) -> int:
         if plugin is None:
             print("      trials: no metadata plugin recognises the run")
         for paradigm, table in tables.items():
-            line = f"      trials [{plugin.name}] {paradigm}: {len(table)} trials"
+            line = f"      trials [{plugin.metadata_plugin_name}] {paradigm}: {len(table)} trials"
             if args.conditions:
                 line += f", {table['condition'].nunique()} conditions"
             print(line)
@@ -288,7 +288,7 @@ def _calibrate(args: argparse.Namespace) -> int:
     calibration = (session.format.compute_channel_gain_calibration(session, config, work_dir)
                    if isinstance(session.format, ComputesChannelGainCalibration) else None)
     if calibration is None:
-        print(f"Nothing to do: the {session.format.name} format has no calibration")
+        print(f"Nothing to do: the {session.format.input_format_name} format has no calibration")
         return 0
     for probe_id, entry in calibration["probes"].items():
         gains = [g for g in entry["gains_uv"] if g is not None]

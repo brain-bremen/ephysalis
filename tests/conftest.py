@@ -43,7 +43,7 @@ def _trial_table_plugin():
     def load(group: str) -> dict:
         loaded = dict(original(group))
         if group == plugins.METADATA_PLUGIN_GROUP:
-            loaded[trial_table_plugin.name] = trial_table_plugin
+            loaded[trial_table_plugin.metadata_plugin_name] = trial_table_plugin
         return loaded
 
     plugins._load_group = load

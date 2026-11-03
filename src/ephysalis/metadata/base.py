@@ -37,16 +37,16 @@ if TYPE_CHECKING:
 class Paradigm:
     """One paradigm presented in a run (helper for plugins)."""
 
-    name: str  # e.g. "RF" for 1_stimulusStageRF
+    paradigm_name: str  # e.g. "RF" for 1_stimulusStageRF; the key of its trial table
     run_name: str
     index_in_run: int  # 0-based; runs can contain several paradigms
-    system: str
-    path: Path | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata_plugin_name: str  # the plugin that found it
+    metadata_path: Path | None = None  # the file or folder the paradigm is read from (e.g. the .tdr)
+    paradigm_metadata: dict[str, Any] = field(default_factory=dict)  # copied into the trial table's attrs
 
 
-def get_metadata_plugin(name: str) -> MetadataPlugin:
-    return get_plugin(METADATA_PLUGIN_GROUP, name)
+def get_metadata_plugin(metadata_plugin_name: str) -> MetadataPlugin:
+    return get_plugin(METADATA_PLUGIN_GROUP, metadata_plugin_name)
 
 
 def run_trial_tables(run: Run, clock_alignment: RunSync | None, auxiliary_signals: AuxSignals | None,

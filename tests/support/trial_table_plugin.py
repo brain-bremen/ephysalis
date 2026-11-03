@@ -8,8 +8,8 @@ import pandas as pd
 
 from ephysalis.timeline.clocks import AUX
 
-name = "trial_table"
-plugin_api_version = 1
+metadata_plugin_name = "trial_table"
+plugin_api_version = 2
 
 
 def extract_trial_tables(run, clock_alignment, auxiliary_signals):

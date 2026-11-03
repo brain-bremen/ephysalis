@@ -68,16 +68,17 @@ def test_merge_tables():
 
 def test_load_dataset(tmp_path):
     dataset = load_dataset(write_dataset(tmp_path))
-    a, b = dataset.sessions
+    session_a, session_b = dataset.sessions
     assert dataset.steps == STEPS and dataset.state_dir == tmp_path / "state"
-    assert a.work_dir == tmp_path / "work" / "a" and a.path == SPIKEGLX_CROP_SESSION.resolve()
-    assert (a.config.lab, a.config.notes, a.config.probes["imec0"].area, a.config.session_id) == \
+    assert session_a.work_dir == tmp_path / "work" / "a" and session_a.session_path == SPIKEGLX_CROP_SESSION.resolve()
+    config_a, config_b = session_a.session_config, session_b.session_config
+    assert (config_a.lab, config_a.notes, config_a.probes["imec0"].area, config_a.session_id) == \
         ("test lab", "default", "V1", "a")
     # defaults < file < inline overrides
-    assert (b.config.lab, b.config.notes, b.config.probes["imec0"].area, b.config.task) == \
+    assert (config_b.lab, config_b.notes, config_b.probes["imec0"].area, config_b.task) == \
         ("test lab", "from the file", "V2", "rf")
-    assert b.config_files == [tmp_path / "dataset.toml", tmp_path / "sessions" / "b.toml"]
-    assert step_argv("lfp", a.step_options["lfp"]) == ["--n-jobs", "1", "--probes", "imec0"]
+    assert session_b.config_files == [tmp_path / "dataset.toml", tmp_path / "sessions" / "b.toml"]
+    assert step_argv("lfp", session_a.step_options["lfp"]) == ["--n-jobs", "1", "--probes", "imec0"]
 
 
 def test_load_dataset_errors(tmp_path):
@@ -92,8 +93,8 @@ def test_load_dataset_errors(tmp_path):
         load_dataset(path)
 
 
-def _states(dataset, session):
-    return {step: (read_record(dataset.session(session), step) or {}).get("state") for step in dataset.steps}
+def _states(dataset, session_id):
+    return {step: (read_record(dataset.session(session_id), step) or {}).get("state") for step in dataset.steps}
 
 
 def test_run_resume_and_reruns(tmp_path):

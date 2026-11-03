@@ -23,7 +23,7 @@ def test_runs_sorted_by_acquisition_time(make_spikeglx_session):
         ]
     )
     session = open_session(session_path)
-    assert session.format.name == "spikeglx"
+    assert session.format.input_format_name == "spikeglx"
     assert [r.name for r in session.runs] == ["3_rfmapping_g0", "5_DoseResponse_g0", "10_OptoTag_g0"]
     assert [r.index for r in session.runs] == [0, 1, 2]
     assert session.runs[0].start_time == datetime(2025, 1, 9, 13, 27, 45)

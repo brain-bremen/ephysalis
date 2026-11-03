@@ -30,7 +30,7 @@ def _run(fmt):
 @pytest.mark.parametrize("fmt", FORMATS)
 def test_discovery(fmt):
     session = open_session(OE_TOOLS_DATA / fmt / NODE)
-    assert session.format.name == "openephys"
+    assert session.format.input_format_name == "openephys"
     run = session.runs[0]
     assert [r.name for r in session.runs] == ["experiment1_recording1"]
     assert run.streams == [STREAM] and run.aux_stream == STREAM and run.probes == {}

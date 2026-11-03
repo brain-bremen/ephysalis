@@ -335,7 +335,7 @@ def default_session_config(session: Session) -> SessionConfig:
     return SessionConfig(
         session_id=session.name,
         subject_id=subject,
-        input_format=session.format.name,
+        input_format=session.format.input_format_name,
         runs=[RunConfig(name=run.name) for run in session.runs],
         probes=probes,
         aux_channels=aux_channels,

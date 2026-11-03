@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from ephysalis.timeline.auxsignals import AuxSignals
     from ephysalis.timeline.clocks import RunSync, SyncSource
 
-PLUGIN_API_VERSION = 1
+PLUGIN_API_VERSION = 2  # 2: input_format_name / metadata_plugin_name instead of name
 INPUT_FORMAT_GROUP = "ephysalis.input_formats"
 METADATA_PLUGIN_GROUP = "ephysalis.metadata_plugins"
 
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 class InputFormat(Protocol):
     """Required core of an input format: open a session folder and hand out lazy recordings."""
 
-    name: str
+    input_format_name: str  # the name it is registered under (entry point), e.g. "spikeglx"
     plugin_api_version: int
 
     def can_read_session_folder(self, session_path: Path) -> bool:
@@ -195,7 +195,7 @@ class MetadataPlugin(Protocol):
     from the files of a lab setup (stimulus software, the lab's sheets). It provides at least one
     of the capabilities below."""
 
-    name: str
+    metadata_plugin_name: str  # the name it is registered under (entry point), e.g. "vstim"
     plugin_api_version: int
 
 
@@ -241,6 +241,7 @@ METADATA_PLUGIN_CAPABILITIES: tuple[type, ...] = (
 
 _GROUPS = {INPUT_FORMAT_GROUP: (InputFormat, INPUT_FORMAT_CAPABILITIES),
            METADATA_PLUGIN_GROUP: (MetadataPlugin, METADATA_PLUGIN_CAPABILITIES)}
+_NAME_MEMBER = {InputFormat: "input_format_name", MetadataPlugin: "metadata_plugin_name"}
 
 
 # --- loading and checking ------------------------------------------------------------------
@@ -251,28 +252,29 @@ def _members(protocol: type) -> list[str]:
 
 
 def _parameters(function: Any) -> list[str]:
-    return [name for name, p in inspect.signature(function).parameters.items()
-            if name != "self" and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return [parameter_name for parameter_name, parameter in inspect.signature(function).parameters.items()
+            if parameter_name != "self" and parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)]
 
 
 def plugin_problems(plugin: Any, core: type, capabilities: tuple[type, ...]) -> list[str]:
     """What is wrong with ``plugin``: missing members of the required core, a different plugin API
     version, capabilities provided only partly, functions with other parameters than the Protocol."""
-    problems = [f"missing {name}" for name in _members(core) if not hasattr(plugin, name)]
+    problems = [f"missing {member_name}" for member_name in _members(core) if not hasattr(plugin, member_name)]
     version = getattr(plugin, "plugin_api_version", None)
     if version is not None and version != PLUGIN_API_VERSION:
         problems.append(f"written for plugin API version {version}, this is ephysalis's version {PLUGIN_API_VERSION}")
-    provided = [c for c in capabilities if any(hasattr(plugin, m) for m in _members(c))]
+    provided = [capability for capability in capabilities
+                if any(hasattr(plugin, member_name) for member_name in _members(capability))]
     for capability in provided:
-        missing = [m for m in _members(capability) if not hasattr(plugin, m)]
+        missing = [member_name for member_name in _members(capability) if not hasattr(plugin, member_name)]
         if missing:
             problems.append(f"{capability.__name__} only partly provided: missing {', '.join(missing)}")
     for protocol in (core, *provided):
-        for name in _members(protocol):
-            expected, got = getattr(protocol, name, None), getattr(plugin, name, None)
+        for member_name in _members(protocol):
+            expected, got = getattr(protocol, member_name, None), getattr(plugin, member_name, None)
             if callable(expected) and callable(got) and _parameters(got) != _parameters(expected):
-                problems.append(f"{name}({', '.join(_parameters(got))}) instead of "
-                                f"{name}({', '.join(_parameters(expected))})")
+                problems.append(f"{member_name}({', '.join(_parameters(got))}) instead of "
+                                f"{member_name}({', '.join(_parameters(expected))})")
     if core is MetadataPlugin and not provided:
         problems.append("provides none of the metadata capabilities")
     return problems
@@ -282,17 +284,20 @@ def plugin_problems(plugin: Any, core: type, capabilities: tuple[type, ...]) -> 
 def _load_group(group: str) -> dict[str, Any]:
     core, capabilities = _GROUPS[group]
     plugins = {}
-    for ep in entry_points(group=group):
+    for entry_point in entry_points(group=group):
         try:
-            plugin = ep.load()
+            plugin = entry_point.load()
         except Exception as error:  # noqa: BLE001 (one broken plugin must not disable the others)
-            logger.warning("plugin %s (%s) not loaded: %s", ep.name, ep.value, error)
+            logger.warning("plugin %s (%s) not loaded: %s", entry_point.name, entry_point.value, error)
             continue
         problems = plugin_problems(plugin, core, capabilities)
+        declared_name = getattr(plugin, _NAME_MEMBER[core], None)
+        if declared_name is not None and declared_name != entry_point.name:
+            problems.append(f"{_NAME_MEMBER[core]} {declared_name!r} differs from its entry point name")
         if problems:
-            logger.warning("plugin %s (%s) skipped: %s", ep.name, ep.value, "; ".join(problems))
+            logger.warning("plugin %s (%s) skipped: %s", entry_point.name, entry_point.value, "; ".join(problems))
             continue
-        plugins[ep.name] = plugin
+        plugins[entry_point.name] = plugin
     return plugins
 
 
@@ -300,11 +305,16 @@ def available(group: str) -> list[str]:
     return sorted(_load_group(group))
 
 
-def get_plugin(group: str, name: str) -> Any:
+def get_plugin(group: str, plugin_name: str) -> Any:
     plugins = _load_group(group)
-    if name not in plugins:
-        raise KeyError(f"Unknown plugin {name!r} in {group}. Available: {sorted(plugins)}")
-    return plugins[name]
+    if plugin_name not in plugins:
+        raise KeyError(f"Unknown plugin {plugin_name!r} in {group}. Available: {sorted(plugins)}")
+    return plugins[plugin_name]
+
+
+def plugin_name(plugin: object) -> str:
+    """The name an input format or metadata plugin is registered under."""
+    return str(getattr(plugin, "input_format_name", None) or getattr(plugin, "metadata_plugin_name", None) or plugin)
 
 
 Capability = TypeVar("Capability")
@@ -313,14 +323,15 @@ Capability = TypeVar("Capability")
 def require(plugin: object, capability: type[Capability], purpose: str) -> Capability:
     """``plugin`` as a ``capability`` (Protocol), or a TypeError saying what is missing for ``purpose``."""
     if not isinstance(plugin, capability):
-        raise TypeError(f"{getattr(plugin, 'name', plugin)!r} has no {capability.__name__} ({', '.join(_members(capability))}),"
+        raise TypeError(f"{plugin_name(plugin)!r} has no {capability.__name__} ({', '.join(_members(capability))}),"
                         f" needed for {purpose}")
     return plugin
 
 
 def input_formats() -> list[InputFormat]:
-    return [get_plugin(INPUT_FORMAT_GROUP, name) for name in available(INPUT_FORMAT_GROUP)]
+    return [get_plugin(INPUT_FORMAT_GROUP, format_name) for format_name in available(INPUT_FORMAT_GROUP)]
 
 
 def metadata_plugins() -> list[MetadataPlugin]:
-    return [get_plugin(METADATA_PLUGIN_GROUP, name) for name in available(METADATA_PLUGIN_GROUP)]
+    return [get_plugin(METADATA_PLUGIN_GROUP, metadata_plugin_name)
+            for metadata_plugin_name in available(METADATA_PLUGIN_GROUP)]
