@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Several sessions per command** (`ephysalis timing S1 S2 --work-dir D:/work/{session}`) and in the GUI (session list, "Apply to sessions…", steps for all sessions; a failing session does not stop the others)
 
 ### Added
+- `py.typed`: the package is marked as typed, so type checkers of plugin packages check them against the Protocols in `ephysalis.plugins`.
 
 - **Sphinx documentation** (`docs/`, `uv run --group docs sphinx-build docs docs/_build`, built in CI): usage, `session.toml`, preprocessing, output layouts, filters, plugins, and one page per historic format (DAQ, UFF, MC_Rack, VStim 1.x trials) describing the file layout for writing other readers; `tools/mcd_neuroshare_reference.py` dumps the MCS Neuroshare library's values of an MCD file. The README is now short
 
