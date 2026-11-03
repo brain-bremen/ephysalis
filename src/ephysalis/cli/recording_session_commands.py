@@ -330,7 +330,6 @@ def _quality(args: argparse.Namespace) -> int:
 
 
 def _csd(args: argparse.Namespace) -> int:
-    import shutil
 
     from ephysalis.processing.csd import TooFewCsdInputs, csd_folder, extract_csd
     from ephysalis.timeline.steps import default_work_dir
@@ -352,7 +351,9 @@ def _csd(args: argparse.Namespace) -> int:
                 try:
                     csd = extract_csd(run, probe_id, work_dir, csd_config, args.n_jobs, args.force)
                 except TooFewCsdInputs as err:  # e.g. the whole array flagged bad in this run: no CSD
-                    shutil.rmtree(csd_folder(work_dir, run.name, probe_id), ignore_errors=True)
+                    from ephysalis.filesystem import remove_folder
+
+                    remove_folder(csd_folder(work_dir, run.name, probe_id))
                     logger.warning("%s %s: no CSD, %s", run.name, probe_id, err)
                     print(f"{run.name} {probe_id}: no CSD ({err})")
                     continue

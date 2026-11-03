@@ -27,7 +27,6 @@ import contextlib
 import gc
 import json
 import logging
-import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from ephysalis.filesystem import remove_folder
 from ephysalis.recording_session.model import RecordingSession, StreamKind
 
 if TYPE_CHECKING:
@@ -236,6 +236,7 @@ def sort_probe(
         logger.info("%s: reusing local copy %s", probe_id, binary_dir)
     else:
         logger.info("%s: writing local copy to %s", probe_id, binary_dir)
+        remove_folder(binary_dir)  # a partial copy of an interrupted run
         local = recording.save(folder=binary_dir, format="binary", dtype="int16", overwrite=True, **job)
 
     sorter_dir = out / sorter
@@ -254,20 +255,24 @@ def sort_probe(
             resumable: Any = checkpoints(checkpoint_dir)
         else:
             resumable = contextlib.nullcontext()
+        remove_folder(sorter_dir)  # a failed or partial sorting (spikeinterface's own removal fails on some NFS)
         with resumable:
             sorting = run_sorter(sorter, local, folder=sorter_dir, remove_existing_folder=True, verbose=True, **params)
-        shutil.rmtree(checkpoint_dir, ignore_errors=True)
+        remove_folder(checkpoint_dir)
     sorting = sorting.remove_empty_units()
 
     from spikeinterface.preprocessing import bandpass_filter
 
     analyzer_dir = out / "analyzer"
     filtered = bandpass_filter(local, freq_min=ANALYZER_BAND_HZ[0], freq_max=ANALYZER_BAND_HZ[1])
-    analyzer = si.create_sorting_analyzer(
-        sorting, filtered, format="binary_folder", folder=analyzer_dir, sparse=True, overwrite=True, job_kwargs=job
-    )
-    for name, kwargs in ANALYZER_EXTENSIONS.items():
-        analyzer.compute(name, **kwargs, **(job if name in ("noise_levels", "waveforms") else {}))
+    # computed in memory and saved at the end: computing an extension deletes its folder while other extensions
+    # may hold its files open, which fails on NFS (the open files stay as .nfs* entries)
+    analyzer = si.create_sorting_analyzer(sorting, filtered, format="memory", sparse=True, job_kwargs=job)
+    for extension_name, extension_parameters in ANALYZER_EXTENSIONS.items():
+        analyzer.compute(extension_name, **extension_parameters,
+                         **(job if extension_name in ("noise_levels", "waveforms") else {}))
+    remove_folder(analyzer_dir)
+    analyzer = analyzer.save_as(format="binary_folder", folder=analyzer_dir)
     units = unit_table(analyzer)
     units.to_csv(out / "units.csv")
 
@@ -284,7 +289,10 @@ def sort_probe(
         # the recording, sorting and analyzer memory-map the binary; Windows can't delete it before they're gone
         del local, filtered, analyzer, sorting
         gc.collect()
-        shutil.rmtree(binary_dir, ignore_errors=True)
+        try:
+            remove_folder(binary_dir)
+        except OSError:
+            pass
         if binary_dir.exists():
             logger.warning("%s: could not delete the local copy %s", probe_id, binary_dir)
     return runs

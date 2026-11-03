@@ -141,6 +141,9 @@ def extract_csd(run: Run, probe_id: str, work_dir: Path, config: CsdConfig, n_jo
     csd = CsdRecording(lfp, operator, inputs, outputs)
     logger.info("%s %s: CSD of %d channels from %d inputs to %s", run.name, probe_id, csd.get_num_channels(),
                 inputs.size, folder)
+    from ephysalis.filesystem import remove_folder
+
+    remove_folder(folder)  # spikeinterface's own overwrite fails on some NFS servers (ephysalis.filesystem)
     saved = csd.save(folder=folder, format="binary", overwrite=True, n_jobs=n_jobs, chunk_duration="10s",
                      progress_bar=False)
     (folder / "csd.json").write_text(json.dumps({

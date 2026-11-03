@@ -60,5 +60,8 @@ def extract_lfp(
     recording = lfp_recording(run, probe_id, rate)
     logger.info("%s %s: writing LFP (%d channels, %.0f Hz) to %s", run.name, probe_id,
                 recording.get_num_channels(), rate, folder)
+    from ephysalis.filesystem import remove_folder
+
+    remove_folder(folder)  # spikeinterface's own overwrite fails on some NFS servers (ephysalis.filesystem)
     return recording.save(folder=folder, format="binary", overwrite=True, n_jobs=n_jobs,
                           chunk_duration="10s", progress_bar=False)

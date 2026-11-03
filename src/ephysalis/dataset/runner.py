@@ -27,7 +27,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -42,7 +41,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ephysalis.dataset.config import STEP_INPUTS, Dataset, DatasetRecordingSession, step_argv
+from ephysalis.dataset.config import (
+    STEP_INPUTS,
+    Dataset,
+    DatasetRecordingSession,
+    step_argv,
+)
+from ephysalis.filesystem import remove_folder
 from ephysalis.recording_session.config import save_recording_session_config
 
 logger = logging.getLogger(__name__)
@@ -283,8 +288,7 @@ class Runner:
                        for source in protected)):
             raise RuntimeError(f"refusing to delete {target}: not inside the work dir or the sort scratch dir of "
                                f"{dataset_recording_session.recording_session_id}, or it holds source data")
-        if target.exists():
-            shutil.rmtree(target)
+        remove_folder(target)
 
     def run_step(self, dataset_recording_session: DatasetRecordingSession, step: str, config_path: Path, config_text: bytes) -> bool:
         previous = step_state(self.dataset, dataset_recording_session, step, self.code, config_text, self.ignore_code_changes)

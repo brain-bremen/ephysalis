@@ -211,3 +211,19 @@ def test_source_data_are_never_written_or_deleted(tmp_path):
     inside.mkdir(parents=True)
     runner._delete_tree(session_a, inside)
     assert not inside.exists() and session_a.recording_session_path.exists()
+
+
+def test_remove_folder(tmp_path):
+    """remove_folder lists each directory completely before deleting (NFS servers whose listing skips entries)."""
+    from ephysalis.filesystem import remove_folder
+
+    for k in range(3):
+        sub = tmp_path / "tree" / f"d{k}" / "e"
+        sub.mkdir(parents=True)
+        for n in range(50):
+            (sub / f"f{n}.npy").write_bytes(b"x")
+    (tmp_path / "file").write_bytes(b"x")
+    remove_folder(tmp_path / "tree")
+    remove_folder(tmp_path / "missing")
+    remove_folder(tmp_path / "file")
+    assert not (tmp_path / "tree").exists() and not (tmp_path / "file").exists()

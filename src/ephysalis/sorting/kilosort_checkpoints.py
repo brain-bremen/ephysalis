@@ -29,7 +29,6 @@ import contextlib
 import hashlib
 import json
 import logging
-import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -54,7 +53,9 @@ class CheckpointStore:
         meta = folder / "checkpoints.json"
         if meta.exists() and json.loads(meta.read_text(encoding="utf-8")).get("key") != key:
             logger.info("kilosort checkpoints in %s are for other settings or data; discarding them", folder)
-            shutil.rmtree(folder)
+            from ephysalis.filesystem import remove_folder
+
+            remove_folder(folder)
         folder.mkdir(parents=True, exist_ok=True)
         meta.write_text(json.dumps({"key": key}), encoding="utf-8")
 

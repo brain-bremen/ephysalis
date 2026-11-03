@@ -71,6 +71,8 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `lfp.LFP_FILTERING` / `mua.MUA_FILTERING` describe them — update together.
 - `sorting/` — `spikes.py` (sorting per probe over the concatenated runs, resumable from its outputs, `cut_spikes`),
   `kilosort_checkpoints.py`.
+- `filesystem.py` — `remove_folder`: the only way to delete folders (NFS servers whose directory listing skips
+  entries during deletion make `shutil.rmtree` fail); call it before spikeinterface overwrites a folder.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
 - `dataset/` — `config.py` (`dataset.toml`: `[[recording_sessions]]`, defaults < recording session file < inline
