@@ -78,9 +78,10 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
 - `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 2:
-  `[recording_sessions]` folder -> session folders below `recording_session_root` (id = path with `_`), the
-  template `recording_session_config_file` with `{recording_session}`, `{subject}`, `{session_label}`,
-  `[recording_session_exceptions."<folder>"]` for sessions that differ; each becomes a `RecordingSessionJob`; defaults < recording session file < exception's `session_config`, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
+  `recording_sessions = [{ subject, folder, ... }]` (one per line; folder below `recording_session_root`, id =
+  folder with `_`, `subject_id` = subject), the template `recording_session_config_file` with `{recording_session}`,
+  `{subject}`, `{session_label}`; each becomes a `RecordingSessionJob`; `[defaults]` < `[subject_defaults.<subject>]`
+  < recording session file < the entry's `session_config`, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
   graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
   stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
   `state_dir`).

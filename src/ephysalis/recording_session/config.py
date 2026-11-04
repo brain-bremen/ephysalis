@@ -300,14 +300,31 @@ def _toml_value(value: Any) -> str:
     return tomli_w.dumps({"k": value})[4:].strip()
 
 
+def _inline_tables(rows: list[dict[str, Any]]) -> list[str]:
+    """``{ key = value, ... }`` per row, the fields aligned in columns (rows with the same keys in front)."""
+    parts = [[f"{_toml_key(k)} = {_toml_value(v)}" for k, v in row.items()] for row in rows]
+    n = max((len(p) for p in parts), default=0)
+    widths = [max((len(p[i]) + 1 for p in parts if i < len(p) - 1), default=0) for i in range(n)]
+    return ["{ " + " ".join((part + ",").ljust(widths[i]) if i < len(p) - 1 else part for i, part in enumerate(p))
+            + " }" for p in parts]
+
+
 def dumps_toml(data: dict[str, Any], inline_entry_tables: tuple[tuple[str, ...], ...] = INLINE_ENTRY_TABLES,
-               prefix: tuple[str, ...] = ()) -> str:
-    """TOML of ``data`` (as ``tomli_w``), but the tables at ``inline_entry_tables`` (key paths, below
-    ``prefix``: e.g. ``("defaults",)`` for a conversion batch) with one aligned inline table per entry::
+               prefix: tuple[str, ...] = (), inline_entry_arrays: tuple[tuple[str, ...], ...] = ()) -> str:
+    """TOML of ``data`` (as ``tomli_w``), but with one aligned inline table per line for
+
+    * the tables at ``inline_entry_tables`` (key paths below ``prefix``, e.g. ``("defaults",)`` in a conversion
+      batch)::
 
         [aux_channels.digital]
         trial_start   = { bit = 0,  active = "high", description = "trial start" }
         lever_pressed = { bit = 14, active = "low",  description = "lever pressed" }
+
+    * the arrays of tables at ``inline_entry_arrays`` (top-level keys, e.g. ``("recording_sessions",)``)::
+
+        recording_sessions = [
+            { subject = "b", folder = "sub-b/ses-20101207" },
+        ]
     """
     import copy as _copy
 
@@ -319,17 +336,23 @@ def dumps_toml(data: dict[str, Any], inline_entry_tables: tuple[tuple[str, ...],
             table = table.get(key) if isinstance(table, dict) else None
         if not isinstance(table, dict) or not table:
             continue
-        rows = {role: [f"{_toml_key(k)} = {_toml_value(v)}" for k, v in entry.items()]
-                for role, entry in table.items() if isinstance(entry, dict)}
-        n = max((len(parts) for parts in rows.values()), default=0)
-        widths = [max((len(parts[i]) + 1 for parts in rows.values() if i < len(parts) - 1), default=0)
-                  for i in range(n)]
+        roles = [role for role, entry in table.items() if isinstance(entry, dict)]
         key_width = max(len(_toml_key(role)) for role in table)
-        for role, parts in rows.items():
-            cells = [(part + ",").ljust(widths[i]) if i < len(parts) - 1 else part for i, part in enumerate(parts)]
+        for role, inline in zip(roles, _inline_tables([table[role] for role in roles])):
             token = f"@@inline-{len(lines_of)}@@"
-            lines_of[token] = f"{_toml_key(role).ljust(key_width)} = {{ {' '.join(cells)} }}"
+            lines_of[token] = f"{_toml_key(role).ljust(key_width)} = {inline}"
             table[role] = token
+    for path in inline_entry_arrays:
+        parent: Any = data
+        for key in path[:-1]:
+            parent = parent.get(key) if isinstance(parent, dict) else None
+        rows = parent.get(path[-1]) if isinstance(parent, dict) else None
+        if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
+            continue
+        token = f"@@inline-{len(lines_of)}@@"
+        lines_of[token] = (f"{_toml_key(path[-1])} = [\n" + "".join(f"    {t},\n" for t in _inline_tables(rows))
+                           + "]")
+        parent[path[-1]] = token
     text = tomli_w.dumps(data)
     if lines_of:
         out = []

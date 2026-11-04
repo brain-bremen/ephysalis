@@ -21,7 +21,7 @@ def test_reference_files_are_current(tmp_path):
             f"docs/{name} is out of date: python -m ephysalis.config_reference docs"
     text = (tmp_path / MARKDOWN_FILE).read_text(encoding="utf-8")
     assert "### `[aux_channels.digital.<name>]`" in text and "| `in_events` | boolean | `true` |" in text
-    assert "[recording_sessions]" in text and not re.search(r"(?<!`)``(?!`)", text)  # no RST markup left
+    assert "recording_sessions = [" in text and not re.search(r"(?<!`)``(?!`)", text)  # no RST markup left
 
 
 def test_json_schema_accepts_a_session_toml(tmp_path):

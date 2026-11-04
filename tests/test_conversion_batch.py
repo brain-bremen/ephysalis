@@ -29,6 +29,7 @@ def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", s
         if not (root / "sessions" / name).exists():
             (root / "sessions").mkdir(exist_ok=True)
             (root / "sessions" / name).symlink_to(SPIKEGLX_CROP_RECORDING_SESSION.resolve(), target_is_directory=True)
+    session_config_b = 'task = "rf"' + (f", {overrides_b}" if overrides_b else "")
     path = root / "conversion_batch.toml"
     path.write_text(f'''schema_version = 2
 conversion_batch_name = "test conversion batch"
@@ -36,13 +37,14 @@ work_dir = "work/{{recording_session}}"
 state_dir = "state"
 steps = {json.dumps(steps)}
 recording_session_root = "sessions"
+recording_sessions = [
+    {{ subject = "m1", folder = "a" }},
+    {{ subject = "m1", folder = "b", recording_session_config_file = "session_configs/b.toml", session_config = {{ {session_config_b} }} }},
+]
 {extra}
-[recording_sessions]
-"." = ["a", "b"]
 [defaults]
 schema_version = 10
 lab = "test lab"
-subject_id = "m1"
 notes = "default"
 [defaults.probes.imec0]
 area = "V1"
@@ -51,11 +53,6 @@ area = "V1"
 n_jobs = 1
 probes = ["imec0"]
 
-[recording_session_exceptions.b]
-recording_session_config_file = "session_configs/b.toml"
-[recording_session_exceptions.b.session_config]
-task = "rf"
-{overrides_b}
 ''')
     return path
 
@@ -82,58 +79,65 @@ def test_load_conversion_batch(tmp_path):
     assert step_argv("lfp", recording_session_a.step_options["lfp"]) == ["--n-jobs", "1", "--probes", "imec0"]
 
 
-def test_recording_session_folders_and_placeholders(tmp_path):
-    """[recording_sessions]: folder -> its session folders; id = the path with _; config files and step options
-    from templates with {recording_session}, {subject} and {session_label}; exceptions only where needed."""
-    for day in ("20101207", "20101209"):
-        (tmp_path / "sourcedata" / "sub-b" / f"ses-{day}").mkdir(parents=True)
-        (tmp_path / "sessions" / f"sub-b_ses-{day}").mkdir(parents=True)
-        (tmp_path / "sessions" / f"sub-b_ses-{day}" / "session.toml").write_text(
-            f'schema_version = 10\nnotes = "{day}"\n')
+def test_recording_sessions_of_several_subjects(tmp_path):
+    """recording_sessions = [{ subject, folder, ... }]: id = folder with _, subject_id = subject, defaults per subject,
+    placeholders {recording_session}, {subject}, {session_label} in the config file template and step options."""
+    for subject, day in (("b", "20101207"), ("b", "20101209"), ("f", "20091203")):
+        (tmp_path / "sourcedata" / f"sub-{subject}" / f"ses-{day}").mkdir(parents=True)
+        (tmp_path / "sessions" / f"sub-{subject}_ses-{day}").mkdir(parents=True)
+        (tmp_path / "sessions" / f"sub-{subject}_ses-{day}" / "session.toml").write_text(f'notes = "{day}"\n')
     path = tmp_path / "conversion_batch.toml"
     path.write_text('''schema_version = 2
 work_dir = "work/{recording_session}"
 recording_session_root = "sourcedata"
 recording_session_config_file = "sessions/{recording_session}/session.toml"
-[recording_sessions]
-sub-b = [
-    "ses-20101207",
-    "ses-20101209",
+recording_sessions = [
+    { subject = "b", folder = "sub-b/ses-20101207" },
+    { subject = "b", folder = "sub-b/ses-20101209", include = false, step_options = { lfp = { n_jobs = 2 } } },
+    { subject = "f", folder = "sub-f/ses-20091203" },
 ]
 [defaults]
 schema_version = 10
-subject_id = "b"
+lab = "lab"
+[subject_defaults.b]
+experimenter = ["I. G."]
+[subject_defaults.b.aux_channels.digital]
+trial_start = { bit = 0, description = "trial start" }
+[subject_defaults.f]
+experimenter = ["S. N."]
 [step_options.lfp]
 n_jobs = 1
-probes = ["{session_label}"]
-[recording_session_exceptions."sub-b/ses-20101209"]
-include = false
-[recording_session_exceptions."sub-b/ses-20101209".step_options.lfp]
-n_jobs = 2
+probes = ["{subject}_{session_label}"]
 ''')
-    first, second = load_conversion_batch(path).recording_session_jobs
-    assert (first.recording_session_id, second.recording_session_id) == ("sub-b_ses-20101207", "sub-b_ses-20101209")
+    first, second, third = load_conversion_batch(path).recording_session_jobs
+    assert [j.recording_session_id for j in (first, second, third)] == [
+        "sub-b_ses-20101207", "sub-b_ses-20101209", "sub-f_ses-20091203"]
     assert first.recording_session_path == tmp_path / "sourcedata" / "sub-b" / "ses-20101207"
-    assert first.work_dir == tmp_path / "work" / "sub-b_ses-20101207" and first.include
-    assert first.recording_session_config.notes == "20101207"
-    assert first.recording_session_config.session_id == "sub-b_ses-20101207"
-    assert first.step_options["lfp"] == {"n_jobs": 1, "probes": ["20101207"]}
-    assert not second.include and second.recording_session_config.notes == "20101209"
+    assert first.work_dir == tmp_path / "work" / "sub-b_ses-20101207" and first.include and not second.include
+    a, c = first.recording_session_config, third.recording_session_config
+    assert (a.subject_id, a.session_id, a.notes, a.lab, a.experimenter) == (
+        "b", "sub-b_ses-20101207", "20101207", "lab", ["I. G."])
+    assert a.aux_channels.digital["trial_start"].description == "trial start"
+    assert (c.subject_id, c.experimenter) == ("f", ["S. N."]) and "trial_start" not in c.aux_channels.digital
+    assert first.step_options["lfp"] == {"n_jobs": 1, "probes": ["b_20101207"]}
     assert second.step_options["lfp"]["n_jobs"] == 2
 
     text = path.read_text()
-    path.write_text(text.replace('"ses-20101209",\n]', '"ses-20101209",\n    "ses-20101210",\n]'))
+    path.write_text(text.replace('"sub-f/ses-20091203" }', '"sub-f/ses-20091204" }'))
     with pytest.raises(ValueError, match="config file .* not found"):
         load_conversion_batch(path)
-    path.write_text(text.replace('"ses-20101207",', '"ses-20101207",\n    "ses-20101207",'))
-    with pytest.raises(ValueError, match="listed twice: sub-b/ses-20101207"):
+    path.write_text(text.replace('"sub-b/ses-20101209", include', '"sub-b/ses-20101207", include'))
+    with pytest.raises(ValueError, match="listed twice .*: sub-b_ses-20101207"):
         load_conversion_batch(path)
-    path.write_text(text.replace('sub-b = [\n    "ses-20101207",\n    "ses-20101209",\n]', 'sub-b = ["ses-20101207"]'))
-    with pytest.raises(ValueError, match="exceptions of folders not in .recording_sessions.: sub-b/ses-20101209"):
+    path.write_text(text.replace('{ subject = "f", folder = "sub-f/ses-20091203" },', ""))
+    with pytest.raises(ValueError, match="subject_defaults of subjects without recording sessions: f"):
         load_conversion_batch(path)
-    path.write_text(text.replace("sub-b = [", "b = [").replace('"sub-b/ses-20101209"', '"b/ses-20101209"')
-                    .replace('recording_session_config_file = "sessions/{recording_session}/session.toml"', ''))
-    with pytest.raises(ValueError, match="need a recording session id sub-<subject>_ses-<session_label>"):
+    path.write_text(text.replace('lab = "lab"', 'lab = "lab"\nsubject_id = "b"'))
+    with pytest.raises(ValueError, match="sets subject_id"):
+        load_conversion_batch(path)
+    (tmp_path / "sessions" / "sub-f_ses-20091203" / "session.toml").write_text('subject_id = "x"\n')
+    path.write_text(text)
+    with pytest.raises(ValueError, match="subject_id 'x' of its config is not the subject 'f'"):
         load_conversion_batch(path)
 
 
@@ -246,13 +250,13 @@ def test_source_data_are_never_written_or_deleted(tmp_path):
     source = tmp_path / "source" / "ses-1"
     source.mkdir(parents=True)
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\nwork_dir = "source/ses-1/ephysalis"\n[defaults]\nsubject_id = "m"\n'
-        '[recording_sessions]\nsource = ["ses-1"]\n')
+        'schema_version = 2\nwork_dir = "source/ses-1/ephysalis"\n'
+        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n')
     with pytest.raises(ValueError, match="overlaps the recording session folder"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\n[defaults]\nsubject_id = "m"\n'
-        '[recording_sessions]\nsource = ["ses-1"]\n')
+        'schema_version = 2\n'
+        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n')
     with pytest.raises(ValueError, match="work_dir is required"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
 

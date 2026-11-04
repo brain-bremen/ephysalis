@@ -8,24 +8,26 @@ Example (paths are relative to `root`, which is relative to the file; default: t
 
 ```toml
 schema_version = 2
-conversion_batch_name = "V1 array recordings of monkey B"
+conversion_batch_name = "V1 array recordings of monkeys B and F"
 root = ".."
 work_dir = "derivatives/ephysalis/{recording_session}"
 state_dir = "derivatives/ephysalis"            # pause file and status table (default: <root>/.ephysalis)
 steps = ["align-clocks", "extract-events", "lfp", "export"]
-recording_session_root = "sourcedata"          # the folders below are relative to it (default: root)
+recording_session_root = "sourcedata"          # the folders are relative to it (default: root)
 recording_session_config_file = "code/sessions/{recording_session}/session.toml"   # optional
-
-[recording_sessions]                           # folder -> its recording session folders
-sub-b = [
-    "ses-20101207",
-    "ses-20101209",
+recording_sessions = [                         # one recording session per line
+    { subject = "b", folder = "sub-b/ses-20101207" },
+    { subject = "b", folder = "sub-b/ses-20101209", include = false },
+    { subject = "f", folder = "sub-f/ses-20091203", recording_session_config_file = "code/f_20091203.toml" },
 ]
 
 [defaults]                                     # session.toml content of every recording session
 schema_version = 10
 lab = "Kreiter lab"
-[defaults.aux_channels.digital]
+
+[subject_defaults.b]                           # session.toml content of the recording sessions of subject b
+experimenter = ["I. G."]
+[subject_defaults.b.aux_channels.digital]
 trial_start = { bit = 0, description = "trial start" }
 
 [step_options.lfp]                             # options of a step, as on its command line
@@ -33,19 +35,11 @@ n_jobs = 4
 [step_options.export]
 output_format = "dh5"
 session_label = "{session_label}"
-
-[recording_session_exceptions."sub-b/ses-20101209"]   # only for sessions that differ (all keys optional)
-recording_session_config_file = "code/sessions/b_20101209.toml"
-include = false
-[recording_session_exceptions."sub-b/ses-20101209".session_config]   # session.toml content, after the file
-task = "shapetracking"
-[recording_session_exceptions."sub-b/ses-20101209".step_options.export]
-per_run = false
 ```
 
-A recording session is a folder: `<recording_session_root>/<folder>/<session folder>` (folder `"."`: directly in the root). Its id is the folder path with `/` as `_` (`sub-b_ses-20101207`); the id names its work dir, its row in the status table and its `--recording-sessions` selection. Placeholders in `work_dir`, `recording_session_config_file` and step options: `{recording_session}` = the id, `{subject}` and `{session_label}` = its parts if the id is `sub-<subject>_ses-<session_label>`. The input format of each recording session is detected from its files (the input format plugins), or set by `input_format` in its config.
+Each entry of `recording_sessions`: `subject` (the session's `subject_id`) and `folder` (below `recording_session_root`), optionally `include` (false: listed but not run), `recording_session_config_file` (instead of the template), `session_config` (session.toml content, after the file) and `step_options` (this session's step options). The id of a recording session is its folder with `/` as `_` (`sub-b_ses-20101207`); it names its work dir, its row in the status table and its `--recording-sessions` selection. Placeholders in `work_dir`, `recording_session_config_file` and step options: `{recording_session}` = the id, `{subject}` = the subject, `{session_label}` = the last folder name without `ses-`. The input format of each recording session is detected from its files (the input format plugins), or set by `input_format` in its config.
 
-A recording session's config is the defaults, overridden by its `recording_session_config_file` (if the template is given, the file must exist), overridden by its exception's `session_config`: tables are merged key by key, everything else (values, arrays such as `runs`) is replaced. Every part must have the current `schema_version` (or none). Relative probe geometry files are relative to the file that names them (the defaults and `session_config`: the conversion batch file).
+A recording session's config is `[defaults]`, overridden by `[subject_defaults.<subject>]`, by its `recording_session_config_file` (if the template is given, the file must exist) and by its `session_config`: tables are merged key by key, everything else (values, arrays such as `runs`) is replaced. Every part must have the current `schema_version` (or none). Relative probe geometry files are relative to the file that names them (the defaults and `session_config`: the conversion batch file).
 
 ## session.toml (schema version 10)
 
