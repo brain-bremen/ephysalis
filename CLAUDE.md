@@ -76,9 +76,10 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   entries during deletion make `shutil.rmtree` fail); call it before spikeinterface overwrites a folder.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
-- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch` of `[[recording_session_jobs]]`
-  (`RecordingSessionJob`), defaults < recording session file < inline
-  overrides, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
+- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 2: a list
+  `recording_sessions = [ids]`, the templates `recording_session_path` / `recording_session_config_file` with
+  `{recording_session}`, `{subject}`, `{session_label}`, `[recording_session_exceptions."<id>"]` for sessions that
+  differ; each becomes a `RecordingSessionJob`; defaults < recording session file < exception's `session_config`, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
   graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
   stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
   `state_dir`).

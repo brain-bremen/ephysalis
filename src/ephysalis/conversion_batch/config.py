@@ -2,12 +2,18 @@
 
 Example (paths are relative to ``root``, which is relative to the file; default: the file's folder)::
 
-    schema_version = 1
+    schema_version = 2
     conversion_batch_name = "V1 array recordings of monkey B"
     root = ".."
     work_dir = "derivatives/ephysalis/{recording_session}"
     state_dir = "derivatives/ephysalis"            # pause file and status table (default: <root>/.ephysalis)
-    steps = ["align-clocks", "extract-trials", "extract-events", "lfp", "export"]
+    steps = ["align-clocks", "extract-events", "lfp", "export"]
+    recording_session_path = "sourcedata/sub-{subject}/ses-{session_label}"
+    recording_session_config_file = "code/sessions/{recording_session}/session.toml"   # optional
+    recording_sessions = [
+        "sub-b_ses-20101207",
+        "sub-b_ses-20101209",
+    ]
 
     [defaults]                                     # session.toml content of every recording session
     schema_version = 8
@@ -19,28 +25,32 @@ Example (paths are relative to ``root``, which is relative to the file; default:
     n_jobs = 4
     [step_options.export]
     output_format = "dh5"
-    per_run = true
+    session_label = "{session_label}"
 
-    [[recording_session_jobs]]
-    recording_session_id = "sub-b_ses-20101207"   # {recording_session} in work_dir and in step options
-    recording_session_path = "sourcedata/sub-b/ses-20101207"
-    recording_session_config_file = "code/sessions/sub-b_ses-20101207/session.toml"   # overrides (optional)
-    [recording_session_jobs.overrides]                 # inline overrides (optional), after the file
+    [recording_session_exceptions."sub-b_ses-20101209"]   # only for sessions that differ (all keys optional)
+    recording_session_path = "sourcedata/other/ses-20101209"
+    recording_session_config_file = "code/sessions/b_20101209.toml"
+    include = false
+    [recording_session_exceptions."sub-b_ses-20101209".session_config]   # session.toml content, after the file
     task = "shapetracking"
-    [recording_session_jobs.step_options.export]       # this recording session's step options (optional)
-    session_label = "20101207"
+    [recording_session_exceptions."sub-b_ses-20101209".step_options.export]
+    per_run = false
 
-A recording session's config is the defaults, overridden by its ``recording_session_config_file``,
-overridden by its ``overrides``: tables are merged key by key, everything else (values, arrays such as
-``runs``) is replaced. Each part is migrated from its own ``schema_version`` (``overrides``: that of the
-defaults) before merging. Relative probe geometry files are relative to the file that names them (the
-defaults and inline overrides: the conversion batch file).
+Placeholders in ``work_dir``, the two path templates and step options: ``{recording_session}`` = the id,
+``{subject}`` and ``{session_label}`` = its parts if the id is ``sub-<subject>_ses-<session_label>``.
+
+A recording session's config is the defaults, overridden by its ``recording_session_config_file`` (if the
+template is given, the file must exist), overridden by its exception's ``session_config``: tables are merged key
+by key, everything else (values, arrays such as ``runs``) is replaced. Each part is migrated from its own
+``schema_version`` (``session_config``: that of the defaults) before merging. Relative probe geometry files are
+relative to the file that names them (the defaults and ``session_config``: the conversion batch file).
 """
 
 from __future__ import annotations
 
 import argparse
 import copy
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,9 +64,17 @@ from ephysalis.recording_session.config import (
 )
 from ephysalis.recording_session.schema import migrate
 
-CONVERSION_BATCH_SCHEMA_VERSION = 1
-CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {}
+CONVERSION_BATCH_SCHEMA_VERSION = 2
+
+
+def _version_1(data: dict[str, Any]) -> dict[str, Any]:
+    raise ValueError("conversion batch schema version 1 ([[recording_session_jobs]]) is not read any more: write "
+                     "recording_sessions = [...] with the recording_session_path template (version 2)")
+
+
+CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {1: _version_1}
 RECORDING_SESSION_PLACEHOLDER = "{recording_session}"
+BIDS_RECORDING_SESSION_ID = re.compile(r"^sub-(?P<subject>[A-Za-z0-9]+)_ses-(?P<session_label>[A-Za-z0-9]+)$")
 # steps in the order they run and the steps whose outputs each one reads
 STEP_INPUTS: dict[str, tuple[str, ...]] = {
     "align-clocks": (),
@@ -168,9 +186,11 @@ def step_argv(step: str, options: dict[str, Any]) -> list[str]:
 
 def load_conversion_batch(path: str | Path) -> ConversionBatch:
     path = Path(path).resolve()
-    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), CONVERSION_BATCH_SCHEMA_VERSION, CONVERSION_BATCH_MIGRATIONS,
-                   source=path)
-    known = {"schema_version", "conversion_batch_name", "root", "work_dir", "state_dir", "steps", "defaults", "step_options", "recording_session_jobs"}
+    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), CONVERSION_BATCH_SCHEMA_VERSION,
+                   CONVERSION_BATCH_MIGRATIONS, source=path)
+    known = {"schema_version", "conversion_batch_name", "root", "work_dir", "state_dir", "steps", "defaults",
+             "step_options", "recording_session_path", "recording_session_config_file", "recording_sessions",
+             "recording_session_exceptions"}
     if unknown := set(data) - known:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
@@ -189,46 +209,56 @@ def load_conversion_batch(path: str | Path) -> ConversionBatch:
     if "work_dir" not in data:
         raise ValueError(f"{path}: work_dir is required (outside the recording session folders), "
                          f"e.g. work_dir = \"derivatives/ephysalis/{RECORDING_SESSION_PLACEHOLDER}\"")
-    work_template = data["work_dir"]
-    conversion_batch = ConversionBatch(conversion_batch_file=path, conversion_batch_name=data.get("conversion_batch_name", path.parent.name), root=root,
-                      state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps)
-    seen = set()
-    for entry in data.get("recording_session_jobs", []):
-        recording_session_id = entry.get("recording_session_id")
-        if not recording_session_id or "recording_session_path" not in entry:
-            raise ValueError(f"{path}: every [[recording_session_jobs]] needs recording_session_id and recording_session_path ({entry})")
-        if recording_session_id in seen:
-            raise ValueError(f"{path}: session {recording_session_id} twice")
-        seen.add(recording_session_id)
-        if unknown := set(entry) - {"recording_session_id", "recording_session_path", "recording_session_config_file",
-                                  "overrides", "step_options", "include"}:
-            raise ValueError(f"{path} session {recording_session_id}: unknown keys {', '.join(sorted(unknown))}")
+    conversion_batch = ConversionBatch(
+        conversion_batch_file=path, conversion_batch_name=data.get("conversion_batch_name", path.parent.name),
+        root=root, state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps)
+    recording_session_ids = data.get("recording_sessions", [])
+    if duplicates := sorted({i for i in recording_session_ids if recording_session_ids.count(i) > 1}):
+        raise ValueError(f"{path}: recording sessions listed twice: {', '.join(duplicates)}")
+    exceptions = data.get("recording_session_exceptions", {})
+    if unlisted := sorted(set(exceptions) - set(recording_session_ids)):
+        raise ValueError(f"{path}: recording_session_exceptions of sessions not in recording_sessions: "
+                         f"{', '.join(unlisted)}")
+    for recording_session_id in recording_session_ids:
+        exception = exceptions.get(recording_session_id, {})
+        source = f"{path} session {recording_session_id}"
+        if unknown := set(exception) - {"recording_session_path", "recording_session_config_file", "session_config",
+                                        "step_options", "include"}:
+            raise ValueError(f"{source}: unknown keys {', '.join(sorted(unknown))}")
+        path_template = exception.get("recording_session_path", data.get("recording_session_path"))
+        if not path_template:
+            raise ValueError(f"{source}: no recording_session_path (template or exception)")
+        recording_session_path = (root / _fill(path_template, recording_session_id, source)).resolve()
         merged, files = defaults, [path]
-        if "recording_session_config_file" in entry:
-            config_file = (root / entry["recording_session_config_file"]).resolve()
+        config_template = exception.get("recording_session_config_file", data.get("recording_session_config_file"))
+        if config_template:
+            config_file = (root / _fill(config_template, recording_session_id, source)).resolve()
+            if not config_file.is_file():
+                raise ValueError(f"{source}: recording session config file {config_file} not found")
             raw = tomllib.loads(config_file.read_text(encoding="utf-8"))
-            merged = merge_tables(merged, _recording_session_part(raw, raw.get("schema_version", 1), config_file.parent,
-                                                        config_file))
+            merged = merge_tables(merged, _recording_session_part(raw, raw.get("schema_version", 1),
+                                                                  config_file.parent, config_file))
             files.append(config_file)
-        if "overrides" in entry:
-            merged = merge_tables(merged, _recording_session_part(entry["overrides"], defaults_version, path.parent,
-                                                        f"{path} session {recording_session_id} overrides"))
+        if "session_config" in exception:
+            merged = merge_tables(merged, _recording_session_part(exception["session_config"], defaults_version,
+                                                                  path.parent, f"{source} session_config"))
         merged.setdefault("session_id", recording_session_id)
-        config = recording_session_config_from_dict(merged, source=f"{path} session {recording_session_id}")
-        options = merge_tables(step_options, entry.get("step_options", {}))
-        for step, step_opts in entry.get("step_options", {}).items():
+        config = recording_session_config_from_dict(merged, source=source)
+        for step, step_opts in exception.get("step_options", {}).items():
             if step not in STEP_INPUTS:
-                raise ValueError(f"{path} session {recording_session_id}: step_options of unknown step {step}")
-            _check_step_options(step, step_opts, f"{path} session {recording_session_id}")
-        options = {step: {k: _fill(v, recording_session_id) for k, v in opts.items()} for step, opts in options.items()}
-        recording_session_path = (root / entry["recording_session_path"]).resolve()
+                raise ValueError(f"{source}: step_options of unknown step {step}")
+            _check_step_options(step, step_opts, source)
+        options = merge_tables(step_options, exception.get("step_options", {}))
+        options = {step: {k: _fill(v, recording_session_id, source) for k, v in opts.items()}
+                   for step, opts in options.items()}
         referenced = [Path(probe.geometry.file) for probe in config.probes.values()
                       if probe.geometry and probe.geometry.file]
         conversion_batch.recording_session_jobs.append(RecordingSessionJob(
-            recording_session_id=recording_session_id, recording_session_path=recording_session_path,
-            work_dir=(root / _fill(work_template, recording_session_id)).resolve(),
+            recording_session_id=recording_session_id,
+            recording_session_path=recording_session_path,
+            work_dir=(root / _fill(data["work_dir"], recording_session_id, source)).resolve(),
             recording_session_config=config, config_files=files, referenced_files=referenced, step_options=options,
-            include=entry.get("include", True)))
+            include=exception.get("include", True)))
     _check_outputs_outside_sources(conversion_batch)
     return conversion_batch
 
@@ -250,10 +280,18 @@ def _check_outputs_outside_sources(conversion_batch: ConversionBatch) -> None:
                                      f"session folder {source} (source data are never written)")
 
 
-def _fill(value: Any, recording_session_id: str) -> Any:
-    """``value`` with :data:`RECORDING_SESSION_PLACEHOLDER` replaced by the session id (also inside lists)."""
-    if isinstance(value, str):
-        return value.replace(RECORDING_SESSION_PLACEHOLDER, recording_session_id)
+def _fill(value: Any, recording_session_id: str, source: object = "") -> Any:
+    """``value`` with the placeholders ``{recording_session}``, ``{subject}``, ``{session_label}`` filled in
+    (also inside lists); ``{subject}`` / ``{session_label}`` need an id ``sub-<subject>_ses-<session_label>``."""
     if isinstance(value, list):
-        return [_fill(v, recording_session_id) for v in value]
+        return [_fill(v, recording_session_id, source) for v in value]
+    if not isinstance(value, str):
+        return value
+    value = value.replace(RECORDING_SESSION_PLACEHOLDER, recording_session_id)
+    if "{subject}" in value or "{session_label}" in value:
+        parts = BIDS_RECORDING_SESSION_ID.match(recording_session_id)
+        if not parts:
+            raise ValueError(f"{source}: {{subject}} / {{session_label}} need a recording session id "
+                             f"sub-<subject>_ses-<session_label>, not {recording_session_id!r}")
+        value = value.replace("{subject}", parts["subject"]).replace("{session_label}", parts["session_label"])
     return value
