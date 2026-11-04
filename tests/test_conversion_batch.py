@@ -52,7 +52,7 @@ def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", s
             (root / "sessions" / name).symlink_to(SPIKEGLX_CROP_RECORDING_SESSION.resolve(), target_is_directory=True)
     session_config_b = 'task = "rf"' + (f", {overrides_b}" if overrides_b else "")
     path = root / "conversion_batch.toml"
-    path.write_text(f'''schema_version = 3
+    path.write_text(f'''schema_version = 4
 conversion_batch_name = "test conversion batch"
 work_dir = "work/{{recording_session}}"
 state_dir = "state"
@@ -109,7 +109,7 @@ def test_recording_sessions_of_several_subjects(tmp_path):
         (tmp_path / "sessions" / f"sub-{subject}_ses-{day}").mkdir(parents=True)
         (tmp_path / "sessions" / f"sub-{subject}_ses-{day}" / "session.toml").write_text(f'notes = "{day}"\n')
     path = tmp_path / "conversion_batch.toml"
-    path.write_text('''schema_version = 3
+    path.write_text('''schema_version = 4
 work_dir = "work/{recording_session}"
 recording_session_root = "sourcedata"
 recording_session_config_file = "sessions/{recording_session}/session.toml"
@@ -162,6 +162,76 @@ experimenter = ["S. N."]
     path.write_text(text)
     with pytest.raises(ValueError, match="subject_id 'x' of its config is not the subject 'f'"):
         load_conversion_batch(path)
+
+
+def test_recording_sessions_file_and_session_decisions(tmp_path):
+    """recording_sessions_file: a (generated) list; [sessions."<folder>"]: decisions about single listed sessions;
+    a file of schema 3 is read too (forward compatibility)."""
+    for day in ("20101207", "20101209", "20101210"):
+        (tmp_path / "sourcedata" / "sub-b" / f"ses-{day}").mkdir(parents=True)
+    (tmp_path / "sessions.toml").write_text('''recording_sessions = [
+    { subject = "b", folder = "sub-b/ses-20101207" },
+    { subject = "b", folder = "sub-b/ses-20101209" },
+]
+''')
+    path = tmp_path / "pipeline.toml"
+    text = ('''schema_version = 4
+work_dir = "work/{recording_session}"
+recording_session_root = "sourcedata"
+recording_sessions_file = "sessions.toml"
+recording_sessions = [{ subject = "b", folder = "sub-b/ses-20101210" }]
+''' + SOFTWARE + "[defaults]\n" + PLUGINS + steps_toml(["lfp"]) + '''
+[sessions."sub-b/ses-20101209"]
+include = false
+steps = { lfp = { rate_hz = 500.0 } }
+''')
+    path.write_text(text)
+    jobs = load_conversion_batch(path).recording_session_jobs
+    assert [j.recording_session_id for j in jobs] == ["sub-b_ses-20101207", "sub-b_ses-20101209", "sub-b_ses-20101210"]
+    assert [j.include for j in jobs] == [True, False, True]
+    assert jobs[1].step_settings["lfp"]["rate_hz"] == 500.0 and jobs[0].step_settings["lfp"]["rate_hz"] == 1000.0
+    path.write_text(text.replace("schema_version = 4", "schema_version = 3"))
+    assert len(load_conversion_batch(path).recording_session_jobs) == 3
+    path.write_text(text.replace('[sessions."sub-b/ses-20101209"]', '[sessions."sub-b/ses-20101211"]'))
+    with pytest.raises(ValueError, match="sessions. of folders that are not listed: sub-b/ses-20101211"):
+        load_conversion_batch(path)
+    path.write_text(text + 'subject = "x"\n')
+    with pytest.raises(ValueError, match="can only set include"):
+        load_conversion_batch(path)
+
+
+def test_extends(tmp_path):
+    """A trial batch extends the pipeline: its own work dir and sessions, the rest (settings, configs) inherited;
+    the base's decisions about sessions it does not list do not apply."""
+    for day in ("20101207", "20101209"):
+        (tmp_path / "sourcedata" / "sub-b" / f"ses-{day}").mkdir(parents=True)
+    (tmp_path / "sessions.toml").write_text('recording_sessions = [{ subject = "b", folder = "sub-b/ses-20101207" }, '
+                                            '{ subject = "b", folder = "sub-b/ses-20101209" }]\n')
+    (tmp_path / "pipeline.toml").write_text('''schema_version = 4
+work_dir = "work/{recording_session}"
+recording_session_root = "sourcedata"
+recording_sessions_file = "sessions.toml"
+''' + SOFTWARE + "[defaults]\n" + PLUGINS + 'lab = "lab"\n' + steps_toml(["lfp"]) + '''
+[sessions."sub-b/ses-20101209"]
+include = false
+''')
+    (tmp_path / "trial.toml").write_text('''extends = "pipeline.toml"
+work_dir = "trial/{recording_session}"
+recording_sessions_file = ""
+recording_sessions = [{ subject = "b", folder = "sub-b/ses-20101207" }]
+[steps.lfp]
+rate_hz = 500.0
+''')
+    base = load_conversion_batch(tmp_path / "pipeline.toml").recording_session_jobs
+    trial = load_conversion_batch(tmp_path / "trial.toml").recording_session_jobs
+    assert [j.include for j in base] == [True, False]
+    assert [j.recording_session_id for j in trial] == ["sub-b_ses-20101207"]
+    assert trial[0].work_dir == tmp_path / "trial" / "sub-b_ses-20101207"
+    assert trial[0].step_settings["lfp"]["rate_hz"] == 500.0 and trial[0].step_settings["lfp"]["n_jobs"] == 1
+    assert trial[0].recording_session_config.lab == "lab"
+    (tmp_path / "pipeline.toml").write_text('extends = "trial.toml"\n' + (tmp_path / "pipeline.toml").read_text())
+    with pytest.raises(ValueError, match="extends .* which extends it again"):
+        load_conversion_batch(tmp_path / "trial.toml")
 
 
 def test_load_conversion_batch_errors(tmp_path):
@@ -283,12 +353,12 @@ def test_source_data_are_never_written_or_deleted(tmp_path):
     source = tmp_path / "source" / "ses-1"
     source.mkdir(parents=True)
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 3\nwork_dir = "source/ses-1/ephysalis"\n'
+        'schema_version = 4\nwork_dir = "source/ses-1/ephysalis"\n'
         'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n' + SOFTWARE + "[defaults]\n" + PLUGINS)
     with pytest.raises(ValueError, match="overlaps the recording session folder"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 3\n'
+        'schema_version = 4\n'
         'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n' + SOFTWARE + "[defaults]\n" + PLUGINS)
     with pytest.raises(ValueError, match="work_dir is required"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")

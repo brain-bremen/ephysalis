@@ -4,16 +4,15 @@ The file describes the whole pipeline from the recording session folders to the 
 recording sessions, their configs, and every setting of every step. Example (paths are relative to ``root``, which
 is relative to the file; default: the file's folder)::
 
-    schema_version = 3
+    schema_version = 4
     conversion_batch_name = "V1 array recordings of monkeys B and F"
     root = ".."
     work_dir = "derivatives/ephysalis/{recording_session}"
     state_dir = "derivatives/ephysalis"            # pause file and status table (default: <root>/.ephysalis)
     recording_session_root = "sourcedata"          # the folders are relative to it (default: root)
     recording_session_config_file = "code/sessions/{recording_session}/session.toml"   # optional
-    recording_sessions = [                         # one recording session per line
-        { subject = "b", folder = "sub-b/ses-20101207" },
-        { subject = "b", folder = "sub-b/ses-20101209", include = false },
+    recording_sessions_file = "code/sessions/recording_sessions.toml"   # optional: a (generated) list
+    recording_sessions = [                         # one recording session per line (after those of the file)
         { subject = "f", folder = "sub-f/ses-20091203", steps = { lfp = { rate_hz = 500.0 } } },
     ]
 
@@ -45,10 +44,20 @@ is relative to the file; default: the file's folder)::
     session_label = "{session_label}"
     # ... (all settings of the step)
 
-Each entry of ``recording_sessions``: ``subject`` (the session's ``subject_id``) and ``folder`` (below
+    [sessions."sub-b/ses-20101209"]                # decisions about single sessions of the lists
+    include = false                                # e.g. recording broken after 10 min
+
+A batch file can build on another one: ``extends = "pipeline.toml"`` (relative to the file) reads that file first;
+the tables of this one are merged into it key by key, its values (also ``recording_sessions``) replace the base's
+(``recording_sessions_file = ""``: none). E.g. a trial run on a few days with its own work dir and BIDS root.
+Decisions in ``[sessions]`` of the base apply only to the sessions this file lists as well.
+
+The recording sessions are those of ``recording_sessions_file`` (a TOML file with ``recording_sessions = [...]``,
+e.g. generated from an inventory) and of ``recording_sessions``. Each entry: ``subject`` (the session's ``subject_id``) and ``folder`` (below
 ``recording_session_root``), optionally ``include`` (false: listed but not run), ``recording_session_config_file``
 (instead of the template), ``session_config`` (session.toml content, after the file) and ``steps`` (settings of
-this session that differ from ``[steps]``). The id of a recording session is its folder with ``/`` as ``_``
+this session that differ from ``[steps]``); ``[sessions."<folder>"]`` adds or replaces these optional keys of a
+listed session (so that a generated list stays as it is). The id of a recording session is its folder with ``/`` as ``_``
 (``sub-b_ses-20101207``); it names its work dir, its row in the status table and its ``--recording-sessions``
 selection. Placeholders in ``work_dir``, ``recording_session_config_file`` and step settings:
 ``{recording_session}`` = the id, ``{subject}`` = the subject, ``{session_label}`` = the last folder name without
@@ -84,11 +93,13 @@ from ephysalis.recording_session.config import (
 )
 from ephysalis.recording_session.schema import migrate
 
-CONVERSION_BATCH_SCHEMA_VERSION = 3
+CONVERSION_BATCH_SCHEMA_VERSION = 4
 
 
 # CONVERSION_BATCH_MIGRATIONS[n]: raw data of version n -> n + 1 (versions before 3 are not read)
-CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {}
+CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {
+    3: lambda data: data,  # 4 added recording_sessions_file and [sessions] (optional)
+}
 RECORDING_SESSION_PLACEHOLDER = "{recording_session}"
 # steps in the order they run and the steps whose outputs each one reads
 STEP_INPUTS: dict[str, tuple[str, ...]] = {
@@ -229,15 +240,30 @@ def _check_step_settings(step: str, settings: dict[str, Any], source: object, co
         raise ValueError(f"{source}: [steps.{step}] lacks {', '.join(missing)} (every setting is required)")
 
 
+def _read_batch_file(path: Path, extended_by: tuple[Path, ...]) -> tuple[dict[str, Any], set[str]]:
+    """The raw data of a batch file, migrated, on top of the file it ``extends`` (tables merged key by key, values
+    replaced); and the folders of ``[sessions]`` that come from the base only (they apply only to the sessions
+    this file lists as well)."""
+    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), CONVERSION_BATCH_SCHEMA_VERSION,
+                   CONVERSION_BATCH_MIGRATIONS, missing=CONVERSION_BATCH_SCHEMA_VERSION, source=path)
+    if "extends" not in data:
+        return data, set()
+    base_path = (path.parent / data.pop("extends")).resolve()
+    if base_path == path or base_path in extended_by:
+        raise ValueError(f"{path}: extends {base_path}, which extends it again")
+    base, base_inherited = _read_batch_file(base_path, (*extended_by, path))
+    own = set(data.get("sessions", {}))
+    return merge_tables(base, data), (set(base.get("sessions", {})) | base_inherited) - own
+
+
 def load_conversion_batch(path: str | Path, check_installed_software: bool = True) -> ConversionBatch:
     """The conversion batch of ``path``; ``check_installed_software``: refuse older installed versions than
     ``[software]`` says (off only to look at a file)."""
     path = Path(path).resolve()
-    data = migrate(tomllib.loads(path.read_text(encoding="utf-8")), CONVERSION_BATCH_SCHEMA_VERSION,
-                   CONVERSION_BATCH_MIGRATIONS, missing=CONVERSION_BATCH_SCHEMA_VERSION, source=path)
+    data, inherited_sessions = _read_batch_file(path, ())
     known = {"schema_version", "conversion_batch_name", "root", "work_dir", "state_dir", "software", "defaults",
              "subject_defaults", "steps", "recording_session_root", "recording_session_config_file",
-             "recording_sessions"}
+             "recording_sessions_file", "recording_sessions", "sessions"}
     if unknown := set(data) - known:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
@@ -262,9 +288,25 @@ def load_conversion_batch(path: str | Path, check_installed_software: bool = Tru
         conversion_batch_file=path, conversion_batch_name=data.get("conversion_batch_name", path.parent.name),
         root=root, state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps, software=software)
     session_root = (root / data.get("recording_session_root", ".")).resolve()
-    entries = data.get("recording_sessions", [])
-    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    entries = []
+    if data.get("recording_sessions_file"):  # "" in a file that extends another: none
+        sessions_file = (root / data["recording_sessions_file"]).resolve()
+        listed = tomllib.loads(sessions_file.read_text(encoding="utf-8"))
+        if set(listed) - {"recording_sessions"}:
+            raise ValueError(f"{sessions_file}: only recording_sessions = [...] is read from it")
+        entries += listed.get("recording_sessions", [])
+    entries += data.get("recording_sessions", [])
+    if not all(isinstance(e, dict) for e in entries):
         raise ValueError(f"{path}: recording_sessions must be a list of tables {{ subject = ..., folder = ... }}")
+    listed_folders = {str(e.get("folder", "")).strip("/") for e in entries}
+    decisions = {f: d for f, d in data.get("sessions", {}).items() if f in listed_folders or f not in inherited_sessions}
+    if unlisted := sorted(set(decisions) - listed_folders):
+        raise ValueError(f"{path}: [sessions] of folders that are not listed: {', '.join(unlisted)}")
+    for folder, decision in decisions.items():
+        if bad := set(decision) - {"include", "recording_session_config_file", "session_config", "steps"}:
+            raise ValueError(f"{path}: [sessions.\"{folder}\"] can only set include, recording_session_config_file, "
+                             f"session_config, steps (not {', '.join(sorted(bad))})")
+    entries = [{**e, **decisions.get(str(e.get("folder", "")).strip("/"), {})} for e in entries]
     subject_defaults = {subject: _recording_session_part(part, part.get("schema_version", defaults_version),
                                                          path.parent, f"{path} [subject_defaults.{subject}]")
                         for subject, part in data.get("subject_defaults", {}).items()}

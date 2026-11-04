@@ -82,8 +82,9 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `--x/--no-x`, empty string/list = not set). LFP and MUA write the settings they ran with to
   `<work>/{lfp,mua}/settings.json`; the exports describe the filtering from them (`LfpSettings.filtering`). No
   processing constants: a parameter is a setting.
-- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 3 (from 3 on, a format
-  change needs a migration: newer ephysalis must read older files), `[software]` minimum versions (older installed
+- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 4 (from 3 on, a format
+  change needs a migration: newer ephysalis must read older files); `recording_sessions_file`, `[sessions."<folder>"]`,
+  `extends`, `[software]` minimum versions (older installed
   ones refused), `[steps.<step>]` complete, each session's `input_format` and `metadata_plugin` set and their
   packages in `[software]`;
   `recording_sessions = [{ subject, folder, ... }]` (one per line; folder below `recording_session_root`, id =
