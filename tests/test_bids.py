@@ -17,6 +17,21 @@ from test_nwb import RUN, work_dir  # noqa: F401 (fixture)
 SUBJECT, RECORDING_SESSION = "SOMxCD1172", "20250109crop"
 
 
+def test_upsert_keeps_other_columns(tmp_path):
+    """A re-export updates its own columns of a row; columns added by other tools stay."""
+    from ephysalis.formats.output.bids import _upsert_tsv
+
+    path = tmp_path / "sub-a_sessions.tsv"
+    _upsert_tsv(path, {"session_id": "ses-1", "acq_time": "2010-01-01T10:00:00.000"}, "session_id")
+    table = pd.read_csv(path, sep="\t", dtype=str)
+    table["task"] = ["flicker"]
+    table.to_csv(path, sep="\t", index=False)
+    _upsert_tsv(path, {"session_id": "ses-1", "acq_time": "2010-01-01T09:00:00.000"}, "session_id")
+    _upsert_tsv(path, {"session_id": "ses-0", "acq_time": "2009-01-01T09:00:00.000"}, "session_id")
+    assert path.read_text().splitlines() == ["session_id\tacq_time\ttask", "ses-0\t2009-01-01T09:00:00.000\tn/a",
+                                             "ses-1\t2010-01-01T09:00:00.000\tflicker"]
+
+
 def test_bids_labels():
     assert bids_labels("SOMxCD1_172", "SOMxCD1_172_20250109_Recording1") == ("SOMxCD1172", "20250109Recording1")
     assert bids_labels("M1", "other-name") == ("M1", "othername")

@@ -93,12 +93,20 @@ def _write_json(data: dict, path: Path) -> None:
 
 
 def _upsert_tsv(path: Path, row: dict, key: str) -> None:
-    """Add ``row`` to the table at ``path``, replacing a row with the same ``key``."""
+    """Add ``row`` to the table at ``path``, or update the row with the same ``key``: only the columns of ``row``
+    change, so columns that other tools added to the table (e.g. a session's task or study) are kept; cells of a
+    new row in such columns are n/a."""
     table = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False) if path.exists() else pd.DataFrame()
-    new = pd.DataFrame([{k: str(_na(v)) for k, v in row.items()}])
-    if not table.empty:
-        table = table[table[key] != row[key]]
-    _write_tsv(pd.concat([table, new], ignore_index=True).sort_values(key), path)
+    values = {k: str(_na(v)) for k, v in row.items()}
+    for column in values:
+        if column not in table.columns:
+            table[column] = NA
+    if not table.empty and (table[key] == values[key]).any():
+        table.loc[table[key] == values[key], list(values)] = list(values.values())
+    else:
+        new = {column: NA for column in table.columns} | values
+        table = pd.concat([table, pd.DataFrame([new])], ignore_index=True)
+    _write_tsv(table.sort_values(key), path)
 
 
 def _lfp_series(nwbfile: NWBFile) -> list:
