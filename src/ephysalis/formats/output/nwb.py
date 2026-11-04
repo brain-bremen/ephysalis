@@ -51,8 +51,8 @@ import numpy as np
 import pandas as pd
 from hdmf.data_utils import GenericDataChunkIterator
 
-from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
-from ephysalis.processing.mua import MUA_FILTERING, mua_folder
+from ephysalis.processing.lfp import lfp_folder, lfp_settings
+from ephysalis.processing.mua import mua_folder, mua_settings
 from ephysalis.plugins import ReadsAuxiliaryAnalogInputs
 from ephysalis.recording_session.model import Run, RecordingSession, StreamKind
 from ephysalis.spike_sorting.spikes import load_run_spikes, sorting_channels
@@ -386,8 +386,8 @@ def _add_derived(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dic
     from ephysalis.formats.output.dh5 import stream_timing
 
     folder, container, filtering = {
-        "lfp": (lfp_folder, LFP(name="LFP"), LFP_FILTERING),
-        "mua": (mua_folder, FilteredEphys(name="MUA"), MUA_FILTERING),
+        "lfp": (lfp_folder, LFP(name="LFP"), lambda: lfp_settings(work_dir).filtering()),
+        "mua": (mua_folder, FilteredEphys(name="MUA"), lambda: mua_settings(work_dir).filtering()),
     }[kind]
     n = 0
     for run in runs:
@@ -402,7 +402,7 @@ def _add_derived(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dic
                 _ecephys_module(nwbfile).add(container)
             container.add_electrical_series(_electrical_series(
                 nwbfile, f"{kind.upper()}_{run.name}_{probe_id}", recording, probe_id, electrode_rows, start, rate,
-                compression, filtering=filtering, description=f"{kind.upper()} of {probe_id} in run {run.name}",
+                compression, filtering=filtering(), description=f"{kind.upper()} of {probe_id} in run {run.name}",
             ))
             n += 1
     return n

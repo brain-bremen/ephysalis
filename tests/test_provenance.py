@@ -37,7 +37,7 @@ def processed(tmp_path_factory):
     common = ["--work-dir", str(work), "--config", str(config_path)]
     for step in CLOCK_AND_EXTRACT_STEPS:
         assert main([step, str(SPIKEGLX_CROP_RECORDING_SESSION), *common]) == 0
-    assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), *common, "--n-jobs", "1", "--rate", "500"]) == 0
+    assert main(["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION), *common, "--n-jobs", "1", "--rate-hz", "500"]) == 0
     (work / "spike_sorting" / "imec0").mkdir(parents=True)
     (work / "spike_sorting" / "imec0" / "segments.json").write_text(json.dumps(
         {"runs": [], "sorter": "kilosort4", "sorter_params": {"clear_cache": True, "nearest_chans": 8}}))
@@ -59,7 +59,7 @@ def test_record_in_output(processed, fmt):
     assert record_config(record) == config
     assert record_config(record, "extract-trials") == config and record_config(record, "lfp") == config
     assert export["argv"][:2] == ["ephysalis", "export"] and export["options"]["output_format"] == fmt
-    assert record["steps"]["lfp"][-1]["options"]["rate"] == 500
+    assert record["steps"]["lfp"][-1]["options"]["rate_hz"] == 500
     assert record["spike_sorting"]["imec0"]["sorter_params"]["nearest_chans"] == 8
     assert export["environment"]["packages"]["numpy"] == np.__version__
     meta = [p for p in export["inputs"] if p.endswith(".ap.meta")]
@@ -72,7 +72,7 @@ def test_dh5_step_operations(processed):
     """One readable DH5 operation per step, in the order they ran, before the export."""
     import h5py
 
-    from ephysalis.processing.lfp import LFP_FILTERING
+    from ephysalis.step_settings import LfpSettings
 
     _, _, files = processed
     with h5py.File(files["dh5"], "r") as f:
@@ -84,8 +84,8 @@ def test_dh5_step_operations(processed):
         lfp = ops[names[5]].attrs
         assert lfp["Tool"].decode().startswith("ephysalis") and "Date" in lfp
         assert lfp["Command"].decode().startswith("ephysalis lfp")
-        assert json.loads(lfp["Options"])["rate"] == 500
-        assert lfp["Filtering"].decode() == LFP_FILTERING
+        assert json.loads(lfp["Options"])["rate_hz"] == 500
+        assert lfp["Filtering"].decode() == LfpSettings(rate_hz=500).filtering()  # the settings it ran with
 
 
 def test_compare():
@@ -109,10 +109,11 @@ def test_replay_argv(processed, tmp_path):
     record = read_processing_record(files["nwb"])
     lfp = replay_argv(record["steps"]["lfp"][-1], SPIKEGLX_CROP_RECORDING_SESSION, tmp_path / "w", tmp_path / "c.toml")
     assert lfp[:2] == ["lfp", str(SPIKEGLX_CROP_RECORDING_SESSION)]
-    assert lfp[lfp.index("--rate") + 1] == "500.0" and lfp[lfp.index("--n-jobs") + 1] == "1"
+    assert lfp[lfp.index("--rate-hz") + 1] == "500.0" and lfp[lfp.index("--n-jobs") + 1] == "1"
     assert lfp[lfp.index("--work-dir") + 1] == str(tmp_path / "w")
     export = replay_argv(record["export"], SPIKEGLX_CROP_RECORDING_SESSION, tmp_path / "w", None)
-    assert "--output" not in export and "--config" not in export  # output goes to the new work dir
+    # every setting is given; the output goes to the new work dir (empty = the default location)
+    assert export[export.index("--output") + 1] == "" and "--config" not in export
 
 
 def test_reproduce(processed, tmp_path, capsys):

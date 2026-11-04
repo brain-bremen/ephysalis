@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from ephysalis.formats.input.base import open_recording_session
-from ephysalis.processing.lfp import extract_lfp, lfp_recording
+from ephysalis.processing.lfp import extract_lfp, lfp_recording, lfp_settings
+from ephysalis.step_settings import LfpSettings
 from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 
 RUN = "3_rfmappingFine_g0"
@@ -19,7 +20,7 @@ def run():
 def test_lfp_matches_legacy(run, probe_id):
     """Same signal as the legacy LFP_1kHz (LF counts, every 2.5th sample without anti-alias
     filter); the residual difference is the aliasing of the legacy decimation."""
-    lfp = lfp_recording(run, probe_id)
+    lfp = lfp_recording(run, probe_id, LfpSettings())
     assert lfp.sampling_frequency == 1000
     traces = lfp.get_traces().astype(float)
     legacy = np.load(run.path / "1_stimulusStageRF" / f"legacy_reference_{probe_id}.npz")["lfp_1kHz"]
@@ -31,7 +32,11 @@ def test_lfp_matches_legacy(run, probe_id):
 
 
 def test_extract_lfp_writes_folder(run, tmp_path):
-    lfp = extract_lfp(run, "imec0", tmp_path, n_jobs=1)
+    lfp = extract_lfp(run, "imec0", tmp_path, LfpSettings(n_jobs=1))
     assert (tmp_path / "lfp" / f"{RUN}_imec0" / "binary.json").exists()
     assert lfp.get_num_samples() == 5000
-    np.testing.assert_array_equal(lfp.get_traces(), lfp_recording(run, "imec0").get_traces())
+    np.testing.assert_array_equal(lfp.get_traces(), lfp_recording(run, "imec0", LfpSettings()).get_traces())
+    assert lfp_settings(tmp_path) == LfpSettings(n_jobs=1)  # recorded for the export
+    # other settings that change the output: made anew; others (n_jobs) reuse it
+    assert extract_lfp(run, "imec0", tmp_path, LfpSettings(n_jobs=2)).get_num_samples() == 5000
+    assert extract_lfp(run, "imec0", tmp_path, LfpSettings(rate_hz=500.0)).get_num_samples() == 2500

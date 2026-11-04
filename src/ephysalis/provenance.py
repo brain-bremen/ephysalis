@@ -280,10 +280,20 @@ def _step_parser(step: str) -> Any:
 def replay_argv(invocation: dict[str, Any], recording_session: Path, work_dir: Path, config: Path | None) -> list[str]:
     """Command line (without ``ephysalis``) that redoes ``invocation`` into ``work_dir``, with
     the session at ``session`` and the recorded config saved at ``config``."""
+    from ephysalis.step_settings import STEP_SETTINGS, step_settings_argv, step_settings_from_options
+
+    step = invocation["step"]
     options = dict(invocation["options"], work_dir=str(work_dir), config=str(config) if config else None)
-    argv = [invocation["step"], str(recording_session)]  # positional: one session
-    for action in _step_parser(invocation["step"])._actions:
-        if not action.option_strings or action.dest in _NOT_REPLAYED or action.dest == "help":
+    argv = [step, str(recording_session)]  # positional: one session
+    settings_fields = set(STEP_SETTINGS[step].model_fields) if step in STEP_SETTINGS else set()
+    if settings_fields:  # every setting, explicitly; outputs and caches outside the work dir: their defaults
+        settings = step_settings_from_options(step, options).model_dump(mode="json")
+        defaults = STEP_SETTINGS[step]().model_dump(mode="json")
+        settings.update({k: defaults[k] for k in _NOT_REPLAYED if k in settings})
+        argv += step_settings_argv(step, settings)
+    for action in _step_parser(step)._actions:
+        if (not action.option_strings or action.dest in _NOT_REPLAYED or action.dest == "help"
+                or action.dest in settings_fields):
             continue
         value = options.get(action.dest, action.default)
         if value is None or value is False or value == action.default:

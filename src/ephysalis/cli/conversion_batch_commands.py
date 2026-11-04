@@ -26,7 +26,7 @@ def _status(args: argparse.Namespace) -> int:
     from ephysalis.conversion_batch.config import load_conversion_batch
     from ephysalis.conversion_batch.runner import status_table
 
-    print(status_table(load_conversion_batch(args.conversion_batch), ignore_code_changes=args.ignore_code_changes,
+    print(status_table(load_conversion_batch(args.conversion_batch, check_installed_software=False), ignore_code_changes=args.ignore_code_changes,
                        recording_session_ids=_comma_separated(args.recording_sessions)))
     return 0
 
@@ -35,7 +35,7 @@ def _pause(args: argparse.Namespace) -> int:
     from ephysalis.conversion_batch.config import load_conversion_batch
     from ephysalis.conversion_batch.runner import request_pause
 
-    path = request_pause(load_conversion_batch(args.conversion_batch))
+    path = request_pause(load_conversion_batch(args.conversion_batch, check_installed_software=False))
     print(f"Pause requested ({path}): the running steps finish, then the runners stop. "
           f"Resume with: ephysalis run {args.conversion_batch}")
     return 0

@@ -101,8 +101,9 @@ def test_mua_in_dh5(crop_work):
     with h5py.File(path, "r") as file:
         block = file[f"CONT{MUA_FIRST_CONT_ID + 5}"]
         assert block.attrs["SignalType"] == b"MUA/ESA" or block.attrs["SignalType"] == "MUA/ESA"
-        volts = block["DATA"][:, 0] * block.attrs["Calibration"]
-        np.testing.assert_allclose(volts, mua.get_traces()[:, 5] * 1e-6, atol=float(block.attrs["Calibration"]))
+        calibration = float(np.atleast_1d(block.attrs["Calibration"])[0])  # per channel: the block's first
+        volts = block["DATA"][:, 0] * calibration
+        np.testing.assert_allclose(volts, mua.get_traces()[:, 5] * 1e-6, atol=calibration)
         assert f"CONT{MUA_FIRST_CONT_ID + mua.get_num_channels()}" not in file  # imec1 has no MUA
         assert "EV02" in file
 

@@ -432,7 +432,7 @@ def add_dh5_to_bids(recording_session: Any, work_dir: Path, dh5_path: Path, root
     import h5py
 
     from ephysalis.formats.output.dh5 import sidecar_paths
-    from ephysalis.processing.lfp import LFP_FILTERING
+    from ephysalis.processing.lfp import lfp_settings
     from ephysalis.formats.output.nwb import recording_session_metadata_nwbfile
 
     target = ecephys_path(root, subject, session_label, ".dh5", run=run, task=task)
@@ -452,7 +452,7 @@ def add_dh5_to_bids(recording_session: Any, work_dir: Path, dh5_path: Path, root
                 row = int(group.attrs["Channels"]["GlobalChanNumber"][0])
                 rate = 1e9 / float(group.attrs["SamplePeriod"])
                 streams[row] = ([name], rate)
-                lfp = (rate, LFP_FILTERING)
+                lfp = (rate, lfp_settings(work_dir).filtering())
     nwbfile = recording_session_metadata_nwbfile(recording_session, work_dir, config, run_clock=run is not None)
     write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
     ignore = root / ".bidsignore"

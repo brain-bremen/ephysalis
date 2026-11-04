@@ -28,6 +28,8 @@ from ephysalis.recording_session.probes import configure_probes
 from ephysalis.plugins import ComputesChannelGainCalibration, HasSynchronisedTimestamps
 from ephysalis.timeline.clocks import RunSync, SyncEdgeCache
 
+from ephysalis.step_settings import add_step_settings_arguments, step_settings_from_args  # noqa: E402
+
 logger = logging.getLogger(__name__)
 SESSION_PLACEHOLDER = "{session}"
 # options that hold a path of one session: need SESSION_PLACEHOLDER with several sessions
@@ -170,11 +172,10 @@ def _align_clocks(args: argparse.Namespace) -> int:
     from ephysalis.timeline.clocks import load_or_extract_edges, synchronize_run
     from ephysalis.timeline.steps import aux_channel_map, default_work_dir, write_clock_report
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
-    cache = SyncEdgeCache(args.cache_dir) if args.cache_dir else SyncEdgeCache(work_dir / "sync")
+    settings = step_settings_from_args("align-clocks", args)
+    cache = SyncEdgeCache(settings.cache_dir) if settings.cache_dir else SyncEdgeCache(work_dir / "sync")
     for run in recording_session.runs:
         run_config = config.run_config(run.name) if config else None
         if args.runs and run.name not in args.runs:
@@ -240,19 +241,18 @@ def _spike_sort(args: argparse.Namespace) -> int:
     from ephysalis.spike_sorting.spikes import spike_sort_probe
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
     print(f"Config: {config_path or 'none (sorting all channels)'}")
     syncs = _included_run_syncs(recording_session, config, work_dir)
-    params = dict(kv.split("=", 1) for kv in args.param or [])
-    scratch = Path(args.scratch_dir) if args.scratch_dir else Path(tempfile.gettempdir()) / "ephysalis"
-    for probe_id in args.probes or recording_session.probe_ids:
+    settings = step_settings_from_args("spike-sort", args)
+    params = dict(kv.split("=", 1) for kv in settings.sorter_params)
+    scratch = Path(settings.scratch_dir) if settings.scratch_dir else Path(tempfile.gettempdir()) / "ephysalis"
+    for probe_id in settings.probes or recording_session.probe_ids:
         runs = spike_sort_probe(
             recording_session, probe_id, work_dir, scratch, config, syncs,
             sorter_params={k: _parse_value(v) for k, v in params.items()},
-            n_jobs=args.n_jobs, keep_binary=args.keep_binary, sorter=args.spike_sorter,
+            n_jobs=settings.n_jobs, keep_binary=settings.keep_binary, sorter=settings.spike_sorter or None,
         )
         for run_name, spikes in runs.items():
             print(f"{probe_id} {run_name}: {len(spikes)} spikes, {spikes.unit_id.nunique()} units")
@@ -280,9 +280,7 @@ def _configure(recording_session: RecordingSession, config: RecordingSessionConf
 def _calibrate(args: argparse.Namespace) -> int:
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     if config is None or config.calibration.run is None:
         print("Nothing to do: [calibration] run is not set in session.toml")
         return 0
@@ -306,9 +304,7 @@ def _quality(args: argparse.Namespace) -> int:
     from ephysalis.processing.quality import GOOD, assess_run
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
     probes = {pid: p.quality for pid, p in (config.probes.items() if config else []) if p.quality is not None}
     if not probes:
@@ -334,9 +330,7 @@ def _csd(args: argparse.Namespace) -> int:
     from ephysalis.processing.csd import TooFewCsdInputs, csd_folder, extract_csd
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
     probes = {pid: p.csd for pid, p in (config.probes.items() if config else []) if p.csd is not None}
     if not probes:
@@ -363,6 +357,18 @@ def _csd(args: argparse.Namespace) -> int:
     return 0
 
 
+def _open_with_config(args: argparse.Namespace) -> tuple[RecordingSession, Path, RecordingSessionConfig | None, Path | None]:
+    """The recording session (in ``--format``, else its config's ``input_format``, else detected), its work dir and
+    its config."""
+    from ephysalis.timeline.steps import default_work_dir
+
+    path = Path(args.recording_session)
+    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(path)
+    config, config_path = _load_config_for(path, work_dir, args.config)
+    input_format = args.format or (config.input_format if config is not None else None)
+    return open_recording_session(path, input_format), work_dir, config, config_path
+
+
 def _load_config_for(recording_session_path: Path, work_dir: Path, config: str | None) -> tuple[RecordingSessionConfig | None, Path | None]:
     candidates = [Path(config)] if config else [recording_session_path / RECORDING_SESSION_CONFIG_FILENAME, work_dir / RECORDING_SESSION_CONFIG_FILENAME]
     path = next((p for p in candidates if p.exists() or config), None)
@@ -375,9 +381,7 @@ def _extract_step(args: argparse.Namespace, step: str, extract: Callable[[Run, R
     (from the sync edge cache, extracted on demand) and record ``step``."""
     from ephysalis.timeline.steps import align_run_clocks, default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir, calibration=False, run_starts=False)
     cache = SyncEdgeCache(work_dir / "sync")
     for run in recording_session.runs:
@@ -451,16 +455,15 @@ def _lfp(args: argparse.Namespace) -> int:
     from ephysalis.processing.lfp import extract_lfp
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
+    settings = step_settings_from_args("lfp", args)
     for run in recording_session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
             continue
-        for probe_id in args.probes or list(run.probes):
-            lfp = extract_lfp(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
+        for probe_id in settings.probes or list(run.probes):
+            lfp = extract_lfp(run, probe_id, work_dir, settings, args.force)
             print(f"{run.name} {probe_id}: LFP {lfp.get_num_channels()} channels, {lfp.get_total_duration():.0f} s")
             if config is not None and config.line_noise.enabled:
                 from ephysalis.processing.linenoise import clean_lfp
@@ -480,16 +483,15 @@ def _mua(args: argparse.Namespace) -> int:
     from ephysalis.processing.mua import extract_mua
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
+    settings = step_settings_from_args("mua", args)
     for run in recording_session.runs:
         run_config = config.run_config(run.name) if config else None
         if (args.runs and run.name not in args.runs) or (not args.runs and run_config is not None and not run_config.include):
             continue
-        for probe_id in args.probes or list(run.probes):
-            mua = extract_mua(run, probe_id, work_dir, args.rate, args.n_jobs, args.force)
+        for probe_id in settings.probes or list(run.probes):
+            mua = extract_mua(run, probe_id, work_dir, settings, args.force)
             print(f"{run.name} {probe_id}: MUA {mua.get_num_channels()} channels, {mua.get_total_duration():.0f} s")
     _record_step("mua", args, recording_session, work_dir, config, config_path)
     print(f"Output: {work_dir / 'mua'}")
@@ -502,9 +504,7 @@ def _export(args: argparse.Namespace) -> int:
     from ephysalis.formats.output.nwb import included_runs, single_run_recording_session
     from ephysalis.timeline.steps import default_work_dir
 
-    recording_session = open_recording_session(args.recording_session, args.format)
-    work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(recording_session.path)
-    config, config_path = _load_config_for(recording_session.path, work_dir, args.config)
+    recording_session, work_dir, config, config_path = _open_with_config(args)
     _configure(recording_session, config, config_path, work_dir)
     print(f"Config: {config_path or 'none'}")
     extension = f".{args.output_format}"
@@ -541,30 +541,30 @@ def _export(args: argparse.Namespace) -> int:
             output = Path(args.output) if args.output else work_dir / f"{recording_session.name}{extension}"
         files.append((recording_session, None, task, output))
     processing = None
-    if args.existing is None:
+    if not args.existing:
         from ephysalis.provenance import processing_record
 
         processing = processing_record(work_dir, _record_step("export", args, recording_session, work_dir, config, config_path))
-    syncs = _included_run_syncs(recording_session, config, work_dir) if args.existing is None else {}
+    syncs = _included_run_syncs(recording_session, config, work_dir) if not args.existing else {}
     for file_recording_session, run_index, task, output in files:
         existing = Path(args.existing) if args.existing else None
         if existing is None:
             if args.output_format == "nwb":
                 from ephysalis.formats.output.nwb import write_recording_session_nwb
 
-                write_recording_session_nwb(file_recording_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
-                                  compression=None if args.no_compression else "gzip", processing=processing,
+                write_recording_session_nwb(file_recording_session, work_dir, output, config, syncs, lfp=args.lfp,
+                                  compression="gzip" if args.compression else None, processing=processing,
                                   raw=args.raw, run_clock=args.per_run)
             else:
                 from ephysalis.formats.output.dh5 import write_recording_session_dh5
 
-                write_recording_session_dh5(file_recording_session, work_dir, output, config, syncs, lfp=not args.no_lfp,
+                write_recording_session_dh5(file_recording_session, work_dir, output, config, syncs, lfp=args.lfp,
                                   processing=processing, raw=args.raw, run_clock=args.per_run)
             existing = output
         if args.bids:
             from ephysalis.formats.output.bids import add_dh5_to_bids, add_nwb_to_bids
 
-            options = {"power_line_frequency": args.power_line_frequency, "dataset_name": args.dataset_name}
+            options = {"power_line_frequency": args.power_line_frequency_hz, "dataset_name": args.dataset_name or None}
             if args.output_format == "nwb":
                 add_nwb_to_bids(existing, Path(args.bids), subject, session_label, run=run_index, task=task, **options)
             else:
@@ -635,7 +635,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder; the cache goes to <work-dir>/sync (default: <session>/ephysalis)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--cache-dir", help="Sync edge cache (default: <work-dir>/sync)")
+    add_step_settings_arguments(p, "align-clocks")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
     p.set_defaults(func=per_recording_session(_align_clocks))
 
@@ -648,12 +648,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder with sync/, sorting/, spikes/ (default: <session>/ephysalis)")
-    p.add_argument("--scratch-dir", help="Fast local folder for the concatenated binary (default: system temp)")
-    p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
-    p.add_argument("--spike-sorter", help="spikeinterface sorter, e.g. kilosort4, mountainsort5 (default: session.toml)")
-    p.add_argument("--param", nargs="+", metavar="KEY=VALUE", help="Sorter parameters, e.g. batch_size=30000")
-    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs for copying and waveforms")
-    p.add_argument("--keep-binary", action="store_true", help="Keep the local binary copy (e.g. for Phy)")
+    add_step_settings_arguments(p, "spike-sort")
     p.set_defaults(func=per_recording_session(_spike_sort))
 
     for name, func, help_text, outputs in (
@@ -670,6 +665,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
         p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
         p.add_argument("--work-dir", help=f"Output folder with {outputs} (default: <session>/ephysalis)")
         p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
+        add_step_settings_arguments(p, name)
         p.set_defaults(func=per_recording_session(func))
 
     p = sub.add_parser("lfp", help="Write the LFP of every run and probe, downsampled with an anti-alias filter")
@@ -678,9 +674,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder, LFP goes to <work-dir>/lfp (default: <session>/ephysalis)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
-    p.add_argument("--rate", type=float, default=1000.0, help="LFP sampling rate in Hz (default 1000)")
-    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
+    add_step_settings_arguments(p, "lfp")
     p.add_argument("--force", action="store_true", help="Overwrite existing LFP")
     p.set_defaults(func=per_recording_session(_lfp))
 
@@ -689,6 +683,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder, calibration.json goes there (default: <session>/ephysalis)")
+    add_step_settings_arguments(p, "calibrate")
     p.set_defaults(func=per_recording_session(_calibrate))
 
     p = sub.add_parser("quality", help="Select the good channels of every run and probe with [probes.<id>.quality] "
@@ -698,7 +693,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder with lfp/, results go to <work-dir>/quality (default: <session>/ephysalis)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--probes", nargs="+", help="Only these probes (default: all with [probes.<id>.quality])")
+    add_step_settings_arguments(p, "quality")
     p.set_defaults(func=per_recording_session(_quality))
 
     p = sub.add_parser("csd", help="Write the CSD of every run and probe with [probes.<id>.csd] (from the LFP)")
@@ -707,20 +702,17 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder with lfp/, CSD goes to <work-dir>/csd (default: <session>/ephysalis)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--probes", nargs="+", help="Only these probes (default: all with [probes.<id>.csd])")
-    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
+    add_step_settings_arguments(p, "csd")
     p.add_argument("--force", action="store_true", help="Overwrite existing CSD")
     p.set_defaults(func=per_recording_session(_csd))
 
-    p = sub.add_parser("mua", help="Write the MUA envelope (300 Hz high-pass, rectified, 1 kHz) of every run and probe")
+    p = sub.add_parser("mua", help="Write the MUA envelope (high-pass, rectified, resampled) of every run and probe")
     p.add_argument("recording_sessions", nargs="+", type=Path, metavar="recording_session")
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
     p.add_argument("--work-dir", help="Output folder, MUA goes to <work-dir>/mua (default: <session>/ephysalis)")
     p.add_argument("--runs", nargs="+", help="Only these runs (default: all included runs)")
-    p.add_argument("--probes", nargs="+", help="Only these probes (default: all)")
-    p.add_argument("--rate", type=float, default=1000.0, help="MUA sampling rate in Hz (default 1000)")
-    p.add_argument("--n-jobs", type=int, default=4, help="Parallel jobs")
+    add_step_settings_arguments(p, "mua")
     p.add_argument("--force", action="store_true", help="Overwrite existing MUA")
     p.set_defaults(func=per_recording_session(_mua))
 
@@ -730,24 +722,10 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
         "optionally into a BIDS dataset",
     )
     p.add_argument("recording_sessions", nargs="+", type=Path, metavar="recording_session")
-    p.add_argument("--output-format", choices=["nwb", "dh5"], default="nwb", help="File format (default nwb)")
-    p.add_argument("--bids", metavar="ROOT", help="Put the file into this BIDS dataset (BIDS-like for DH5: "
-                   "BIDS only allows NWB and NIX data files)")
     p.add_argument("--format", help="Input format (default: auto-detect)")
     p.add_argument("--config", help=f"Session config (default: {RECORDING_SESSION_CONFIG_FILENAME} in the session or work dir)")
-    p.add_argument("--work-dir", help="Folder with the outputs of timing, lfp and sort (default: <session>/ephysalis)")
-    p.add_argument("-o", "--output", help="Output file without --bids (default: <work-dir>/<session>.<format>)")
-    p.add_argument("--existing", help="With --bids: copy this existing session file instead of writing a new one")
-    p.add_argument("--subject", help="BIDS subject label (default: subject id without non-alphanumerics)")
-    p.add_argument("--session-label", help="BIDS session label (default: session id without the subject prefix)")
-    p.add_argument("--power-line-frequency", type=float, default=50.0, help="Mains frequency in Hz (default 50)")
-    p.add_argument("--dataset-name", help="Name in dataset_description.json (default: folder name)")
-    p.add_argument("--no-lfp", action="store_true", help="Leave out the LFP")
-    p.add_argument("--per-run", action="store_true", help="One file per run, on the run's own clock (DAQ: the DAQ "
-                   "clock; BIDS: run-<n>, n = position of the run among the included runs)")
-    p.add_argument("--raw", action="store_true", help="Include the raw data (AP/wideband streams and analog aux "
-                   "inputs; about the size of the recording)")
-    p.add_argument("--no-compression", action="store_true", help="NWB: write the LFP without gzip compression")
+    p.add_argument("--work-dir", help="Folder with the outputs of the other steps (default: <session>/ephysalis)")
+    add_step_settings_arguments(p, "export")
     p.set_defaults(func=per_recording_session(_export))
 
     p = sub.add_parser(

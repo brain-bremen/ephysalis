@@ -741,8 +741,21 @@
     }
    ],
    "default": null,
-   "description": "Input format plugin, e.g. spikeglx, openephys, mcd, daq; detected from the files if not set",
+   "description": "Input format plugin, e.g. spikeglx, openephys, mcd, daq; detected from the files if not set (required in a conversion batch)",
    "title": "Input Format"
+  },
+  "metadata_plugin": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "description": "Metadata plugin of the runs that do not name their own, e.g. vstim; 'none': no plugin; detected per run if not set (required in a conversion batch)",
+   "title": "Metadata Plugin"
   },
   "experimenter": {
    "description": "Names of the experimenters (NWB)",

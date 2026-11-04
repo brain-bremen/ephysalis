@@ -45,9 +45,9 @@ from ephysalis.conversion_batch.config import (
     STEP_INPUTS,
     ConversionBatch,
     RecordingSessionJob,
-    step_argv,
 )
 from ephysalis.filesystem import glob_in_work_folder, remove_folder
+from ephysalis.step_settings import step_settings_argv
 from ephysalis.recording_session.config import save_recording_session_config
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ def code_versions() -> dict[str, Any]:
 
 def sort_scratch_dir(conversion_batch: ConversionBatch, recording_session_job: RecordingSessionJob) -> Path:
     """The sort step's scratch dir of a recording session (its ``scratch_dir`` option; default: the system's)."""
-    scratch = Path(recording_session_job.step_options.get("spike-sort", {}).get("scratch_dir")
+    scratch = Path(recording_session_job.step_settings.get("spike-sort", {}).get("scratch_dir")
                    or Path(tempfile.gettempdir()) / "ephysalis")
     return scratch if scratch.is_absolute() else conversion_batch.root / scratch
 
@@ -127,7 +127,7 @@ def step_inputs(conversion_batch: ConversionBatch, recording_session_job: Record
     for file in recording_session_job.referenced_files:
         files[str(file)] = _sha256(file.read_bytes()) if file.exists() else None
     return {"config": _sha256(config_text), "files": files,
-            "options": step_argv(step, recording_session_job.step_options.get(step, {})), "upstream": upstream}
+            "options": step_settings_argv(step, recording_session_job.step_settings[step]), "upstream": upstream}
 
 
 @dataclass
@@ -253,7 +253,7 @@ class Runner:
                 child.terminate()
 
     def _skip_reason(self, recording_session_job: RecordingSessionJob, step: str) -> str | None:
-        probes = recording_session_job.step_options.get(step, {}).get("probes")
+        probes = recording_session_job.step_settings.get(step, {}).get("probes")
         if probes and not set(probes) & set(recording_session_job.recording_session_config.probes):
             return f"none of the probes {', '.join(probes)} in the session config"
         return None
@@ -268,7 +268,7 @@ class Runner:
         if resume:
             self._say(f"{recording_session_job.recording_session_id} sort: resuming the interrupted sorting")
             return
-        probes = (recording_session_job.step_options.get("spike-sort", {}).get("probes")
+        probes = (recording_session_job.step_settings.get("spike-sort", {}).get("probes")
                   or list(recording_session_job.recording_session_config.probes))
         scratch = sort_scratch_dir(self.conversion_batch, recording_session_job)
         for probe in probes:
@@ -304,7 +304,7 @@ class Runner:
             return True
         argv = [sys.executable, "-u", "-m", "ephysalis.cli.main", step, str(recording_session_job.recording_session_path),
                 "--config", str(config_path), "--work-dir", str(recording_session_job.work_dir),
-                *step_argv(step, recording_session_job.step_options.get(step, {}))]
+                *step_settings_argv(step, recording_session_job.step_settings[step])]
         if step in FORCE_STEPS:
             argv.append("--force")
         why = {"pending": "", "changed": " (inputs changed)", "code": " (code changed)", "failed": " (failed before)",

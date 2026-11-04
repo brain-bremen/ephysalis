@@ -257,7 +257,10 @@ class RecordingSessionConfig(BaseModel):
                             "its folder)")
     subject_id: str = Field(description="Id of the subject (NWB / BIDS subject)")
     input_format: str | None = Field(default=None, description="Input format plugin, e.g. spikeglx, openephys, mcd, "
-                                     "daq; detected from the files if not set")
+                                     "daq; detected from the files if not set (required in a conversion batch)")
+    metadata_plugin: str | None = Field(default=None, description="Metadata plugin of the runs that do not name "
+                                        "their own, e.g. vstim; 'none': no plugin; detected per run if not set "
+                                        "(required in a conversion batch)")
     experimenter: list[str] = Field(default_factory=list, description="Names of the experimenters (NWB)")
     lab: str | None = Field(default=None, description="Lab (NWB)")
     institution: str | None = Field(default=None, description="Institution (NWB)")

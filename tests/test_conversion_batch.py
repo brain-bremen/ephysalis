@@ -9,7 +9,10 @@ import pytest
 from conftest import SPIKEGLX_CROP_RECORDING_SESSION
 
 from ephysalis.cli.main import main
-from ephysalis.conversion_batch.config import load_conversion_batch, merge_tables, step_argv
+import tomli_w
+
+from ephysalis.conversion_batch.config import load_conversion_batch, merge_tables
+from ephysalis.step_settings import STEP_SETTINGS, step_settings_argv
 from ephysalis.conversion_batch.runner import (
     PAUSE_FILE,
     Runner,
@@ -19,9 +22,27 @@ from ephysalis.conversion_batch.runner import (
 )
 
 STEPS = ["align-clocks", "extract-events", "lfp"]
+SOFTWARE = '[software]\nephysalis = "0.3.0.dev0"\n'
+PLUGINS = 'input_format = "spikeglx"\nmetadata_plugin = "none"\n'
 
 
-def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", steps=STEPS) -> Path:
+def steps_toml(steps=STEPS, overrides: dict | None = None, leave_out: tuple[str, str] | None = None) -> str:
+    """[steps.<step>] tables with every setting: the defaults, lfp on imec0 with one job, and ``overrides``."""
+    tables = {}
+    for step in steps:
+        settings = STEP_SETTINGS[step]().model_dump(mode="json")
+        if step == "lfp":
+            settings.update(probes=["imec0"], n_jobs=1)
+        settings.update((overrides or {}).get(step, {}))
+        if leave_out and leave_out[0] == step:
+            settings.pop(leave_out[1])
+        tables[step] = settings
+    return tomli_w.dumps({"steps": tables})
+
+
+def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", steps=STEPS,
+                           step_overrides: dict | None = None, leave_out: tuple[str, str] | None = None,
+                           software: str = SOFTWARE, plugins: str = PLUGINS) -> Path:
     (root / "session_configs").mkdir(exist_ok=True)
     (root / "session_configs" / "b.toml").write_text('schema_version = 10\nnotes = "from the file"\n'
                                                      '[probes.imec0]\narea = "V2"\n')
@@ -31,27 +52,26 @@ def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", s
             (root / "sessions" / name).symlink_to(SPIKEGLX_CROP_RECORDING_SESSION.resolve(), target_is_directory=True)
     session_config_b = 'task = "rf"' + (f", {overrides_b}" if overrides_b else "")
     path = root / "conversion_batch.toml"
-    path.write_text(f'''schema_version = 2
+    path.write_text(f'''schema_version = 3
 conversion_batch_name = "test conversion batch"
 work_dir = "work/{{recording_session}}"
 state_dir = "state"
-steps = {json.dumps(steps)}
 recording_session_root = "sessions"
 recording_sessions = [
     {{ subject = "m1", folder = "a" }},
     {{ subject = "m1", folder = "b", recording_session_config_file = "session_configs/b.toml", session_config = {{ {session_config_b} }} }},
 ]
-{extra}
+{software}
 [defaults]
 schema_version = 10
 lab = "test lab"
 notes = "default"
+{plugins}
 [defaults.probes.imec0]
 area = "V1"
 
-[step_options.lfp]
-n_jobs = 1
-probes = ["imec0"]
+{steps_toml(steps, step_overrides, leave_out)}
+{extra}
 
 ''')
     return path
@@ -76,7 +96,9 @@ def test_load_conversion_batch(tmp_path):
     assert (config_b.lab, config_b.notes, config_b.probes["imec0"].area, config_b.task) == \
         ("test lab", "from the file", "V2", "rf")
     assert recording_session_b.config_files == [tmp_path / "conversion_batch.toml", tmp_path / "session_configs" / "b.toml"]
-    assert step_argv("lfp", recording_session_a.step_options["lfp"]) == ["--n-jobs", "1", "--probes", "imec0"]
+    argv = step_settings_argv("lfp", recording_session_a.step_settings["lfp"])
+    assert argv[argv.index("--probes") + 1] == "imec0" and argv[argv.index("--rate-hz") + 1] == "1000.0"
+    assert argv[argv.index("--n-jobs") + 1] == "1" and "--anti-alias-kaiser-beta" in argv
 
 
 def test_recording_sessions_of_several_subjects(tmp_path):
@@ -87,28 +109,29 @@ def test_recording_sessions_of_several_subjects(tmp_path):
         (tmp_path / "sessions" / f"sub-{subject}_ses-{day}").mkdir(parents=True)
         (tmp_path / "sessions" / f"sub-{subject}_ses-{day}" / "session.toml").write_text(f'notes = "{day}"\n')
     path = tmp_path / "conversion_batch.toml"
-    path.write_text('''schema_version = 2
+    path.write_text('''schema_version = 3
 work_dir = "work/{recording_session}"
 recording_session_root = "sourcedata"
 recording_session_config_file = "sessions/{recording_session}/session.toml"
 recording_sessions = [
     { subject = "b", folder = "sub-b/ses-20101207" },
-    { subject = "b", folder = "sub-b/ses-20101209", include = false, step_options = { lfp = { n_jobs = 2 } } },
+    { subject = "b", folder = "sub-b/ses-20101209", include = false, steps = { lfp = { n_jobs = 2 } } },
     { subject = "f", folder = "sub-f/ses-20091203" },
 ]
+[software]
+ephysalis = "0.3.0.dev0"
 [defaults]
 schema_version = 10
 lab = "lab"
+input_format = "spikeglx"
+metadata_plugin = "none"
 [subject_defaults.b]
 experimenter = ["I. G."]
 [subject_defaults.b.aux_channels.digital]
 trial_start = { bit = 0, description = "trial start" }
 [subject_defaults.f]
 experimenter = ["S. N."]
-[step_options.lfp]
-n_jobs = 1
-probes = ["{subject}_{session_label}"]
-''')
+''' + steps_toml(["lfp"], {"lfp": {"probes": ["{subject}_{session_label}"]}}))
     first, second, third = load_conversion_batch(path).recording_session_jobs
     assert [j.recording_session_id for j in (first, second, third)] == [
         "sub-b_ses-20101207", "sub-b_ses-20101209", "sub-f_ses-20091203"]
@@ -119,8 +142,8 @@ probes = ["{subject}_{session_label}"]
         "b", "sub-b_ses-20101207", "20101207", "lab", ["I. G."])
     assert a.aux_channels.digital["trial_start"].description == "trial start"
     assert (c.subject_id, c.experimenter) == ("f", ["S. N."]) and "trial_start" not in c.aux_channels.digital
-    assert first.step_options["lfp"] == {"n_jobs": 1, "probes": ["b_20101207"]}
-    assert second.step_options["lfp"]["n_jobs"] == 2
+    assert first.step_settings["lfp"]["probes"] == ["b_20101207"] and first.step_settings["lfp"]["n_jobs"] == 1
+    assert second.step_settings["lfp"]["n_jobs"] == 2 and second.step_settings["lfp"]["rate_hz"] == 1000.0
 
     text = path.read_text()
     path.write_text(text.replace('"sub-f/ses-20091203" }', '"sub-f/ses-20091204" }'))
@@ -141,16 +164,25 @@ probes = ["{subject}_{session_label}"]
         load_conversion_batch(path)
 
 
-def test_load_dataset_errors(tmp_path):
-    path = write_conversion_batch(tmp_path, extra='[step_options.mua]\nn_job = 2')
-    with pytest.raises(ValueError, match="unknown options of mua: n_job"):
-        load_conversion_batch(path)
-    path = write_conversion_batch(tmp_path, extra='[step_options.lfp.x]\n', steps=["lfp", "timing"])
-    with pytest.raises(ValueError, match="unknown steps timing"):
-        load_conversion_batch(path)
-    path = write_conversion_batch(tmp_path, extra='[step_options.export]\nwork_dir = "x"')
-    with pytest.raises(ValueError, match="work_dir of export are set by the runner"):
-        load_conversion_batch(path)
+def test_load_conversion_batch_errors(tmp_path):
+    cases = [
+        ({"step_overrides": {"mua": {"n_job": 2}}, "steps": [*STEPS, "mua"]}, "unknown settings of mua: n_job"),
+        ({"extra": "[steps.timing]\n"}, "unknown step timing"),
+        ({"leave_out": ("lfp", "anti_alias_cutoff")}, r"\[steps.lfp\] lacks anti_alias_cutoff"),
+        ({"step_overrides": {"lfp": {"rate_hz": "fast"}}}, r"(?s)\[steps.lfp\].*rate_hz"),
+        ({"software": '[software]\nephysalis = "99.0"\n'}, "needs ephysalis >= 99.0"),
+        ({"software": ""}, "must give the ephysalis version"),
+        ({"plugins": 'metadata_plugin = "none"\n'}, "input_format is not set"),
+        ({"plugins": 'input_format = "spikeglx"\n'}, "metadata_plugin is not set"),
+        ({"plugins": 'input_format = "spikeglx"\nmetadata_plugin = "vstim"\n'},
+         "plugin 'vstim' comes from ephysalis-bremen, which is not in .software."),
+    ]
+    for options, message in cases:
+        with pytest.raises(ValueError, match=message):
+            load_conversion_batch(write_conversion_batch(tmp_path, **options))
+    # status and pause do not need the software
+    path = write_conversion_batch(tmp_path, software='[software]\nephysalis = "99.0"\n')
+    assert load_conversion_batch(path, check_installed_software=False).software == {"ephysalis": "99.0"}
 
 
 def _states(conversion_batch, recording_session_id):
@@ -231,7 +263,8 @@ def test_lock_and_skipped_step(tmp_path):
     import os
     import socket
 
-    path = write_conversion_batch(tmp_path, extra='[step_options.spike-sort]\nprobes = ["v4"]', steps=["align-clocks", "spike-sort"])
+    path = write_conversion_batch(tmp_path, steps=["align-clocks", "spike-sort"],
+                                  step_overrides={"spike-sort": {"probes": ["v4"]}})
     lock = tmp_path / "work" / "a" / "runner" / "lock"
     lock.parent.mkdir(parents=True)
     lock.write_text(json.dumps({"host": socket.gethostname(), "pid": os.getpid()}))  # a live runner
@@ -250,13 +283,13 @@ def test_source_data_are_never_written_or_deleted(tmp_path):
     source = tmp_path / "source" / "ses-1"
     source.mkdir(parents=True)
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\nwork_dir = "source/ses-1/ephysalis"\n'
-        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n')
+        'schema_version = 3\nwork_dir = "source/ses-1/ephysalis"\n'
+        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n' + SOFTWARE + "[defaults]\n" + PLUGINS)
     with pytest.raises(ValueError, match="overlaps the recording session folder"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\n'
-        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n')
+        'schema_version = 3\n'
+        'recording_sessions = [{ subject = "m", folder = "source/ses-1" }]\n' + SOFTWARE + "[defaults]\n" + PLUGINS)
     with pytest.raises(ValueError, match="work_dir is required"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
 

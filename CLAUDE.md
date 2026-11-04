@@ -67,9 +67,9 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   in `<work>/sync`), `steps.py` (the align-clocks and extract steps), `events.py` (digital line edges and event
   words per run, `events/<run>.csv`; DH5 codes made at export), `annotations.py`, `auxsignals.py` (photodiode,
   wheel, eye; role access via `AuxChannelMap`). Don't name a module `aux.py` (reserved on Windows).
-- `processing/` — `lfp.py`, `mua.py`, `csd.py` (port of Borisov's `dh_csd`), `linenoise.py` (port of
-  `dh_remove_50hz`), `quality.py` (channel selection). All filters are acausal; `docs/filters.md` and
-  `lfp.LFP_FILTERING` / `mua.MUA_FILTERING` describe them — update together.
+- `processing/` — `resampling.py` (polyphase resampling with a configurable anti-alias FIR; defaults = SciPy's
+  design = spikeinterface's `resample`), `lfp.py`, `mua.py`, `csd.py` (port of Borisov's `dh_csd`), `linenoise.py` (port of
+  `dh_remove_50hz`), `quality.py` (channel selection). The filters are set by `LfpSettings` / `MuaSettings`, whose `filtering()` describes them in the outputs.
 - `spike_sorting/` — `spikes.py` (spike sorting per probe over the concatenated runs, `[spike_sorting]` in session.toml,
   work dir `spike_sorting/<probe>`, resumable from its outputs, `cut_spikes`),
   `kilosort_checkpoints.py`.
@@ -77,7 +77,15 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   entries during deletion make `shutil.rmtree` fail); call it before spikeinterface overwrites a folder.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
-- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 2:
+- `step_settings.py` — one Pydantic model per step (`STEP_SETTINGS`): the `[steps.<step>]` tables of a conversion
+  batch (every field required there) and the step's command options (`add_step_settings_arguments`, booleans
+  `--x/--no-x`, empty string/list = not set). LFP and MUA write the settings they ran with to
+  `<work>/{lfp,mua}/settings.json`; the exports describe the filtering from them (`LfpSettings.filtering`). No
+  processing constants: a parameter is a setting.
+- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 3 (from 3 on, a format
+  change needs a migration: newer ephysalis must read older files), `[software]` minimum versions (older installed
+  ones refused), `[steps.<step>]` complete, each session's `input_format` and `metadata_plugin` set and their
+  packages in `[software]`;
   `recording_sessions = [{ subject, folder, ... }]` (one per line; folder below `recording_session_root`, id =
   folder with `_`, `subject_id` = subject), the template `recording_session_config_file` with `{recording_session}`,
   `{subject}`, `{session_label}`; each becomes a `RecordingSessionJob`; `[defaults]` < `[subject_defaults.<subject>]`

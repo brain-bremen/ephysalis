@@ -45,6 +45,9 @@ class ExperimentalProtocol:
     experimental_protocol_metadata: dict[str, Any] = field(default_factory=dict)  # copied into the trial table's attrs
 
 
+NO_METADATA_PLUGIN = "none"  # metadata_plugin = "none": the run has no metadata plugin
+
+
 def get_metadata_plugin(metadata_plugin_name: str) -> MetadataPlugin:
     return get_plugin(METADATA_PLUGIN_GROUP, metadata_plugin_name)
 
@@ -52,13 +55,14 @@ def get_metadata_plugin(metadata_plugin_name: str) -> MetadataPlugin:
 def run_trial_tables(run: Run, clock_alignment: RunSync | None, auxiliary_signals: AuxSignals | None,
                      config: RecordingSessionConfig | None = None) -> tuple[MetadataPlugin | None, dict[str, pd.DataFrame]]:
     """``(plugin, trial tables)`` of a run: from the plugin set for the run in ``session.toml``
-    (``runs[].metadata_plugin``), else from the first plugin (in name order) that recognises the
-    run; ``(None, {})`` if none does."""
+    (``runs[].metadata_plugin``, else the session's ``metadata_plugin``; ``"none"``: no plugin), else from the
+    first plugin (in name order) that recognises the run; ``(None, {})`` if none does."""
     run_config = config.run_config(run.name) if config is not None else None
-    if run_config is not None and run_config.metadata_plugin:
-        candidates = [get_metadata_plugin(run_config.metadata_plugin)]
-    else:
-        candidates = metadata_plugins()
+    name = (run_config.metadata_plugin if run_config is not None and run_config.metadata_plugin
+            else config.metadata_plugin if config is not None else None)
+    if name == NO_METADATA_PLUGIN:
+        return None, {}
+    candidates = [get_metadata_plugin(name)] if name else metadata_plugins()
     for plugin in candidates:
         if isinstance(plugin, ExtractsTrialTables):
             tables = plugin.extract_trial_tables(run, clock_alignment, auxiliary_signals)

@@ -58,8 +58,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from ephysalis.processing.lfp import LFP_FILTERING, lfp_folder
-from ephysalis.processing.mua import MUA_FILTERING, mua_folder
+from ephysalis.processing.lfp import lfp_folder, lfp_settings
+from ephysalis.processing.mua import mua_folder, mua_settings
 from ephysalis.formats.output.nwb import (
     RUNNING_SPEED_BIN_S,
     recording_session_trials,
@@ -272,10 +272,11 @@ def _write_derived(file: h5py.File, recording_session: RecordingSession, work_di
     from ephysalis.processing.quality import recording_session_status
 
     folder, first_id, signal_type, comment = {
-        "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, f"LFP: {LFP_FILTERING}"),
-        "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA, f"MUA envelope: {MUA_FILTERING}"),
-        "csd": (csd_folder, CSD_FIRST_CONT_ID, ContSignalType.CSD,
-                f"CSD of the LFP (dh_csd V3.1 [RBF] port, ephysalis.processing.csd); Calibration in {CSD_UNIT} per count"),
+        "lfp": (lfp_folder, LFP_FIRST_CONT_ID, ContSignalType.LFP, lambda: f"LFP: {lfp_settings(work_dir).filtering()}"),
+        "mua": (mua_folder, MUA_FIRST_CONT_ID, ContSignalType.MUA,
+                lambda: f"MUA envelope: {mua_settings(work_dir).filtering()}"),
+        "csd": (csd_folder, CSD_FIRST_CONT_ID, ContSignalType.CSD, lambda: f"CSD of the LFP (dh_csd V3.1 [RBF] port, "
+                f"ephysalis.processing.csd); Calibration in {CSD_UNIT} per count"),
     }[kind]
     scaling: dict[str, Any] = ({"to_int16": True} if kind == "mua" else
                {"to_int16": True, "full_scale": DH5_FULL_SCALE, "unit_factor": 1.0, "c_rounding": True} if kind == "csd"
@@ -311,7 +312,7 @@ def _write_derived(file: h5py.File, recording_session: RecordingSession, work_di
                 [c for c in p[0].channel_ids if str(c) in ids]), *p[1:]) for p in (parts[k] for k in having)]
             n_blocks += _write_cont_blocks(
                 file, selected, first_id + global_index, global_index, f"{probe_id} {kind.upper()}", signal_type,
-                f"{comment}; INDEX regions placed on the session time axis", positions=[channels.index(c) for c in ids],
+                f"{comment()}; INDEX regions placed on the session time axis", positions=[channels.index(c) for c in ids],
                 attributes=attributes, **scaling)
         global_index += len(channels)
     return n_blocks
@@ -577,8 +578,11 @@ def step_operation_details(processing: dict[str, Any]) -> dict[str, dict[str, st
     """Parameters of each step for its DH5 operation (:func:`ephysalis.provenance.step_operations`):
     the filters of LFP and MUA, the CSD and channel-quality settings of the probes (from the
     step's ``session.toml``), the sorter and its parameters per probe."""
-    from ephysalis.processing.lfp import LFP_FILTERING
-    from ephysalis.processing.mua import MUA_FILTERING
+    from ephysalis.step_settings import step_settings_from_options
+
+    def filtering(step: str) -> str:
+        records = processing.get("steps", {}).get(step)
+        return step_settings_from_options(step, records[-1].get("options") or {}).filtering() if records else ""
 
     def probe_settings(step: str, key: str) -> str:
         records = processing.get("steps", {}).get(step) or [{}]
@@ -586,8 +590,8 @@ def step_operation_details(processing: dict[str, Any]) -> dict[str, dict[str, st
         return json.dumps({p: c[key] for p, c in sorted(probes.items()) if c.get(key)}, sort_keys=True)
 
     return {
-        "lfp": {"Filtering": LFP_FILTERING},
-        "mua": {"Filtering": MUA_FILTERING},
+        "lfp": {"Filtering": filtering("lfp")},
+        "mua": {"Filtering": filtering("mua")},
         "csd": {"CSD parameters": probe_settings("csd", "csd")},
         "quality": {"Quality parameters": probe_settings("quality", "quality")},
         "spike-sort": {"Sorting": json.dumps(processing.get("spike_sorting") or {}, sort_keys=True, default=str)},
