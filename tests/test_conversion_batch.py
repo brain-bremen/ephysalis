@@ -23,19 +23,24 @@ STEPS = ["align-clocks", "extract-events", "lfp"]
 
 def write_conversion_batch(root: Path, overrides_b: str = "", extra: str = "", steps=STEPS) -> Path:
     (root / "session_configs").mkdir(exist_ok=True)
-    (root / "session_configs" / "b.toml").write_text('schema_version = 8\nnotes = "from the file"\n'
+    (root / "session_configs" / "b.toml").write_text('schema_version = 10\nnotes = "from the file"\n'
                                                      '[probes.imec0]\narea = "V2"\n')
+    for name in ("a", "b"):  # two recording session folders with the same recording
+        if not (root / "sessions" / name).exists():
+            (root / "sessions").mkdir(exist_ok=True)
+            (root / "sessions" / name).symlink_to(SPIKEGLX_CROP_RECORDING_SESSION.resolve(), target_is_directory=True)
     path = root / "conversion_batch.toml"
     path.write_text(f'''schema_version = 2
 conversion_batch_name = "test conversion batch"
 work_dir = "work/{{recording_session}}"
 state_dir = "state"
 steps = {json.dumps(steps)}
-recording_session_path = "{SPIKEGLX_CROP_RECORDING_SESSION.as_posix()}"
-recording_sessions = ["a", "b"]
+recording_session_root = "sessions"
 {extra}
+[recording_sessions]
+"." = ["a", "b"]
 [defaults]
-schema_version = 8
+schema_version = 10
 lab = "test lab"
 subject_id = "m1"
 notes = "default"
@@ -77,57 +82,58 @@ def test_load_conversion_batch(tmp_path):
     assert step_argv("lfp", recording_session_a.step_options["lfp"]) == ["--n-jobs", "1", "--probes", "imec0"]
 
 
-def test_recording_session_list_and_placeholders(tmp_path):
-    """recording_sessions = [...]: paths, config files and step options from templates with {recording_session},
-    {subject} and {session_label}; exceptions only for the sessions that differ."""
+def test_recording_session_folders_and_placeholders(tmp_path):
+    """[recording_sessions]: folder -> its session folders; id = the path with _; config files and step options
+    from templates with {recording_session}, {subject} and {session_label}; exceptions only where needed."""
     for day in ("20101207", "20101209"):
+        (tmp_path / "sourcedata" / "sub-b" / f"ses-{day}").mkdir(parents=True)
         (tmp_path / "sessions" / f"sub-b_ses-{day}").mkdir(parents=True)
-        (tmp_path / "sessions" / f"sub-b_ses-{day}" / "session.toml").write_text(f'schema_version = 8\nnotes = "{day}"\n')
+        (tmp_path / "sessions" / f"sub-b_ses-{day}" / "session.toml").write_text(
+            f'schema_version = 10\nnotes = "{day}"\n')
     path = tmp_path / "conversion_batch.toml"
     path.write_text('''schema_version = 2
 work_dir = "work/{recording_session}"
-recording_session_path = "sourcedata/sub-{subject}/ses-{session_label}"
+recording_session_root = "sourcedata"
 recording_session_config_file = "sessions/{recording_session}/session.toml"
-recording_sessions = [
-    "sub-b_ses-20101207",
-    "sub-b_ses-20101209",
+[recording_sessions]
+sub-b = [
+    "ses-20101207",
+    "ses-20101209",
 ]
 [defaults]
-schema_version = 8
+schema_version = 10
 subject_id = "b"
 [step_options.lfp]
 n_jobs = 1
 probes = ["{session_label}"]
-[recording_session_exceptions."sub-b_ses-20101209"]
-recording_session_path = "elsewhere/{session_label}"
+[recording_session_exceptions."sub-b/ses-20101209"]
 include = false
-[recording_session_exceptions."sub-b_ses-20101209".step_options.lfp]
+[recording_session_exceptions."sub-b/ses-20101209".step_options.lfp]
 n_jobs = 2
 ''')
     first, second = load_conversion_batch(path).recording_session_jobs
+    assert (first.recording_session_id, second.recording_session_id) == ("sub-b_ses-20101207", "sub-b_ses-20101209")
     assert first.recording_session_path == tmp_path / "sourcedata" / "sub-b" / "ses-20101207"
     assert first.work_dir == tmp_path / "work" / "sub-b_ses-20101207" and first.include
     assert first.recording_session_config.notes == "20101207"
+    assert first.recording_session_config.session_id == "sub-b_ses-20101207"
     assert first.step_options["lfp"] == {"n_jobs": 1, "probes": ["20101207"]}
-    assert second.recording_session_path == tmp_path / "elsewhere" / "20101209" and not second.include
-    assert second.recording_session_config.notes == "20101209" and second.step_options["lfp"]["n_jobs"] == 2
+    assert not second.include and second.recording_session_config.notes == "20101209"
+    assert second.step_options["lfp"]["n_jobs"] == 2
 
     text = path.read_text()
-    path.write_text(text.replace('"sub-b_ses-20101209",\n]', '"sub-b_ses-20101209",\n    "sub-b_ses-20101210",\n]'))
+    path.write_text(text.replace('"ses-20101209",\n]', '"ses-20101209",\n    "ses-20101210",\n]'))
     with pytest.raises(ValueError, match="config file .* not found"):
         load_conversion_batch(path)
-    path.write_text(text.replace('"sub-b_ses-20101207",', '"sub-b_ses-20101207",\n    "sub-b_ses-20101207",'))
-    with pytest.raises(ValueError, match="listed twice: sub-b_ses-20101207"):
+    path.write_text(text.replace('"ses-20101207",', '"ses-20101207",\n    "ses-20101207",'))
+    with pytest.raises(ValueError, match="listed twice: sub-b/ses-20101207"):
         load_conversion_batch(path)
-    path.write_text(text.replace('recording_sessions = [\n    "sub-b_ses-20101207",\n    "sub-b_ses-20101209",\n]',
-                                 'recording_sessions = ["sub-b_ses-20101207"]'))
-    with pytest.raises(ValueError, match="exceptions of sessions not in recording_sessions: sub-b_ses-20101209"):
+    path.write_text(text.replace('sub-b = [\n    "ses-20101207",\n    "ses-20101209",\n]', 'sub-b = ["ses-20101207"]'))
+    with pytest.raises(ValueError, match="exceptions of folders not in .recording_sessions.: sub-b/ses-20101209"):
         load_conversion_batch(path)
-    path.write_text(text.replace('"sub-b_ses-20101207",', '"b20101207",'))
+    path.write_text(text.replace("sub-b = [", "b = [").replace('"sub-b/ses-20101209"', '"b/ses-20101209"')
+                    .replace('recording_session_config_file = "sessions/{recording_session}/session.toml"', ''))
     with pytest.raises(ValueError, match="need a recording session id sub-<subject>_ses-<session_label>"):
-        load_conversion_batch(path)
-    path.write_text(text.replace("schema_version = 2", "schema_version = 1", 1))
-    with pytest.raises(ValueError, match="recording_session_jobs.*is not read any more"):
         load_conversion_batch(path)
 
 
@@ -240,13 +246,13 @@ def test_source_data_are_never_written_or_deleted(tmp_path):
     source = tmp_path / "source" / "ses-1"
     source.mkdir(parents=True)
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\nwork_dir = "source/ses-1/ephysalis"\nrecording_session_path = "source/ses-1"\n'
-        'recording_sessions = ["s"]\n[defaults]\nsubject_id = "m"\n')
+        'schema_version = 2\nwork_dir = "source/ses-1/ephysalis"\n[defaults]\nsubject_id = "m"\n'
+        '[recording_sessions]\nsource = ["ses-1"]\n')
     with pytest.raises(ValueError, match="overlaps the recording session folder"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
     (tmp_path / "conversion_batch.toml").write_text(
-        'schema_version = 2\nrecording_session_path = "source/ses-1"\nrecording_sessions = ["s"]\n'
-        '[defaults]\nsubject_id = "m"\n')
+        'schema_version = 2\n[defaults]\nsubject_id = "m"\n'
+        '[recording_sessions]\nsource = ["ses-1"]\n')
     with pytest.raises(ValueError, match="work_dir is required"):
         load_conversion_batch(tmp_path / "conversion_batch.toml")
 

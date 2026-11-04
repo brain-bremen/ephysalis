@@ -235,12 +235,12 @@ def locate_sync_pulse_channel(run: Run, probe_id: str | None, auxiliary_channel_
         return SyncSource(recording, recording.channel_ids[0], IMEC_SYNC_BIT)
     bit = run.extra["aux"].get("sync_bit")
     if auxiliary_channel_roles is not None and "sync" in auxiliary_channel_roles.digital:
-        if bit is not None and bit != auxiliary_channel_roles.digital["sync"]:
+        if bit is not None and bit != auxiliary_channel_roles.digital["sync"].bit:
             logger.warning(
                 "Run %s: NIDQ sync bit %d from the config differs from syncNiChan=%d in the meta file",
-                run.name, auxiliary_channel_roles.digital["sync"], bit,
+                run.name, auxiliary_channel_roles.digital["sync"].bit, bit,
             )
-        bit = auxiliary_channel_roles.digital["sync"]
+        bit = auxiliary_channel_roles.digital["sync"].bit
     if bit is None:
         raise ValueError(f"Run {run.name}: unknown NIDQ sync bit")
     recording = get_stream_recording(run, StreamKind.AUX)

@@ -5,21 +5,8 @@ The session config replaces the legacy Excel sheets (font colour = run included)
 created once per session (``ephysalis init``) and can be edited by hand. The outputs embed
 the config they were made with (:mod:`ephysalis.provenance`).
 
-Schema versions (``schema_version``, see :mod:`ephysalis.recording_session.schema`):
-
-1. first version
-2. ``lab``, ``institution``, ``[subject]``, ``[sorting]``; probes: ``stream``, ``channels``,
-   ``geometry``, ``sorting`` (non-Neuropixels probes, per-probe sorter)
-3. ``[events]`` (TTL lines left out of the events, offset of the network event codes)
-4. ``[calibration]`` (gains from a calibration-sine recording), ``[line_noise]`` (mains removal
-   with the recorded mains reference), probes: ``csd`` (current source density)
-5. ``[events.lines]`` (active level and description of the trigger lines), ``[[events.markers]]``;
-   probes: ``quality`` (channel selection); ``task`` of the session and of the runs (BIDS ``task`` entity)
-6. ``[events] lines_without_role``
-7. probes: ``reference_channels`` (re-reference to the mean of other channels of the stream)
-8. runs: ``stimulus_system`` renamed to ``metadata_plugin``; ``[events] network_events_offset`` renamed to
-   ``event_word_offset``
-9. ``[sorting]`` and probes: ``sorting`` renamed to ``[spike_sorting]`` / ``spike_sorting`` (not the sorting of files)
+Schema version 10 (``schema_version``, see :mod:`ephysalis.recording_session.schema`; a file without one is taken
+as the current version). Older versions are not read: there are no migrations, write the file anew.
 """
 
 from __future__ import annotations
@@ -30,58 +17,27 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tomli_w
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ephysalis.recording_session.schema import Migration, migrate
 from ephysalis.recording_session.model import RecordingSession
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 RECORDING_SESSION_CONFIG_FILENAME = "session.toml"
-# MIGRATIONS[n]: raw data of schema version n -> n + 1
-MIGRATIONS: dict[int, Migration] = {
-    1: lambda data: data,  # 2 only added fields, all with defaults
-    2: lambda data: data,  # 3 added [events], with defaults
-    3: lambda data: data,  # 4 added [calibration], [line_noise] and probes.csd, all off by default
-    4: lambda data: data,  # 5 added [events.lines], [[events.markers]] and probes.quality, empty by default
-    5: lambda data: data,  # 6 added [events] lines_without_role (default true: as before)
-    6: lambda data: data,  # 7 added probes.reference_channels (default none: no re-reference)
-    7: lambda data: _schema_8(data),  # 8: runs[].stimulus_system -> metadata_plugin, events.network_events_offset -> event_word_offset
-    8: lambda data: _schema_9(data),  # 9: [sorting] and probes.<id>.sorting -> spike_sorting
-}
-
-
-def _schema_8(data: dict) -> dict:
-    data = _rename_run_key(data, "stimulus_system", "metadata_plugin")
-    events = data.get("events", {})
-    if "network_events_offset" in events:
-        events["event_word_offset"] = events.pop("network_events_offset")
-    return data
-
-
-def _schema_9(data: dict) -> dict:
-    if "sorting" in data:
-        data["spike_sorting"] = data.pop("sorting")
-    for probe in (data.get("probes") or {}).values():
-        if isinstance(probe, dict) and "sorting" in probe:
-            probe["spike_sorting"] = probe.pop("sorting")
-    return data
-
-
-def _rename_run_key(data: dict, old: str, new: str) -> dict:
-    for run in data.get("runs", []):
-        if old in run:
-            run[new] = run.pop(old)
-    return data
+# MIGRATIONS[n]: raw data of schema version n -> n + 1 (none: older versions are not read)
+MIGRATIONS: dict[int, Migration] = {}
 
 
 class RunConfig(BaseModel):
-    name: str
-    include: bool = True
+    """A run (recording) of the session; runs not listed are included with the defaults."""
+
+    name: str = Field(description="Name of the run as the input format lists it (ephysalis inspect)")
+    include: bool = Field(default=True, description="Process and export the run")
     metadata_plugin: str | None = Field(
         default=None, description="Metadata plugin; auto-detected if not set"
     )
     task: str | None = Field(default=None, description="Task of the run (BIDS task entity), instead of the session's")
-    notes: str = ""
+    notes: str = Field(default="", description="Free text")
 
 
 class SpikeSortingConfig(BaseModel):
@@ -162,7 +118,7 @@ class ProbeConfig(BaseModel):
                                   "needs the probe geometry")
     quality: ChannelQualityConfig | None = Field(default=None, description="Select the good channels of this "
                                                  "probe (ephysalis quality); needs the probe geometry")
-    notes: str = ""
+    notes: str = Field(default="", description="Free text")
 
 
 class SubjectConfig(BaseModel):
@@ -177,20 +133,49 @@ class SubjectConfig(BaseModel):
     description: str = ""
 
 
+class DigitalLineConfig(BaseModel):
+    """A digital (TTL) line with a role: ``role = { bit = 0, active = "high", description = "..." }`` in
+    ``[aux_channels.digital]``, or ``role = 0`` for the bit alone (:mod:`ephysalis.timeline.annotations`)."""
+
+    bit: int = Field(description="Bit of the digital word (0-based); the TTL line is bit + 1")
+    active: Literal["high", "low"] = Field(default="high", description="Level of the line during a pulse, "
+                                           "e.g. 'low' for a lever line that is low while pressed")
+    description: str = Field(default="", description="Meaning of the pulses (DH5 /Intervals and TriggerLines, "
+                             "NWB trigger_lines, BIDS events.json); default: the role")
+    in_events: bool = Field(default=True, description="Its edges are in the events; false for fast pulse trains "
+                            "(frame, sync, wheel lines), which are then only documented")
+
+
 class AuxChannelMap(BaseModel):
     """Roles of the auxiliary (NIDQ) channels.
 
     ``analog`` maps a role to the analog input index (XA<n> / AI<n>); ``digital`` maps a role
-    to a bit of the digital word. Defaults reproduce the MATLAB pipeline
+    to a line of the digital word (:class:`DigitalLineConfig`). Defaults reproduce the MATLAB pipeline
     (``multiParadigmArtefactRemovalAndSpikesortingComb_contEye_CR.m``) for 8-channel rigs.
     """
 
     analog: dict[str, int] = Field(
-        default_factory=lambda: {"laser_red": 0, "photodiode": 2, "laser_green": 4, "laser_blue": 6}
+        default_factory=lambda: {"laser_red": 0, "photodiode": 2, "laser_green": 4, "laser_blue": 6},
+        description="Role -> analog input index (XA<n> / AI<n>)",
     )
-    digital: dict[str, int] = Field(
-        default_factory=lambda: {"sync": 1, "photodiode_invalid": 2, "paradigm": 3, "wheel": 7}
+    digital: dict[str, DigitalLineConfig] = Field(
+        default_factory=lambda: {"sync": DigitalLineConfig(bit=1, in_events=False),
+                                 "photodiode_invalid": DigitalLineConfig(bit=2), "paradigm": DigitalLineConfig(bit=3),
+                                 "wheel": DigitalLineConfig(bit=7, in_events=False)},
+        description="Role -> digital line: { bit, active, description, in_events } or the bit alone",
     )
+
+    @field_validator("digital", mode="before")
+    @classmethod
+    def _bit_alone(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {role: {"bit": line} if isinstance(line, int) else line for role, line in value.items()}
+        return value
+
+    @property
+    def bits(self) -> dict[str, int]:
+        """Role -> bit of the digital lines."""
+        return {role: line.bit for role, line in self.digital.items()}
 
     @classmethod
     def vstim_openephys_default(cls) -> AuxChannelMap:
@@ -204,14 +189,6 @@ class AuxChannelMap(BaseModel):
             # older 4-channel rigs: AI0..AI3 = red laser, photodiode, green laser, blue laser
             return cls(analog={"laser_red": 0, "photodiode": 1, "laser_green": 2, "laser_blue": 3})
         return cls()
-
-
-class TriggerLineConfig(BaseModel):
-    """A digital line with a role in ``[aux_channels.digital]`` (:mod:`ephysalis.timeline.annotations`)."""
-
-    active: Literal["high", "low"] = Field(default="high", description="Level of the line during a pulse, "
-                                           "e.g. 'low' for a lever line that is low while pressed")
-    description: str = Field(default="", description="Meaning of the pulses (DH5 /Intervals, BIDS events.json)")
 
 
 class MarkerConfig(BaseModel):
@@ -229,10 +206,6 @@ class EventsConfig(BaseModel):
     """Events of the runs (``events/<run>.csv``, DH5 ``EV02``, NWB ``events`` table) and the pulses
     and markers made from them (DH5 ``/Intervals``, ``/Markers``; :mod:`ephysalis.timeline.annotations`)."""
 
-    exclude_roles: list[str] = Field(
-        default_factory=lambda: ["sync", "wheel"],
-        description="Digital line roles ([aux_channels]) left out of the events, e.g. fast pulse trains",
-    )
     event_word_offset: int = Field(
         default=1000, description="Added to the event words (e.g. VStim's) for their DH5 event codes "
         "(TTL lines are +line / -line); used only by the DH5 export"
@@ -240,10 +213,6 @@ class EventsConfig(BaseModel):
     lines_without_role: bool = Field(
         default=True, description="Also TTL lines without a role in [aux_channels.digital]; switch off for "
         "unconnected digital inputs that toggle (e.g. the USB-ME of MC_Rack recordings)"
-    )
-    lines: dict[str, TriggerLineConfig] = Field(
-        default_factory=dict, description="Active level and description of the lines, by role "
-        "(default: active high, described by the role)"
     )
     markers: list[MarkerConfig] = Field(default_factory=list, description="Markers besides trial_start")
 
@@ -282,25 +251,28 @@ class LineNoiseConfig(BaseModel):
 
 
 class RecordingSessionConfig(BaseModel):
-    schema_version: int = SCHEMA_VERSION
-    session_id: str
-    subject_id: str
-    input_format: str | None = None
-    experimenter: list[str] = Field(default_factory=list)
-    lab: str | None = None
-    institution: str | None = None
-    description: str = ""
+    schema_version: int = Field(default=SCHEMA_VERSION, description="Version of this format; only the current one "
+                                "is read")
+    session_id: str = Field(description="Id of the recording session (NWB session_id; in a conversion batch: from "
+                            "its folder)")
+    subject_id: str = Field(description="Id of the subject (NWB / BIDS subject)")
+    input_format: str | None = Field(default=None, description="Input format plugin, e.g. spikeglx, openephys, mcd, "
+                                     "daq; detected from the files if not set")
+    experimenter: list[str] = Field(default_factory=list, description="Names of the experimenters (NWB)")
+    lab: str | None = Field(default=None, description="Lab (NWB)")
+    institution: str | None = Field(default=None, description="Institution (NWB)")
+    description: str = Field(default="", description="Description of the session (NWB session_description)")
     task: str | None = Field(default=None, description="Task (BIDS task entity, e.g. shapetracking); runs can "
                              "have their own")
     subject: SubjectConfig = Field(default_factory=SubjectConfig)
-    runs: list[RunConfig] = Field(default_factory=list)
-    probes: dict[str, ProbeConfig] = Field(default_factory=dict)
+    runs: list[RunConfig] = Field(default_factory=list, description="Runs with settings of their own")
+    probes: dict[str, ProbeConfig] = Field(default_factory=dict, description="Probes by id (e.g. imec0, v1)")
     spike_sorting: SpikeSortingConfig = Field(default_factory=SpikeSortingConfig)
     aux_channels: AuxChannelMap = Field(default_factory=AuxChannelMap)
     events: EventsConfig = Field(default_factory=EventsConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     line_noise: LineNoiseConfig = Field(default_factory=LineNoiseConfig)
-    notes: str = ""
+    notes: str = Field(default="", description="Free text")
 
     def run_config(self, name: str) -> RunConfig | None:
         return next((r for r in self.runs if r.name == name), None)
@@ -315,14 +287,68 @@ class RecordingSessionConfig(BaseModel):
         return [r.name for r in self.runs if r.include]
 
 
+# tables written with one inline table per entry (one line each), by key path
+INLINE_ENTRY_TABLES: tuple[tuple[str, ...], ...] = (("aux_channels", "digital"),)
+_BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _toml_key(key: str) -> str:
+    return key if _BARE_KEY.match(key) else tomli_w.dumps({"k": key})[4:].strip()
+
+
+def _toml_value(value: Any) -> str:
+    return tomli_w.dumps({"k": value})[4:].strip()
+
+
+def dumps_toml(data: dict[str, Any], inline_entry_tables: tuple[tuple[str, ...], ...] = INLINE_ENTRY_TABLES,
+               prefix: tuple[str, ...] = ()) -> str:
+    """TOML of ``data`` (as ``tomli_w``), but the tables at ``inline_entry_tables`` (key paths, below
+    ``prefix``: e.g. ``("defaults",)`` for a conversion batch) with one aligned inline table per entry::
+
+        [aux_channels.digital]
+        trial_start   = { bit = 0,  active = "high", description = "trial start" }
+        lever_pressed = { bit = 14, active = "low",  description = "lever pressed" }
+    """
+    import copy as _copy
+
+    data = _copy.deepcopy(data)
+    lines_of: dict[str, str] = {}
+    for path in inline_entry_tables:
+        table: Any = data
+        for key in prefix + path:
+            table = table.get(key) if isinstance(table, dict) else None
+        if not isinstance(table, dict) or not table:
+            continue
+        rows = {role: [f"{_toml_key(k)} = {_toml_value(v)}" for k, v in entry.items()]
+                for role, entry in table.items() if isinstance(entry, dict)}
+        n = max((len(parts) for parts in rows.values()), default=0)
+        widths = [max((len(parts[i]) + 1 for parts in rows.values() if i < len(parts) - 1), default=0)
+                  for i in range(n)]
+        key_width = max(len(_toml_key(role)) for role in table)
+        for role, parts in rows.items():
+            cells = [(part + ",").ljust(widths[i]) if i < len(parts) - 1 else part for i, part in enumerate(parts)]
+            token = f"@@inline-{len(lines_of)}@@"
+            lines_of[token] = f"{_toml_key(role).ljust(key_width)} = {{ {' '.join(cells)} }}"
+            table[role] = token
+    text = tomli_w.dumps(data)
+    if lines_of:
+        out = []
+        for line in text.split("\n"):
+            token = line.rsplit(" = ", 1)[-1].strip('"') if line.endswith('@@"') else None
+            out.append(lines_of.get(token, line) if token else line)
+        text = "\n".join(out)
+    return text
+
+
 def save_recording_session_config(config: RecordingSessionConfig, path: str | Path) -> None:
     data = config.model_dump(mode="json", exclude_none=True)
-    Path(path).write_text(tomli_w.dumps(data), encoding="utf-8")
+    Path(path).write_text(dumps_toml(data), encoding="utf-8")
 
 
 def recording_session_config_from_dict(data: dict[str, Any], source: object = "session config") -> RecordingSessionConfig:
-    """Config from raw data of any supported schema version (older ones are migrated)."""
-    return RecordingSessionConfig.model_validate(migrate(data, SCHEMA_VERSION, MIGRATIONS, source=source))
+    """Config from raw data of the current schema version (no ``schema_version``: the current one)."""
+    return RecordingSessionConfig.model_validate(migrate(data, SCHEMA_VERSION, MIGRATIONS, missing=SCHEMA_VERSION,
+                                                          source=source))
 
 
 def load_recording_session_config(path: str | Path) -> RecordingSessionConfig:

@@ -53,8 +53,9 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   `_find_experimental_protocols_in_run`, `recording_session`, never a bare `name`, `system`, `path`, `session`
   or `_discover`. Never write into or delete in the recording session folders (source data).
 - `recording_session/` — `model.py` (format-independent RecordingSession → Run → ProbeInfo/streams, `StreamKind`;
-  `Run.extra` is private to the format), `config.py` (`RecordingSessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 8 + `MIGRATIONS`),
-  `schema.py` (`migrate`; raise the version and add a migration whenever a config format changes), `probes.py`
+  `Run.extra` is private to the format), `config.py` (`RecordingSessionConfig` ↔ `session.toml`, `SCHEMA_VERSION` 10, no migrations: older
+  versions are not read; `dumps_toml` writes `[aux_channels.digital]` as one aligned inline table per line),
+  `schema.py` (`migrate`; raise the version whenever a config format changes), `probes.py`
   (probes defined in `session.toml`, geometry files relative to the config).
 - `formats/input/` — `spikeglx.py`, `openephys.py` (Binary, NWB, legacy Open Ephys via open-ephys-python-tools, own
   lazy extractor for `.continuous`), `base.py` (`open_recording_session`). `formats/output/` — `nwb.py`, `dh5.py` (CONT
@@ -76,13 +77,16 @@ DAQ-HDF5 format) file per session or run, optionally inside a BIDS dataset.
   entries during deletion make `shutil.rmtree` fail); call it before spikeinterface overwrites a folder.
 - `provenance.py` — every step appends its invocation to `<work>/provenance/<step>.json`; `export` embeds all of it
   in the output; `ephysalis reproduce` replays it. Keep processing deterministic.
-- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 2: a list
-  `recording_sessions = [ids]`, the templates `recording_session_path` / `recording_session_config_file` with
-  `{recording_session}`, `{subject}`, `{session_label}`, `[recording_session_exceptions."<id>"]` for sessions that
-  differ; each becomes a `RecordingSessionJob`; defaults < recording session file < exception's `session_config`, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
+- `conversion_batch/` — `config.py` (`conversion_batch.toml`: `ConversionBatch`, schema 2:
+  `[recording_sessions]` folder -> session folders below `recording_session_root` (id = path with `_`), the
+  template `recording_session_config_file` with `{recording_session}`, `{subject}`, `{session_label}`,
+  `[recording_session_exceptions."<folder>"]` for sessions that differ; each becomes a `RecordingSessionJob`; defaults < recording session file < exception's `session_config`, `work_dir` required and outside the recording session folders, `STEP_INPUTS` = the step
   graph, step options checked against the step parsers), `runner.py` (`ephysalis run`: steps as subprocesses,
   stamps of inputs and code in `<work>/runner/<step>.json`, logs, locks, pause file and `status.tsv` in
   `state_dir`).
+- `config_reference.py` — `docs/configuration.md` and `docs/schema/session.schema.json` generated from the models
+  (`python -m ephysalis.config_reference docs`; `tests/test_config_reference.py` fails when they are out of date:
+  regenerate after changing a config model or the conversion batch docstring).
 - `cli/` — `main.py`, `recording_session_commands.py` (the steps; `per_recording_session` for several), `conversion_batch_commands.py`
   (`run`, `status`, `pause`). GUI (`gui/`, PySide6) runs each step as `python -m ephysalis.cli.main <step>`.
 

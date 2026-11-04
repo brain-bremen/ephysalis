@@ -44,11 +44,11 @@ def test_apply_probe_with_reference_channels():
     np.testing.assert_allclose(out.get_traces()[:, 0], x[:, 0] - x[:, 2])
 
 
-def test_schema_7_reference_channels_and_migration():
-    config = recording_session_config_from_dict({"schema_version": 6, "session_id": "s", "subject_id": "m",
+def test_reference_channels_config():
+    config = recording_session_config_from_dict({"session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"]}}})
-    assert config.schema_version == SCHEMA_VERSION == 9 and config.probes["v4"].reference_channels is None
-    config = recording_session_config_from_dict({"schema_version": 7, "session_id": "s", "subject_id": "m",
+    assert config.schema_version == SCHEMA_VERSION and config.probes["v4"].reference_channels is None
+    config = recording_session_config_from_dict({"session_id": "s", "subject_id": "m",
                                        "probes": {"v4": {"stream": "elec0003", "channels": ["18C"],
                                                          "reference_channels": ["14C"]}}})
     assert config.probes["v4"].reference_channels == ["14C"]

@@ -31,6 +31,13 @@ installing and using it will follow once the design is settled.
 
 ```{toctree}
 :maxdepth: 2
+:caption: Reference
+
+configuration
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Development
 
 roadmap

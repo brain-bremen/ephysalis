@@ -364,6 +364,7 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
     from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
+    digital = aux_channel_map(runs[0], config).digital if runs else {}
     times, codes, names, lines, unnamed = [], [], {}, {}, {}
     for run in runs:
         path = work_dir / "events" / f"{run.name}.csv"
@@ -374,15 +375,14 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
         codes.append(dh5_event_codes(events, events_config.event_word_offset))
         ttl = events[(events.source == "ttl") & (events.name != "")]
         for line, name in ttl.groupby("line").name.first().items():
-            on = int(line) if active_state(name, events_config) else -int(line)
+            on = int(line) if active_state(name, digital) else -int(line)
             names[f"{name}On"], names[f"{name}Off"] = on, -on
             lines[int(line)] = str(name)
         for line in events[(events.source == "ttl") & (events.name == "")].line.unique():
             unnamed.setdefault(int(line), "")
         if (events.source == "word").any():  # names of all the run's event words (metadata plugin)
             names.update({name: word + events_config.event_word_offset for word, name in event_word_names(run).items()})
-    table = trigger_line_table(aux_channel_map(runs[0], config).digital if runs else {}, unnamed | lines,
-                               events_config)
+    table = trigger_line_table(digital, unnamed | lines)
     if table:
         file.attrs["TriggerLines"] = json.dumps(table)
     if not times:
@@ -394,7 +394,7 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
     for name, code in names.items():
         file[EV_DATASET_NAME].attrs[name] = np.int32(code)
     if lines:
-        legend = line_code_names(lines, events_config)
+        legend = line_code_names(lines, digital)
         file[EV_DATASET_NAME].attrs["EventCodes"] = np.array([c for c, _ in legend], dtype=np.int32)
         file[EV_DATASET_NAME].attrs["EventNames"] = np.array([n for _, n in legend], dtype="S")
         meaning = {row["line"]: row for row in table}
@@ -412,12 +412,14 @@ def _write_annotations(file: h5py.File, work_dir: Path, runs: list[Run], offsets
     from dhspec.markers import MARKERS_DATASET_DTYPE, MARKERS_GROUP_NAME
 
     from ephysalis.timeline.annotations import line_descriptions, markers, recording_session_pulses
+    from ephysalis.timeline.steps import aux_channel_map
     from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    pulses, lines = recording_session_pulses(work_dir, runs, offsets, events_config)
+    digital = aux_channel_map(runs[0], config).digital if runs else {}
+    pulses, lines = recording_session_pulses(work_dir, runs, offsets, digital)
     intervals: dict[str, tuple[np.ndarray, str]] = {}
-    descriptions = line_descriptions(lines, events_config)
+    descriptions = line_descriptions(lines, digital)
     for role, group in pulses[pulses.stop_time.notna()].groupby("role", sort=True):
         intervals[str(role)] = (np.c_[_ns(group.start_time.to_numpy(float)), _ns(group.stop_time.to_numpy(float))],
                                 f"TTL line pulses: {descriptions.get(str(role), role)}")

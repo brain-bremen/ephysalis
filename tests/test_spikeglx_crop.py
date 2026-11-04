@@ -53,17 +53,17 @@ def test_default_aux_roles_match_recording(run):
     def edges(bits: np.ndarray) -> int:
         return int(np.abs(np.diff(bits.astype(np.int8))).sum())
 
-    nidq_sync = (word >> roles.digital["sync"]) & 1
+    nidq_sync = (word >> roles.digital["sync"].bit) & 1
     imec_sync = (run.get_recording(StreamKind.SYNC, "imec0").get_traces()[:, 0] >> 6) & 1
     assert edges(nidq_sync) == edges(imec_sync) == 10  # 1 Hz sync pulse, 5 s
 
     # photodiode is valid during the whole window and crosses the MATLAB trial threshold
-    invalid = (word >> roles.digital["photodiode_invalid"]) & 1
+    invalid = (word >> roles.digital["photodiode_invalid"].bit) & 1
     assert not invalid.any()
     photodiode = nidq[:, roles.analog["photodiode"]]
     assert photodiode.max() > 4000
 
-    assert edges((word >> roles.digital["wheel"]) & 1) > 10
+    assert edges((word >> roles.digital["wheel"].bit) & 1) > 10
 
 
 @pytest.mark.parametrize("probe_id", ["imec0", "imec1"])
@@ -159,7 +159,7 @@ def test_sync_edge_cache(run, tmp_path, monkeypatch):
 
     # another NIDQ sync bit invalidates the aux entry only
     other = channels.model_copy(deep=True)
-    other.digital["sync"] = 5
+    other.digital["sync"].bit = 5
     calls = []
     monkeypatch.setattr(sync_module, "digital_edges", lambda rec, ch, bit, **kw: calls.append(bit) or extracted[AUX])
     load_or_extract_edges(run, other, cache)

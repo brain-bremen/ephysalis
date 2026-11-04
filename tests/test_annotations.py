@@ -10,7 +10,7 @@ import pytest
 from ephysalis.timeline.annotations import event_code_names, line_pulses, markers
 from conftest import extract_all
 from ephysalis.cli.main import main
-from ephysalis.recording_session.config import EventsConfig, MarkerConfig, TriggerLineConfig
+from ephysalis.recording_session.config import DigitalLineConfig, EventsConfig, MarkerConfig
 from synthetic import write_openephys
 
 MS = 1_000_000  # ns
@@ -22,18 +22,18 @@ def _events(rows):
 
 
 def test_line_pulses():
-    config = EventsConfig(lines={"lever_pressed": TriggerLineConfig(active="low")})
+    digital = {"interval0": DigitalLineConfig(bit=0), "lever_pressed": DigitalLineConfig(bit=14, active="low")}
     events = _events([(0.5, 15, 1, "lever_pressed"),  # release before the first press: dropped
                       (1.0, 1, 1, "interval0"), (1.5, 1, 0, "interval0"),
                       (2.0, 15, 0, "lever_pressed"), (2.7, 15, 1, "lever_pressed"),
                       (3.0, 1, 1, "interval0"), (3.2, 1, 1, "interval0"),  # two starts: the first has no end
                       (4.0, 15, 0, "lever_pressed")])  # no release before the end of the run
-    pulses = line_pulses(events, config, "a")
+    pulses = line_pulses(events, digital, "a")
     assert pulses.role.tolist() == ["interval0", "lever_pressed", "interval0", "interval0", "lever_pressed"]
     np.testing.assert_allclose(pulses.start_time, [1.0, 2.0, 3.0, 3.2, 4.0])
     np.testing.assert_allclose(pulses.stop_time, [1.5, 2.7, np.nan, np.nan, np.nan])
     assert set(pulses.run) == {"a"}
-    assert event_code_names({1: "interval0", 15: "lever_pressed"}, config) == [
+    assert event_code_names({1: "interval0", 15: "lever_pressed"}, digital) == [
         (-15, "lever_pressed_on"), (-1, "interval0_off"), (1, "interval0_on"), (15, "lever_pressed_off")]
 
 
@@ -60,7 +60,7 @@ def test_dh5_nwb_bids_annotations(tmp_path):
     for s in starts:
         ttl += [(s, 1, 1), (s + 300, 1, 0), (s + 400, 3, 1), (s + 2000, 3, 0), (s + 500, 15, 0), (s + 2500, 15, 1)]
     recording_session = write_openephys(tmp_path / "ses", [{"data": np.zeros((10_000, 2)), "ttl": ttl}])
-    (tmp_path / "session.toml").write_text("""schema_version = 5
+    (tmp_path / "session.toml").write_text("""schema_version = 10
 session_id = "s"
 subject_id = "m"
 [aux_channels]
@@ -68,15 +68,8 @@ analog = {}
 [aux_channels.digital]
 interval0 = 0
 interval2 = 2
-lever_pressed = 14
-frame = 5
-[events]
-exclude_roles = ["frame"]
-[events.lines.frame]
-description = "100 Hz frame pulses"
-[events.lines.lever_pressed]
-active = "low"
-description = "lever pressed"
+lever_pressed = { bit = 14, active = "low", description = "lever pressed" }
+frame = { bit = 5, description = "100 Hz frame pulses", in_events = false }
 [[events.markers]]
 name = "lever_release"
 role = "lever_pressed"
@@ -105,7 +98,7 @@ offset_ms = 650
         lines = {row["line"]: row for row in json.loads(f.attrs["TriggerLines"])}
         assert sorted(lines) == [1, 3, 6, 15]  # every line of [aux_channels.digital], also without edges
         assert lines[6] == {"line": 6, "role": "frame", "active": "high", "in_events": False,
-                            "description": "100 Hz frame pulses (not in the events: [events] exclude_roles)"}
+                            "description": "100 Hz frame pulses (not in the events: in_events = false)"}
         assert lines[15]["active"] == "low" and lines[1]["in_events"] and lines[3]["in_events"]
     bids = tmp_path / "bids"
     assert main(["export", str(recording_session), *common, "--per-run", "--bids", str(bids)]) == 0

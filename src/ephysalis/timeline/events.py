@@ -15,7 +15,7 @@ column      content
             (:class:`~ephysalis.plugins.NamesEventWords`)
 ==========  ===============================================================================
 
-Lines whose role is in ``[events] exclude_roles`` (default the sync and wheel lines, which
+Lines with ``in_events = false`` in ``[aux_channels.digital]`` (by default the sync and wheel lines, which
 switch thousands of times per minute) are left out, with ``lines_without_role = false`` also
 all lines without a role (e.g. unconnected inputs that toggle).
 
@@ -62,8 +62,8 @@ def run_events(run: Run, sync: RunSync, aux_channels: AuxChannelMap, config: Eve
     """Digital line edges and event words of a run (see the module docs)."""
     if run.aux_stream is None:
         return empty_events()
-    roles = {bit + 1: role for role, bit in aux_channels.digital.items()}
-    excluded = {line for line, role in roles.items() if role in config.exclude_roles}
+    roles = {entry.bit + 1: role for role, entry in aux_channels.digital.items()}
+    excluded = {entry.bit + 1 for entry in aux_channels.digital.values() if not entry.in_events}
     wanted = None if config.lines_without_role else set(roles) - excluded
     parts = []
     ttl = (run.format.read_digital_line_edges(run, wanted) if isinstance(run.format, ReadsDigitalLineEdges)

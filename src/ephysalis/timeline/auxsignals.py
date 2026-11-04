@@ -192,7 +192,7 @@ class AuxSignals:
 
     def digital(self, role: str) -> np.ndarray:
         lines = require(self.run.format, ReadsDigitalLineEdges, f"the digital line {role!r}")
-        return lines.read_auxiliary_digital_line(self.run, self.channels.digital[role])
+        return lines.read_auxiliary_digital_line(self.run, self.channels.digital[role].bit)
 
     def has(self, role: str) -> bool:
         return role in self.channels.analog or role in self.channels.digital

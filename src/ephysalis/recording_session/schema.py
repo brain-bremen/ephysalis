@@ -39,7 +39,8 @@ def migrate(
     data = dict(data)
     while version < current:
         if version not in migrations:
-            raise ValueError(f"{source}: no migration from schema version {version}")
+            raise ValueError(f"{source}: no migration from schema version {version} (current: {current}); "
+                             "write the file for the current version")
         data = migrations[version](data)
         version += 1
     data[key] = current

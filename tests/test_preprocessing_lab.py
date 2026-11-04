@@ -139,7 +139,7 @@ def test_pipeline_mains_csd(tmp_path):
     probeinterface.write_probeinterface(tmp_path / "grid.json", geometry)
     ids = ", ".join(f'"AI{c}"' for c in channels)
     (tmp_path / "session.toml").write_text(
-        'schema_version = 4\nsession_id = "s"\nsubject_id = "fritz"\n'
+        'schema_version = 10\nsession_id = "s"\nsubject_id = "fritz"\n'
         f'[[runs]]\nname = "{CAL}"\ninclude = false\n[[runs]]\nname = "{TASK}"\n'
         f'[probes.epidural]\nstream = "USB-6343"\nchannels = [{ids}]\ngeometry = {{ file = "grid.json" }}\n'
         '[probes.epidural.csd]\nexclude_inputs = ["AI20"]\n'
@@ -217,7 +217,7 @@ def test_quality_restricts_csd(tmp_path):
     probeinterface.write_probeinterface(tmp_path / "grid.json", geometry)
     ids = ", ".join(f'"AI{c}"' for c in channels)
     (tmp_path / "session.toml").write_text(
-        'schema_version = 5\nsession_id = "s"\nsubject_id = "fritz"\n'
+        'schema_version = 10\nsession_id = "s"\nsubject_id = "fritz"\n'
         f'[probes.epidural]\nstream = "USB-6343"\nchannels = [{ids}]\ngeometry = {{ file = "grid.json" }}\n'
         '[probes.epidural.csd]\n[probes.epidural.quality]\nn_windows = 40\n')
     common = ["--work-dir", str(tmp_path / "work"), "--config", str(tmp_path / "session.toml")]

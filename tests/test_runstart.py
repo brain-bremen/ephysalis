@@ -27,7 +27,7 @@ def test_run_starts_task_and_scans(tmp_path):
     assert first.recorded_start_time == recorded[0] and second.start_time == recorded[1] - timedelta(seconds=396.75)
 
     (tmp_path / "session.toml").write_text(
-        'schema_version = 5\nsession_id = "20231114"\nsubject_id = "m"\ntask = "shape tracking"\n'
+        'schema_version = 10\nsession_id = "20231114"\nsubject_id = "m"\ntask = "shape tracking"\n'
         f'[[runs]]\nname = "{second.name}"\ntask = "rf mapping"\n')
     common = ["--work-dir", str(work), "--config", str(tmp_path / "session.toml")]
     bids = tmp_path / "bids"

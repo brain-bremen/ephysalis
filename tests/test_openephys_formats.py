@@ -103,7 +103,7 @@ def test_pipeline(fmt, tmp_path):
     probe = probeinterface.generate_linear_probe(num_elec=16, ypitch=25)
     probeinterface.write_probeinterface(tmp_path / "probe.json", probe)
     (tmp_path / "session.toml").write_text(
-        'schema_version = 3\nsession_id = "s"\nsubject_id = "m"\n'
+        'schema_version = 10\nsession_id = "s"\nsubject_id = "m"\n'
         '[probes.probe0]\nstream = "File_Reader-100.example_data"\ngeometry = { file = "probe.json" }\n')
     recording_session = str(OE_TOOLS_DATA / fmt / NODE)
     common = ["--work-dir", str(tmp_path), "--config", str(tmp_path / "session.toml")]

@@ -155,13 +155,13 @@ def test_apply_to_recording_sessions(app, page, tmp_path):
     page.add_recording_sessions([DATA_FOLDER], show=False)
     config = page._editor.config()
     config.spike_sorting.sorter = "mountainsort5"
-    config.events.exclude_roles = ["sync"]
+    config.events.lines_without_role = False
     config.probes["imec0"].area = "V1"  # probes are not copied
     page._editor.set_config(config)
     [written] = page.apply_to_recording_sessions(["spike_sorting", "events"], [SPIKEGLX_CROP_RECORDING_SESSION, DATA_FOLDER])
     assert written == tmp_path / DATA_FOLDER.name / "session.toml"
     other = load_recording_session_config(written)
-    assert other.spike_sorting.sorter == "mountainsort5" and other.events.exclude_roles == ["sync"]
+    assert other.spike_sorting.sorter == "mountainsort5" and not other.events.lines_without_role
     assert [r.name for r in other.runs] == ["experiment1_recording1"] and other.probes == {}
     assert page._find_config(DATA_FOLDER) == written
 

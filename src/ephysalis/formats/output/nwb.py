@@ -531,10 +531,11 @@ def _add_annotations(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets:
     from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    pulses, lines = recording_session_pulses(work_dir, runs, offsets, events_config)
-    table = trigger_line_table(aux_channel_map(runs[0], config).digital if runs else {}, lines, events_config)
+    digital = aux_channel_map(runs[0], config).digital if runs else {}
+    pulses, lines = recording_session_pulses(work_dir, runs, offsets, digital)
+    table = trigger_line_table(digital, lines)
     if table:
-        descriptions = line_descriptions(lines, events_config)
+        descriptions = line_descriptions(lines, digital)
         meanings = [descriptions.get(row["role"], f"{row['description']} (TTL line {row['line']}, active "
                                      f"{row['active']})") for row in table]
         _events_module(nwbfile).add(DynamicTable(

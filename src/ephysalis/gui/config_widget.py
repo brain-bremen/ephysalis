@@ -48,6 +48,13 @@ def _is_dict_str_any(t: Any) -> bool:
     return typing.get_origin(t) is dict and typing.get_args(t) == (str, Any)
 
 
+def _is_dict_str_model(t: Any) -> bool:
+    """dict[str, <BaseModel>], e.g. the digital lines (role -> DigitalLineConfig)."""
+    args = typing.get_args(t)
+    return (typing.get_origin(t) is dict and len(args) == 2 and args[0] is str and isinstance(args[1], type)
+            and issubclass(args[1], BaseModel))
+
+
 def _is_model(t: Any) -> bool:
     return isinstance(t, type) and issubclass(t, BaseModel)
 
@@ -154,6 +161,8 @@ class _JsonDictEdit(QLineEdit):
         return value
 
     def set_value(self, v: dict | None) -> None:
+        if v:
+            v = {k: x.model_dump(mode="json") if isinstance(x, BaseModel) else x for k, x in v.items()}
         self.setText(json.dumps(v) if v else "")
 
 
@@ -252,7 +261,7 @@ def _make_field_widget(annotation: Any, default: Any) -> QWidget:
     if _is_list_int(inner):
         return _IntListEdit(default)
 
-    if _is_dict_str_any(inner):
+    if _is_dict_str_any(inner) or _is_dict_str_model(inner):
         return _JsonDictEdit(default)
 
     if _is_model(inner):

@@ -1,4 +1,4 @@
-"""Named pulses and markers of the trigger lines (``[events.lines]``, ``[[events.markers]]`` in
+"""Named pulses and markers of the trigger lines (``[aux_channels.digital]``, ``[[events.markers]]`` in
 ``session.toml``), from the events of the runs (``events/<run>.csv``).
 
 * pulse: from the active edge of a line (rising, or falling for ``active = "low"``) to the
@@ -13,7 +13,7 @@
   marker with an offset is derived (e.g. a stimulus onset at a fixed time in the trial), not
   measured; its description should say so. Every file with trials also gets ``trial_start``.
 * trigger line table: every digital line of the recording session's ``[aux_channels.digital]`` with its role,
-  active level, description and whether its edges are in the events (a role in ``exclude_roles``, e.g. a 100 Hz
+  active level, description and whether its edges are in the events (``in_events = false``, e.g. a 100 Hz
   frame line, is documented but not in the events), plus the lines without a role that have events (DH5
   ``TriggerLines`` attribute, NWB ``events/trigger_lines``, BIDS ``events.json``).
 """
@@ -28,7 +28,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
     from ephysalis.recording_session.model import Run
-    from ephysalis.recording_session.config import EventsConfig
+    from ephysalis.recording_session.config import DigitalLineConfig, EventsConfig
 
 TRIGGER_LINE_COLUMNS = ["line", "role", "active", "description", "in_events"]
 TRIAL_ROLE = "trial"
@@ -36,19 +36,24 @@ TRIAL_START_MARKER = "trial_start"
 PULSE_COLUMNS = ["start_time", "stop_time", "role", "line", "run"]
 
 
-def active_state(role: str, config: EventsConfig) -> int:
-    """Line level (0 or 1) while a pulse of ``role`` lasts."""
-    line = config.lines.get(role)
+def active_state(role: str, digital: dict[str, DigitalLineConfig]) -> int:
+    """Line level (0 or 1) while a pulse of ``role`` lasts (``digital``: ``[aux_channels.digital]``)."""
+    line = digital.get(role)
     return 0 if line is not None and line.active == "low" else 1
 
 
-def line_pulses(events: pd.DataFrame, config: EventsConfig, run: str = "") -> pd.DataFrame:
+def _description(role: str, digital: dict[str, DigitalLineConfig]) -> str:
+    line = digital.get(role)
+    return line.description if line is not None and line.description else role
+
+
+def line_pulses(events: pd.DataFrame, digital: dict[str, DigitalLineConfig], run: str = "") -> pd.DataFrame:
     """Pulses of the TTL lines with a role in the events of one run (columns ``PULSE_COLUMNS``,
     ``stop_time`` NaN for a pulse without end), sorted by start."""
     ttl = events[(events.source == "ttl") & (events["name"].fillna("") != "")]
     rows = []
     for (line, role), edges in ttl.groupby(["line", "name"], sort=True):
-        active = active_state(str(role), config)
+        active = active_state(str(role), digital)
         start = None
         for time, state in zip(edges.time.to_numpy(float), edges.state.to_numpy(int)):
             if state == active:
@@ -88,53 +93,47 @@ def markers(pulses: pd.DataFrame, trials: pd.DataFrame, config: EventsConfig) ->
     return out
 
 
-def event_code_names(lines: dict[int, str], config: EventsConfig) -> list[tuple[int, str]]:
+def event_code_names(lines: dict[int, str], digital: dict[str, DigitalLineConfig]) -> list[tuple[int, str]]:
     """(DH5 event code, name) of the edges of the lines (``line -> role``): ``<role>_on`` for
     the active edge, ``<role>_off`` for the other (codes ``+line`` rising, ``-line`` falling)."""
     out = []
     for line, role in lines.items():
-        on = line if active_state(role, config) else -line
+        on = line if active_state(role, digital) else -line
         out += [(on, f"{role}_on"), (-on, f"{role}_off")]
     return sorted(out)
 
 
-def trigger_line_table(digital_roles: dict[str, int], event_lines: dict[int, str],
-                       config: EventsConfig) -> list[dict]:
-    """Every documented digital line (``TRIGGER_LINE_COLUMNS``), sorted by line: the roles of
-    ``digital_roles`` (role -> bit, line = bit + 1) and the lines of ``event_lines`` (line -> role, ``""``
-    for a line without a role; from the events of the runs)."""
-    lines = {bit + 1: role for role, bit in digital_roles.items()}
+def trigger_line_table(digital: dict[str, DigitalLineConfig], event_lines: dict[int, str]) -> list[dict]:
+    """Every documented digital line (``TRIGGER_LINE_COLUMNS``), sorted by line: the roles of ``digital``
+    (``[aux_channels.digital]``, line = bit + 1) and the lines of ``event_lines`` (line -> role, ``""`` for a line
+    without a role; from the events of the runs)."""
+    lines = {entry.bit + 1: role for role, entry in digital.items()}
     for line, role in event_lines.items():
         lines.setdefault(int(line), role)
     with_events = {int(line) for line in event_lines}
     table = []
     for line, role in sorted(lines.items()):
-        entry = config.lines.get(role) if role else None
-        if not role:
-            description = "line without a role in [aux_channels.digital]"
-        else:
-            description = entry.description if entry is not None and entry.description else role
-        if role in config.exclude_roles:
-            description += " (not in the events: [events] exclude_roles)"
-        table.append({"line": line, "role": role, "active": "low" if role and active_state(role, config) == 0
-                      else "high", "description": description,
-                      "in_events": line in with_events and role not in config.exclude_roles})
+        entry = digital.get(role) if role else None
+        description = _description(role, digital) if role else "line without a role in [aux_channels.digital]"
+        if entry is not None and not entry.in_events:
+            description += " (not in the events: in_events = false)"
+        table.append({"line": line, "role": role, "active": entry.active if entry is not None else "high",
+                      "description": description,
+                      "in_events": line in with_events and (entry is None or entry.in_events)})
     return table
 
 
-def line_descriptions(lines: dict[int, str], config: EventsConfig) -> dict[str, str]:
+def line_descriptions(lines: dict[int, str], digital: dict[str, DigitalLineConfig]) -> dict[str, str]:
     """Role -> description of its pulses (with the line and its active level)."""
     out = {}
     for line, role in sorted(lines.items()):
-        entry = config.lines.get(role)
-        level = "low" if active_state(role, config) == 0 else "high"
-        text = entry.description if entry is not None and entry.description else role
-        out[role] = f"{text} (TTL line {line}, active {level})"
+        level = "low" if active_state(role, digital) == 0 else "high"
+        out[role] = f"{_description(role, digital)} (TTL line {line}, active {level})"
     return out
 
 
 def recording_session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str, float],
-                   config: EventsConfig) -> tuple[pd.DataFrame, dict[int, str]]:
+                             digital: dict[str, DigitalLineConfig]) -> tuple[pd.DataFrame, dict[int, str]]:
     """Pulses of all runs on the file's time axis (``offsets``: start of each run on it) and
     the lines with a role (``line -> role``), from ``events/<run>.csv``."""
     from ephysalis.timeline.events import load_run_events
@@ -147,7 +146,7 @@ def recording_session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str,
         events = load_run_events(path)
         ttl = events[(events.source == "ttl") & (events["name"] != "")]
         lines.update({int(line): str(role) for line, role in ttl.groupby("line")["name"].first().items()})
-        pulses = line_pulses(events, config, run.name)
+        pulses = line_pulses(events, digital, run.name)
         pulses[["start_time", "stop_time"]] += offsets[run.name]
         parts.append(pulses)
     pulses = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=PULSE_COLUMNS)
