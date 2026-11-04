@@ -1,5 +1,7 @@
 """Pulses and markers of the trigger lines (ephysalis.timeline.annotations) and their DH5 / NWB / BIDS output."""
 
+import json
+
 import h5py
 import numpy as np
 import pandas as pd
@@ -67,6 +69,11 @@ analog = {}
 interval0 = 0
 interval2 = 2
 lever_pressed = 14
+frame = 5
+[events]
+exclude_roles = ["frame"]
+[events.lines.frame]
+description = "100 Hz frame pulses"
 [events.lines.lever_pressed]
 active = "low"
 description = "lever pressed"
@@ -93,6 +100,13 @@ offset_ms = 650
         np.testing.assert_array_equal(f["Markers"]["derived_sample_onset"][()], [2050 * MS, 7050 * MS])
         legend = dict(zip(f["EV02"].attrs["EventNames"].astype(str), f["EV02"].attrs["EventCodes"]))
         assert legend["lever_pressed_on"] == -15 and legend["interval0_on"] == 1
+        descriptions = dict(zip(f["EV02"].attrs["EventCodes"], f["EV02"].attrs["EventDescriptions"].astype(str)))
+        assert descriptions[-15] == "start of: lever pressed (TTL line 15, falling edge)"
+        lines = {row["line"]: row for row in json.loads(f.attrs["TriggerLines"])}
+        assert sorted(lines) == [1, 3, 6, 15]  # every line of [aux_channels.digital], also without edges
+        assert lines[6] == {"line": 6, "role": "frame", "active": "high", "in_events": False,
+                            "description": "100 Hz frame pulses (not in the events: [events] exclude_roles)"}
+        assert lines[15]["active"] == "low" and lines[1]["in_events"] and lines[3]["in_events"]
     bids = tmp_path / "bids"
     assert main(["export", str(recording_session), *common, "--per-run", "--bids", str(bids)]) == 0
     from pynwb import NWBHDF5IO
@@ -107,7 +121,8 @@ offset_ms = 650
     table = pd.read_csv(next(bids.rglob("*_events.tsv")), sep="\t")
     lever_rows = table[table.trial_type == "lever_pressed"]
     assert lever_rows.duration.tolist() == pytest.approx([2.0, 2.0]) and set(lever_rows.ttl_line) == {15}
-    import json
-
-    levels = json.loads(next(bids.rglob("*_events.json")).read_text())["trial_type"]["Levels"]
-    assert levels["lever_pressed"].startswith("lever pressed (TTL line 15, active low")
+    sidecar = json.loads(next(bids.rglob("*_events.json")).read_text())
+    levels = sidecar["trial_type"]["Levels"]
+    assert levels["lever_pressed"].startswith("lever pressed (TTL line 15, active low") and "frame" not in levels
+    assert sidecar["ttl_line"]["Levels"]["6"].startswith("frame: 100 Hz frame pulses")
+    assert sidecar["ttl_line"]["Levels"]["6"].endswith("[no events in this file]")

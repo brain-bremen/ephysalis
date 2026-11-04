@@ -254,8 +254,11 @@ def events_json(nwbfile: NWBFile, table: pd.DataFrame) -> dict:
         levels = {"run": "a whole run"}
         if nwbfile.trials is not None:
             levels.update({str(p): f"trial of experimental protocol {p}" for p in sorted(set(nwbfile.trials["experimental_protocol"][:]))})
-        levels.update(dict(zip(lines.role, lines.meaning)))
+        in_events = lines.in_events if "in_events" in lines else pd.Series(True, index=lines.index)
+        levels.update({r: m for r, m, e in zip(lines.role, lines.meaning, in_events) if r and e})
         columns["trial_type"]["Levels"] = levels
+        columns["ttl_line"]["Levels"] = {str(n): f"{r or 'no role'}: {m}" + ("" if e else " [no events in this file]")
+                                         for n, r, m, e in zip(lines.line, lines.role, lines.meaning, in_events)}
         columns["duration"]["Description"] = "n/a for a pulse without end in the recording"
     if nwbfile.trials is not None:
         for column in nwbfile.trials.colnames:

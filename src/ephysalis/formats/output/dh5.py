@@ -24,6 +24,8 @@ DH5                    content
                        timestamps only (``spikeSamples = 0``) with the mean waveform on the peak
                        channel as ``MEAN_WAVEFORM``
 ``TRIALMAP``           trials of all runs (``StimNo`` = condition)
+``TriggerLines``       file attribute (JSON): every digital line of the session with its role, active level,
+                       description and whether its edges are in ``EV02``
 ``EV02``               events (``events/<run>.csv``): TTL edges ``+line`` / ``-line``, network
                        events ``word + 1000``; the code names are attributes (:mod:`ephysalis.timeline.events`;
                        ``EventCodes`` / ``EventNames``: ``<role>_on`` = active edge of the line)
@@ -351,16 +353,18 @@ def _write_raw(file: h5py.File, recording_session: RecordingSession, runs: list[
 
 def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float],
                   config: RecordingSessionConfig | None) -> int:
-    """EV02 from ``events/<run>.csv``, with the names of the codes as attributes."""
+    """EV02 from ``events/<run>.csv``, with the names (``EventNames``) and descriptions
+    (``EventDescriptions``) of the codes as attributes, and the file attribute ``TriggerLines``."""
     import dh5io.event_triggers
     from dhspec.event_triggers import EV_DATASET_NAME
 
-    from ephysalis.timeline.annotations import active_state, event_code_names as line_code_names
+    from ephysalis.timeline.annotations import active_state, event_code_names as line_code_names, trigger_line_table
+    from ephysalis.timeline.steps import aux_channel_map
     from ephysalis.timeline.events import dh5_event_codes, event_word_names, load_run_events
     from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
-    times, codes, names, lines = [], [], {}, {}
+    times, codes, names, lines, unnamed = [], [], {}, {}, {}
     for run in runs:
         path = work_dir / "events" / f"{run.name}.csv"
         if not path.exists():
@@ -373,8 +377,14 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
             on = int(line) if active_state(name, events_config) else -int(line)
             names[f"{name}On"], names[f"{name}Off"] = on, -on
             lines[int(line)] = str(name)
+        for line in events[(events.source == "ttl") & (events.name == "")].line.unique():
+            unnamed.setdefault(int(line), "")
         if (events.source == "word").any():  # names of all the run's event words (metadata plugin)
             names.update({name: word + events_config.event_word_offset for word, name in event_word_names(run).items()})
+    table = trigger_line_table(aux_channel_map(runs[0], config).digital if runs else {}, unnamed | lines,
+                               events_config)
+    if table:
+        file.attrs["TriggerLines"] = json.dumps(table)
     if not times:
         return 0
     all_times, all_codes = np.concatenate(times), np.concatenate(codes)
@@ -387,6 +397,10 @@ def _write_events(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dic
         legend = line_code_names(lines, events_config)
         file[EV_DATASET_NAME].attrs["EventCodes"] = np.array([c for c, _ in legend], dtype=np.int32)
         file[EV_DATASET_NAME].attrs["EventNames"] = np.array([n for _, n in legend], dtype="S")
+        meaning = {row["line"]: row for row in table}
+        file[EV_DATASET_NAME].attrs["EventDescriptions"] = np.array([
+            f"{'start' if n.endswith('_on') else 'end'} of: {meaning[abs(c)]['description']} (TTL line {abs(c)}, "
+            f"{'rising' if c > 0 else 'falling'} edge)" for c, n in legend], dtype="S")
     return len(all_times)
 
 

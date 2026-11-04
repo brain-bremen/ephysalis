@@ -526,20 +526,27 @@ def _add_annotations(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets:
     from hdmf.common import DynamicTable, VectorData
     from pynwb.epoch import TimeIntervals
 
-    from ephysalis.timeline.annotations import line_descriptions, markers, recording_session_pulses
+    from ephysalis.timeline.annotations import line_descriptions, markers, recording_session_pulses, trigger_line_table
+    from ephysalis.timeline.steps import aux_channel_map
     from ephysalis.recording_session.config import EventsConfig
 
     events_config = config.events if config is not None else EventsConfig()
     pulses, lines = recording_session_pulses(work_dir, runs, offsets, events_config)
-    if lines:
+    table = trigger_line_table(aux_channel_map(runs[0], config).digital if runs else {}, lines, events_config)
+    if table:
         descriptions = line_descriptions(lines, events_config)
-        roles = sorted(lines, key=lambda line: lines[line])
+        meanings = [descriptions.get(row["role"], f"{row['description']} (TTL line {row['line']}, active "
+                                     f"{row['active']})") for row in table]
         _events_module(nwbfile).add(DynamicTable(
-            name="trigger_lines", description="digital lines with a role (session.toml [aux_channels.digital])",
-            columns=[VectorData(name="role", description="role of the line", data=[lines[n] for n in roles]),
-                     VectorData(name="line", description="TTL line (1-based)", data=np.array(roles, dtype=np.int64)),
-                     VectorData(name="meaning", description="meaning of the pulses",
-                                data=[descriptions[lines[n]] for n in roles])]))
+            name="trigger_lines", description="every digital line of the session (session.toml "
+            "[aux_channels.digital], and lines without a role that have events)",
+            columns=[VectorData(name="role", description="role of the line ('' = none)",
+                                data=[row["role"] for row in table]),
+                     VectorData(name="line", description="TTL line (1-based)",
+                                data=np.array([row["line"] for row in table], dtype=np.int64)),
+                     VectorData(name="meaning", description="meaning of the pulses", data=meanings),
+                     VectorData(name="in_events", description="edges in the events and trigger_pulses",
+                                data=np.array([row["in_events"] for row in table], dtype=bool))]))
     if len(pulses):
         table = TimeIntervals(name="trigger_pulses", description="pulses of the trigger lines: from the active "
                               "edge to the next opposite edge; stop_time NaN for a pulse without end")

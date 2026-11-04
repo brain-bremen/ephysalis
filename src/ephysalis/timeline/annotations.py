@@ -12,6 +12,10 @@
   (``role = "trial"``: its start or end); DH5 ``/Markers/<name>``, NWB ``markers`` table. A
   marker with an offset is derived (e.g. a stimulus onset at a fixed time in the trial), not
   measured; its description should say so. Every file with trials also gets ``trial_start``.
+* trigger line table: every digital line of the recording session's ``[aux_channels.digital]`` with its role,
+  active level, description and whether its edges are in the events (a role in ``exclude_roles``, e.g. a 100 Hz
+  frame line, is documented but not in the events), plus the lines without a role that have events (DH5
+  ``TriggerLines`` attribute, NWB ``events/trigger_lines``, BIDS ``events.json``).
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ if TYPE_CHECKING:
     from ephysalis.recording_session.model import Run
     from ephysalis.recording_session.config import EventsConfig
 
+TRIGGER_LINE_COLUMNS = ["line", "role", "active", "description", "in_events"]
 TRIAL_ROLE = "trial"
 TRIAL_START_MARKER = "trial_start"
 PULSE_COLUMNS = ["start_time", "stop_time", "role", "line", "run"]
@@ -91,6 +96,30 @@ def event_code_names(lines: dict[int, str], config: EventsConfig) -> list[tuple[
         on = line if active_state(role, config) else -line
         out += [(on, f"{role}_on"), (-on, f"{role}_off")]
     return sorted(out)
+
+
+def trigger_line_table(digital_roles: dict[str, int], event_lines: dict[int, str],
+                       config: EventsConfig) -> list[dict]:
+    """Every documented digital line (``TRIGGER_LINE_COLUMNS``), sorted by line: the roles of
+    ``digital_roles`` (role -> bit, line = bit + 1) and the lines of ``event_lines`` (line -> role, ``""``
+    for a line without a role; from the events of the runs)."""
+    lines = {bit + 1: role for role, bit in digital_roles.items()}
+    for line, role in event_lines.items():
+        lines.setdefault(int(line), role)
+    with_events = {int(line) for line in event_lines}
+    table = []
+    for line, role in sorted(lines.items()):
+        entry = config.lines.get(role) if role else None
+        if not role:
+            description = "line without a role in [aux_channels.digital]"
+        else:
+            description = entry.description if entry is not None and entry.description else role
+        if role in config.exclude_roles:
+            description += " (not in the events: [events] exclude_roles)"
+        table.append({"line": line, "role": role, "active": "low" if role and active_state(role, config) == 0
+                      else "high", "description": description,
+                      "in_events": line in with_events and role not in config.exclude_roles})
+    return table
 
 
 def line_descriptions(lines: dict[int, str], config: EventsConfig) -> dict[str, str]:
