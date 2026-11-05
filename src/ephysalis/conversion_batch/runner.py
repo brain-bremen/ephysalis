@@ -16,6 +16,9 @@ Steps that are not done run again from scratch (``--force``; ``sort`` with a new
 ``sort`` that was interrupted with the same stamp, which resumes. Steps run as subprocesses, so a
 crashing step does not take the runner down; a failed step stops its session (the others go on).
 
+Reading: ``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`) lets the steps read the session
+folders directly or a copy (in memory, on a local disk) made before a session's first step that has to run.
+
 Pausing: ``ephysalis pause`` writes ``state_dir/pause``; runners start no new step, the running steps
 finish and the runners exit. ``ephysalis run`` again resumes (and removes the pause file). Ctrl+C
 (SIGINT/SIGTERM) stops the running steps at once; they run again on resume.
@@ -41,11 +44,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from ephysalis.conversion_batch.config import (
     STEP_INPUTS,
     ConversionBatch,
     RecordingSessionJob,
 )
+from ephysalis.conversion_batch.source_cache import ORIGIN_ENV, SourceCache, SourceCacheSettings, Staged
 from ephysalis.filesystem import glob_in_work_folder, remove_folder
 from ephysalis.step_settings import step_settings_argv
 from ephysalis.recording_session.config import save_recording_session_config
@@ -162,18 +168,6 @@ def _lock_path(recording_session_job: RecordingSessionJob) -> Path:
     return runner_dir(recording_session_job) / "lock"
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:  # Windows: no such process
-        return False
-    return True
-
-
 def _lock_owner(recording_session_job: RecordingSessionJob) -> dict[str, Any] | None:
     try:
         return json.loads(_lock_path(recording_session_job).read_text(encoding="utf-8"))
@@ -187,7 +181,7 @@ def _lock_alive(recording_session_job: RecordingSessionJob) -> bool:
         return False
     if owner.get("host") != socket.gethostname():
         return True  # another machine's runner: cannot check, take it as alive
-    return _pid_alive(int(owner.get("pid", -1)))
+    return psutil.pid_exists(int(owner.get("pid", -1)))  # not os.kill(pid, 0): on Windows it terminates
 
 
 def acquire_lock(recording_session_job: RecordingSessionJob) -> bool:
@@ -231,8 +225,11 @@ def request_pause(conversion_batch: ConversionBatch) -> Path:
 
 class Runner:
     def __init__(self, conversion_batch: ConversionBatch, steps: list[str] | None = None, ignore_code_changes: bool = False,
-                 dry_run: bool = False, echo=None):
+                 dry_run: bool = False, echo=None, source_cache: SourceCacheSettings | None = None):
         self.conversion_batch = conversion_batch
+        self.source_cache_settings = source_cache or conversion_batch.source_cache  # source_cache: overrides the file
+        self.source_cache = SourceCache(self.source_cache_settings, say=self._say, protected=[
+            job.recording_session_path for job in conversion_batch.recording_session_jobs])
         self.steps = [s for s in conversion_batch.steps if steps is None or s in steps]
         self.ignore_code_changes = ignore_code_changes
         self.dry_run = dry_run
@@ -290,7 +287,8 @@ class Runner:
                                f"{recording_session_job.recording_session_id}, or it holds source data")
         remove_folder(target)
 
-    def run_step(self, recording_session_job: RecordingSessionJob, step: str, config_path: Path, config_text: bytes) -> bool:
+    def run_step(self, recording_session_job: RecordingSessionJob, step: str, config_path: Path, config_text: bytes,
+                 staged: Staged | None = None) -> bool:
         previous = step_state(self.conversion_batch, recording_session_job, step, self.code, config_text, self.ignore_code_changes)
         if previous.finished:
             return True
@@ -302,7 +300,8 @@ class Runner:
                 _write_record(recording_session_job, step, {**base, "state": "skipped", "reason": reason})
             self._say(f"{recording_session_job.recording_session_id} {step}: skipped ({reason})")
             return True
-        argv = [sys.executable, "-u", "-m", "ephysalis.cli.main", step, str(recording_session_job.recording_session_path),
+        source = staged.path if staged else recording_session_job.recording_session_path
+        argv = [sys.executable, "-u", "-m", "ephysalis.cli.main", step, str(source),
                 "--config", str(config_path), "--work-dir", str(recording_session_job.work_dir),
                 *step_settings_argv(step, recording_session_job.step_settings[step])]
         if step in FORCE_STEPS:
@@ -320,7 +319,10 @@ class Runner:
         self._say(f"{recording_session_job.recording_session_id} {step}{why}")
         t0 = time.time()
         with open(log, "w", encoding="utf-8") as out:
-            child = subprocess.Popen(argv, cwd=self.conversion_batch.root, stdout=out, stderr=subprocess.STDOUT)
+            env = None
+            if staged is not None and staged.copied:  # the step reads a copy: provenance records the original
+                env = {**os.environ, ORIGIN_ENV: str(staged.origin)}
+            child = subprocess.Popen(argv, cwd=self.conversion_batch.root, stdout=out, stderr=subprocess.STDOUT, env=env)
             with self._children_lock:
                 self._children.add(child)
             try:
@@ -348,6 +350,8 @@ class Runner:
             owner = _lock_owner(recording_session_job) or {}
             self._say(f"{recording_session_job.recording_session_id}: another runner works on it ({owner.get('host')}, pid {owner.get('pid')})")
             return "locked"
+        staged: Staged | None = None
+        result = "failed"
         try:
             config_path = write_recording_session_config(recording_session_job) if not self.dry_run else recording_session_job.work_dir / "session.toml"
             with tempfile.TemporaryDirectory() as tmp:
@@ -355,13 +359,33 @@ class Runner:
                 config_text = (Path(tmp) / "s.toml").read_bytes()
             for step in self.steps:
                 if self.stop.is_set():
-                    return "interrupted"
+                    result = "interrupted"
+                    return result
                 if pause_requested(self.conversion_batch):
-                    return "paused"
-                if not self.run_step(recording_session_job, step, config_path, config_text):
-                    return "interrupted" if self.stop.is_set() else "failed"
-            return "done"
+                    result = "paused"
+                    return result
+                if staged is None and not self.dry_run and not step_state(
+                        self.conversion_batch, recording_session_job, step, self.code, config_text,
+                        self.ignore_code_changes).finished:  # the first step that runs: the folder to read
+                    try:
+                        staged = self.source_cache.stage(
+                            recording_session_job.recording_session_id, recording_session_job.recording_session_path,
+                            should_stop=lambda: self.stop.is_set() or pause_requested(self.conversion_batch))
+                    except Exception as error:  # noqa: BLE001 (e.g. disk full): this session fails, the others go on
+                        self._say(f"{recording_session_job.recording_session_id}: copying to the source cache failed: {error}")
+                        return result
+                    if staged is None:
+                        result = "interrupted" if self.stop.is_set() else "paused"
+                        return result
+                if not self.run_step(recording_session_job, step, config_path, config_text, staged):
+                    result = "interrupted" if self.stop.is_set() else "failed"
+                    return result
+            result = "done"
+            return result
         finally:
+            if staged is not None:
+                self.source_cache.release(recording_session_job.recording_session_id, staged,
+                                          keep=result in ("paused", "interrupted"))
             if not self.dry_run:
                 release_lock(recording_session_job)
 
@@ -375,6 +399,11 @@ class Runner:
         if not self.dry_run:
             (self.conversion_batch.state_dir / PAUSE_FILE).unlink(missing_ok=True)  # resume
         self._say(f"{self.conversion_batch.conversion_batch_name}: {len(recording_session_jobs)} sessions, {parallel} at a time, steps {', '.join(self.steps)}")
+        if self.source_cache_settings.mode != "direct":
+            cache = self.source_cache_settings
+            self._say(f"source cache: {cache.mode} in {cache.dir}"
+                      + (f", at most {cache.max_size_gb:g} GB" if cache.max_size_gb is not None else "")
+                      + f", {cache.reserve_bytes / 1e9:g} GB left free")
         results: dict[str, str] = {}
 
         def run_one_recording_session(recording_session_job: RecordingSessionJob) -> None:

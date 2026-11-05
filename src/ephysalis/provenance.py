@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -35,6 +36,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
+
+from ephysalis.conversion_batch.source_cache import ORIGIN_ENV
 
 if TYPE_CHECKING:
     from ephysalis.recording_session.model import RecordingSession
@@ -148,7 +151,8 @@ def step_record(step: str, recording_session: RecordingSession, config: Recordin
         "step": step,
         "time": datetime.now(UTC).isoformat(timespec="seconds"),
         "argv": ["ephysalis", *argv] if argv is not None else None,
-        "recording_session": str(recording_session.path),
+        "recording_session": os.environ.get(ORIGIN_ENV) or str(recording_session.path),
+        **({"read_from": str(recording_session.path)} if os.environ.get(ORIGIN_ENV) else {}),
         "config_file": str(config_path) if config_path else None,
         "config": config.model_dump(mode="json", exclude_none=True) if config else None,
         "options": options,

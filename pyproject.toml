@@ -20,6 +20,8 @@ dependencies = [
     "tomli-w>=1.2",
     "pynwb>=3.0",
     "open-ephys-python-tools>=1.0.1",
+    "psutil>=5.9",
+    "filelock>=3.12",
 ]
 
 [project.optional-dependencies]

@@ -4,7 +4,7 @@ The file describes the whole pipeline from the recording session folders to the 
 recording sessions, their configs, and every setting of every step. Example (paths are relative to ``root``, which
 is relative to the file; default: the file's folder)::
 
-    schema_version = 4
+    schema_version = 5
     conversion_batch_name = "V1 array recordings of monkeys B and F"
     root = ".."
     work_dir = "derivatives/ephysalis/{recording_session}"
@@ -15,6 +15,12 @@ is relative to the file; default: the file's folder)::
     recording_sessions = [                         # one recording session per line (after those of the file)
         { subject = "f", folder = "sub-f/ses-20091203", steps = { lfp = { rate_hz = 500.0 } } },
     ]
+
+    [source_cache]                                 # how the steps read the session folders (default: direct)
+    mode = "local"                                 # direct | memory (a copy on a RAM disk) | local (a local disk)
+    dir = "/data/ephysalis-cache"                  # memory: default /dev/shm/ephysalis; local: required
+    max_size_gb = 500                              # all copies together (optional)
+    reserve_gb = 10                                # left free on the disk / in memory (default 10 / 32)
 
     [software]                                     # minimum versions; newer ones run the file too
     ephysalis = "0.3.0"
@@ -69,6 +75,12 @@ its ``input_format`` and ``metadata_plugin``, and ``[software]`` lists ephysalis
 used with the version the file was made for; ``ephysalis run`` refuses older installed versions. Newer versions
 read the file: a format change comes with a migration (``CONVERSION_BATCH_MIGRATIONS``).
 
+``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`): ``memory`` and ``local`` copy each session's
+folder once before its first step that has to run and let the steps read the copy (deleted when the session
+ends); the copies together stay below ``max_size_gb`` and leave ``reserve_gb`` free, a session waits for space and
+one that alone is too big is read directly. It changes only where the data are read from (provenance records the
+original folder), not the results; ``ephysalis run --source-cache`` overrides it for one run.
+
 A recording session's config is ``[defaults]``, overridden by ``[subject_defaults.<subject>]``, by its
 ``recording_session_config_file`` (if the template is given, the file must exist) and by its ``session_config``:
 tables are merged key by key, everything else (values, arrays such as ``runs``) is replaced. Every part must have
@@ -92,13 +104,15 @@ from ephysalis.recording_session.config import (
     recording_session_config_from_dict,
 )
 from ephysalis.recording_session.schema import migrate
+from ephysalis.conversion_batch.source_cache import SourceCacheSettings, source_cache_settings
 
-CONVERSION_BATCH_SCHEMA_VERSION = 4
+CONVERSION_BATCH_SCHEMA_VERSION = 5
 
 
 # CONVERSION_BATCH_MIGRATIONS[n]: raw data of version n -> n + 1 (versions before 3 are not read)
 CONVERSION_BATCH_MIGRATIONS: dict[int, Any] = {
     3: lambda data: data,  # 4 added recording_sessions_file and [sessions] (optional)
+    4: lambda data: data,  # 5 added [source_cache] (optional)
 }
 RECORDING_SESSION_PLACEHOLDER = "{recording_session}"
 # steps in the order they run and the steps whose outputs each one reads
@@ -138,6 +152,7 @@ class ConversionBatch:
     state_dir: Path
     steps: list[str]  # in the order they run
     software: dict[str, str] = field(default_factory=dict)  # package -> minimum version
+    source_cache: SourceCacheSettings = field(default_factory=SourceCacheSettings)  # [source_cache]
     recording_session_jobs: list[RecordingSessionJob] = field(default_factory=list)
 
     def recording_session_job(self, recording_session_id: str) -> RecordingSessionJob:
@@ -263,7 +278,7 @@ def load_conversion_batch(path: str | Path, check_installed_software: bool = Tru
     data, inherited_sessions = _read_batch_file(path, ())
     known = {"schema_version", "conversion_batch_name", "root", "work_dir", "state_dir", "software", "defaults",
              "subject_defaults", "steps", "recording_session_root", "recording_session_config_file",
-             "recording_sessions_file", "recording_sessions", "sessions"}
+             "recording_sessions_file", "recording_sessions", "sessions", "source_cache"}
     if unknown := set(data) - known:
         raise ValueError(f"{path}: unknown keys {', '.join(sorted(unknown))}")
     root = (path.parent / data.get("root", ".")).resolve()
@@ -286,7 +301,8 @@ def load_conversion_batch(path: str | Path, check_installed_software: bool = Tru
                          f"e.g. work_dir = \"derivatives/ephysalis/{RECORDING_SESSION_PLACEHOLDER}\"")
     conversion_batch = ConversionBatch(
         conversion_batch_file=path, conversion_batch_name=data.get("conversion_batch_name", path.parent.name),
-        root=root, state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps, software=software)
+        root=root, state_dir=(root / data.get("state_dir", ".ephysalis")).resolve(), steps=steps, software=software,
+        source_cache=source_cache_settings(data.get("source_cache", {}), root, path))
     session_root = (root / data.get("recording_session_root", ".")).resolve()
     entries = []
     if data.get("recording_sessions_file"):  # "" in a file that extends another: none
@@ -371,7 +387,23 @@ def load_conversion_batch(path: str | Path, check_installed_software: bool = Tru
             step_settings=session_settings,
             include=entry.get("include", True)))
     _check_outputs_outside_sources(conversion_batch)
+    _check_source_cache_outside(conversion_batch, [session_root / folder for folder in folders])
     return conversion_batch
+
+
+def _check_source_cache_outside(conversion_batch: ConversionBatch, listed_folders: list[Path]) -> None:
+    """The source cache dir must not overlap a session folder (also as listed, before symbolic links are
+    followed) or a work dir: its copies are deleted."""
+    folder = conversion_batch.source_cache.dir
+    if conversion_batch.source_cache.mode == "direct" or folder is None:
+        return
+    folder = folder.resolve()
+    for job, listed in zip(conversion_batch.recording_session_jobs, listed_folders):
+        for what, other in (("recording session folder", job.recording_session_path),
+                            ("recording session folder", listed), ("work dir", job.work_dir)):
+            if folder == other or folder.is_relative_to(other) or other.is_relative_to(folder):
+                raise ValueError(f"{conversion_batch.conversion_batch_file}: [source_cache] dir {folder} overlaps the "
+                                 f"{what} {other} of {job.recording_session_id}")
 
 
 def _check_outputs_outside_sources(conversion_batch: ConversionBatch) -> None:
