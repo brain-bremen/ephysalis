@@ -3,15 +3,13 @@
 Modes (:class:`SourceCacheMode`):
 
 - ``direct``: the steps read the folders where they are (default).
-- ``memory`` (Linux only): before the first step of a session that has to run, the runner copies its folder to
-  the shared memory (``dir``, default ``/dev/shm/ephysalis``) and the steps read the copy; it is deleted when the
-  session ends.
-- ``local``: the same, into ``dir`` on a local disk (required). A session that is paused or interrupted keeps its
-  copy: it is reused when the session resumes (if the source files are unchanged) and deleted when its space is
-  needed.
+- ``local``: before the first step of a session that has to run, the runner copies its folder into ``dir`` on a
+  local disk and the steps read the copy; it is deleted when the session ends. A session that is paused or
+  interrupted keeps its copy: it is reused when the session resumes (if the source files are unchanged) and deleted
+  when its space is needed.
 
 The copies of all sessions together (of every runner on this machine) stay below ``max_size_gb``, and leave
-``reserve_gb`` free: of the memory (memory: what the kernel counts as available) or of the disk (local). A session
+``reserve_gb`` of the disk free. A session
 that needs more space than is free waits until other sessions release theirs; a session that alone is bigger than
 the cache can ever hold is read directly. Reading a folder once, sequentially, is fast on a network file system;
 the steps' own reads (memory-mapped, several workers) fetch the same data several times.
@@ -27,7 +25,6 @@ import logging
 import os
 import shutil
 import socket
-import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -42,29 +39,26 @@ from filelock import FileLock
 logger = logging.getLogger(__name__)
 
 GB = 1_000_000_000
-DEFAULT_MEMORY_DIR = "/dev/shm/ephysalis"
-DEFAULT_RESERVE_GB = {"memory": 32.0, "local": 10.0}
+DEFAULT_RESERVE_GB = 10.0
 WAIT_SECONDS = 30.0
 ORIGIN_ENV = "EPHYSALIS_RECORDING_SESSION_ORIGIN"  # the original folder of a step that reads a copy (provenance)
 
 
 class SourceCacheMode(StrEnum):
     DIRECT = "direct"
-    MEMORY = "memory"
     LOCAL = "local"
 
 
 @dataclass(frozen=True)
 class SourceCacheSettings:
     mode: SourceCacheMode = SourceCacheMode.DIRECT
-    dir: Path | None = None  # memory: default DEFAULT_MEMORY_DIR; local: required
-    max_size_gb: float | None = None  # all copies together (None: only the free memory or disk space limits them)
-    reserve_gb: float | None = None  # left free (default DEFAULT_RESERVE_GB of the mode)
+    dir: Path | None = None  # local: required
+    max_size_gb: float | None = None  # all copies together (None: only the free disk space limits them)
+    reserve_gb: float | None = None  # left free on the disk (default DEFAULT_RESERVE_GB)
 
     @property
     def reserve_bytes(self) -> int:
-        reserve = self.reserve_gb if self.reserve_gb is not None else DEFAULT_RESERVE_GB.get(self.mode, 0.0)
-        return int(reserve * GB)
+        return int((self.reserve_gb if self.reserve_gb is not None else DEFAULT_RESERVE_GB) * GB)
 
 
 def source_cache_settings(data: dict[str, Any], root: Path, source: object) -> SourceCacheSettings:
@@ -92,12 +86,9 @@ def source_cache_settings(data: dict[str, Any], root: Path, source: object) -> S
 
 
 def check_source_cache_settings(settings: SourceCacheSettings, source: object) -> SourceCacheSettings:
-    """``settings`` with the default dir of memory mode; local mode needs a dir. (That memory mode runs only on
-    Linux is checked when a runner starts: the file stays readable, e.g. for ``ephysalis status``, everywhere.)"""
+    """``settings``, checked: local mode needs a dir."""
     if settings.mode == SourceCacheMode.LOCAL and settings.dir is None:
         raise ValueError(f"{source}: [source_cache] mode = \"local\" needs dir (a folder on a local disk)")
-    if settings.mode == SourceCacheMode.MEMORY and settings.dir is None:
-        return SourceCacheSettings(settings.mode, Path(DEFAULT_MEMORY_DIR), settings.max_size_gb, settings.reserve_gb)
     return settings
 
 
@@ -133,9 +124,6 @@ class SourceCache:
         self.protected = [p.resolve() for p in protected or []]  # never deleted: the source folders
         self.say = say or (lambda text: logger.info(text))
         self.owner = {"host": socket.gethostname(), "pid": os.getpid()}
-        if settings.mode == SourceCacheMode.MEMORY and not sys.platform.startswith("linux"):
-            raise ValueError(f"[source_cache] mode = \"memory\" needs Linux (/dev/shm); on {sys.platform} use "
-                             f"mode = \"local\" (ephysalis run --source-cache local --source-cache-dir ...)")
         if settings.mode != SourceCacheMode.DIRECT:
             assert settings.dir is not None
             folder = settings.dir.resolve()
@@ -209,8 +197,6 @@ class SourceCache:
             limits.append((int(self.settings.max_size_gb * GB) - used, f"max_size_gb {self.settings.max_size_gb:g}"))
         free = shutil.disk_usage(self.dir).free - self.settings.reserve_bytes - pending
         limits.append((free, f"free space of {self.dir}"))
-        if self.settings.mode == SourceCacheMode.MEMORY:
-            limits.append((psutil.virtual_memory().available - self.settings.reserve_bytes - pending, "available memory"))
         return min(limits)
 
     def _capacity(self) -> int | None:
@@ -311,7 +297,7 @@ class SourceCache:
             entry = self._entries().get(name)
             if entry is None or entry.get("owner") != self.owner:
                 return
-            if keep and self.settings.mode == SourceCacheMode.LOCAL and entry.get("state") == "complete":
+            if keep and entry.get("state") == "complete":
                 self._write_entry(name, {**entry, "owner": None})
                 return
             try:

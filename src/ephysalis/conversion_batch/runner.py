@@ -17,7 +17,7 @@ Steps that are not done run again from scratch (``--force``; ``sort`` with a new
 crashing step does not take the runner down; a failed step stops its session (the others go on).
 
 Reading: ``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`) lets the steps read the session
-folders directly or a copy (in memory, on a local disk) made before a session's first step that has to run.
+folders directly or a copy on a local disk made before a session's first step that has to run.
 
 Pausing: ``ephysalis pause`` writes ``state_dir/pause``; runners start no new step, the running steps
 finish and the runners exit. ``ephysalis run`` again resumes (and removes the pause file). Ctrl+C

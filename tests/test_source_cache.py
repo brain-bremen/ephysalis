@@ -1,5 +1,5 @@
-"""[source_cache] of a conversion batch: the steps read the session folders directly, or a copy in memory or on a
-local disk, below a size limit (ephysalis.conversion_batch.source_cache)."""
+"""[source_cache] of a conversion batch: the steps read the session folders directly, or a copy on a local disk,
+below a size limit (ephysalis.conversion_batch.source_cache)."""
 
 import json
 import threading
@@ -38,13 +38,10 @@ def _cache(tmp_path: Path, mode="local", max_size_gb=None, protected=(), lines=N
 def test_settings_of_the_batch_file(tmp_path):
     path = write_conversion_batch(tmp_path)
     assert load_conversion_batch(path).source_cache.mode == "direct"  # default
-    path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "memory"\n')
-    cache = load_conversion_batch(path).source_cache
-    assert cache.mode == "memory" and cache.dir == Path(sc.DEFAULT_MEMORY_DIR) and cache.reserve_bytes == 32 * GB
     path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "local"\ndir = "cache"\nmax_size_gb = 500\n')
     cache = load_conversion_batch(path).source_cache
     assert cache.dir == (tmp_path / "cache").resolve() and cache.max_size_gb == 500.0 and cache.reserve_bytes == 10 * GB
-    for extra, message in [('mode = "ram"', "is not one of direct, memory, local"),
+    for extra, message in [('mode = "memory"', "is not one of direct, local"),
                            ('mode = "local"', "needs dir"),
                            ('mode = "local"\ndir = "c"\nmax_size_gb = 0', "positive number"),
                            ('mode = "local"\ndir = "c"\nmax_size = 5', "unknown keys of .source_cache.: max_size"),
@@ -79,14 +76,6 @@ def test_copy_reuse_and_release(tmp_path):
     # done: the copy is deleted; the source is never touched
     cache.release("s1", third)
     assert not third.path.exists() and not (tmp_path / "cache" / "s1.json").exists() and (source / "a.bin").exists()
-
-
-def test_memory_mode_never_keeps_copies(tmp_path):
-    source = _session(tmp_path, "s1", {"a.bin": 1000})
-    cache = _cache(tmp_path, mode="memory")
-    staged = cache.stage("s1", source)
-    cache.release("s1", staged, keep=True)
-    assert not staged.path.exists()
 
 
 def test_direct_and_too_big(tmp_path):
@@ -170,9 +159,8 @@ def test_run_options_override_the_file(tmp_path, monkeypatch):
         return {}
 
     monkeypatch.setattr(Runner, "run", fake_run)
-    main(["run", str(path), "--source-cache", "memory", "--source-cache-max-gb", "200"])
-    assert seen["settings"].mode == "memory" and seen["settings"].dir == Path(sc.DEFAULT_MEMORY_DIR)
-    assert seen["settings"].max_size_gb == 200
+    main(["run", str(path), "--source-cache-max-gb", "200"])
+    assert seen["settings"].mode == "local" and seen["settings"].max_size_gb == 200
     main(["run", str(path), "--source-cache-dir", str(tmp_path / "other")])
     assert seen["settings"].mode == "local" and seen["settings"].dir == tmp_path / "other"
     main(["run", str(path), "--source-cache", "direct"])
@@ -192,17 +180,6 @@ def test_a_failed_copy_fails_only_its_session(tmp_path, monkeypatch):
     lines: list[str] = []
     assert Runner(load_conversion_batch(path), echo=lines.append).run() == {"a": "failed", "b": "done"}
     assert any("a: copying to the source cache failed: No space left on device" in line for line in lines)
-
-
-def test_memory_mode_only_on_linux(tmp_path, monkeypatch):
-    """Elsewhere the file stays readable (status), but a run in memory mode is refused; local mode runs."""
-    path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "memory"\n')
-    monkeypatch.setattr(sc.sys, "platform", "win32")
-    conversion_batch = load_conversion_batch(path)
-    with pytest.raises(ValueError, match="needs Linux"):
-        Runner(conversion_batch, echo=lambda _: None)
-    local = SourceCacheSettings(SourceCacheMode.LOCAL, tmp_path / "cache")
-    assert Runner(conversion_batch, echo=lambda _: None, source_cache=local).source_cache.settings.mode == "local"
 
 
 def test_a_copy_that_cannot_be_deleted_yet(tmp_path, monkeypatch):

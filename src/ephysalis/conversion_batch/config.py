@@ -17,10 +17,10 @@ is relative to the file; default: the file's folder)::
     ]
 
     [source_cache]                                 # how the steps read the session folders (default: direct)
-    mode = "local"                                 # direct | memory (a copy on a RAM disk) | local (a local disk)
-    dir = "/data/ephysalis-cache"                  # memory: default /dev/shm/ephysalis; local: required
+    mode = "local"                                 # direct | local (a copy on a local disk)
+    dir = "/data/ephysalis-cache"                  # local: required
     max_size_gb = 500                              # all copies together (optional)
-    reserve_gb = 10                                # left free on the disk / in memory (default 10 / 32)
+    reserve_gb = 10                                # left free on the disk (default 10)
 
     [software]                                     # minimum versions; newer ones run the file too
     ephysalis = "0.3.0"
@@ -75,7 +75,7 @@ its ``input_format`` and ``metadata_plugin``, and ``[software]`` lists ephysalis
 used with the version the file was made for; ``ephysalis run`` refuses older installed versions. Newer versions
 read the file: a format change comes with a migration (``CONVERSION_BATCH_MIGRATIONS``).
 
-``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`): ``memory`` and ``local`` copy each session's
+``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`): ``local`` copies each session's
 folder once before its first step that has to run and let the steps read the copy (deleted when the session
 ends); the copies together stay below ``max_size_gb`` and leave ``reserve_gb`` free, a session waits for space and
 one that alone is too big is read directly. It changes only where the data are read from (provenance records the

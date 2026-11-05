@@ -32,8 +32,7 @@ def _source_cache_override(args: argparse.Namespace, conversion_batch):
         return None
     settings = conversion_batch.source_cache
     if args.source_cache is not None and args.source_cache != settings.mode:
-        settings = replace(settings, mode=SourceCacheMode(args.source_cache),
-                           dir=None if args.source_cache_dir is None and args.source_cache == "memory" else settings.dir)
+        settings = replace(settings, mode=SourceCacheMode(args.source_cache))
     if args.source_cache_dir is not None:
         settings = replace(settings, dir=args.source_cache_dir.resolve())
     if args.source_cache_max_gb is not None:
@@ -70,9 +69,9 @@ def add_conversion_batch_commands(sub: argparse._SubParsersAction[argparse.Argum
     p.add_argument("--ignore-code-changes", action="store_true",
                    help="Steps done with another version of ephysalis or of the plugins count as done")
     p.add_argument("--dry-run", action="store_true", help="Only show what would run")
-    p.add_argument("--source-cache", choices=["direct", "memory", "local"],
-                   help="How the steps read the session folders (overrides [source_cache] mode): directly, a copy in "
-                        "memory (/dev/shm) or a copy on a local disk (--source-cache-dir)")
+    p.add_argument("--source-cache", choices=["direct", "local"],
+                   help="How the steps read the session folders (overrides [source_cache] mode): directly or a copy "
+                        "on a local disk (--source-cache-dir)")
     p.add_argument("--source-cache-dir", type=Path, help="Folder of the copies (overrides [source_cache] dir)")
     p.add_argument("--source-cache-max-gb", type=float,
                    help="All copies together at most this many GB (overrides [source_cache] max_size_gb)")
