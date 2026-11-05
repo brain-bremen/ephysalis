@@ -234,7 +234,7 @@ rate_hz = 500.0
         load_conversion_batch(tmp_path / "trial.toml")
 
 
-def test_load_conversion_batch_errors(tmp_path):
+def test_load_conversion_batch_errors(tmp_path, monkeypatch):
     cases = [
         ({"step_overrides": {"mua": {"n_job": 2}}, "steps": [*STEPS, "mua"]}, "unknown settings of mua: n_job"),
         ({"extra": "[steps.timing]\n"}, "unknown step timing"),
@@ -244,9 +244,16 @@ def test_load_conversion_batch_errors(tmp_path):
         ({"software": ""}, "must give the ephysalis version"),
         ({"plugins": 'metadata_plugin = "none"\n'}, "input_format is not set"),
         ({"plugins": 'input_format = "spikeglx"\n'}, "metadata_plugin is not set"),
-        ({"plugins": 'input_format = "spikeglx"\nmetadata_plugin = "vstim"\n'},
-         "plugin 'vstim' comes from ephysalis-bremen, which is not in .software."),
+        ({"plugins": 'input_format = "spikeglx"\nmetadata_plugin = "no_such_plugin"\n'},
+         "no ephysalis.metadata_plugins plugin 'no_such_plugin' is installed"),
+        ({"plugins": 'input_format = "spikeglx"\nmetadata_plugin = "lab_plugin"\n'},
+         "plugin 'lab_plugin' comes from lab-plugins, which is not in .software."),
     ]
+    import ephysalis.conversion_batch.config as batch_config
+
+    real_plugin_package = batch_config.plugin_package  # lab_plugin: installed from another package (not needed)
+    monkeypatch.setattr(batch_config, "plugin_package", lambda group, name: "lab-plugins" if name == "lab_plugin"
+                        else real_plugin_package(group, name))
     for options, message in cases:
         with pytest.raises(ValueError, match=message):
             load_conversion_batch(write_conversion_batch(tmp_path, **options))
