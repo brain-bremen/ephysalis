@@ -4,7 +4,9 @@ Modes (:class:`SourceCacheMode`):
 
 - ``direct``: the steps read the folders where they are (default).
 - ``local``: before the first step of a session that has to run, the runner copies its folder into ``dir`` on a
-  local disk and the steps read the copy; it is deleted when the session ends. A session that is paused or
+  local disk and the steps read the copy; it is deleted when the session ends. While sessions compute, the runner
+  prefetches the next ones (:meth:`SourceCache.prefetch`): at most ``parallel`` copies ahead, each only when it
+  fits; for a running session that needs space, prefetched copies make room first. A session that is paused or
   interrupted keeps its copy: it is reused when the session resumes (if the source files are unchanged) and deleted
   when its space is needed.
 
@@ -25,6 +27,7 @@ import logging
 import os
 import shutil
 import socket
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -116,7 +119,8 @@ class Staged:
 
 
 class SourceCache:
-    """Copies of recording session folders (:mod:`ephysalis.conversion_batch.source_cache`)."""
+    """Copies of recording session folders (:mod:`ephysalis.conversion_batch.source_cache`). One object per
+    runner; its threads (the sessions and the prefetch) share it."""
 
     def __init__(self, settings: SourceCacheSettings, protected: list[Path] | None = None,
                  say: Callable[[str], None] | None = None):
@@ -124,6 +128,9 @@ class SourceCache:
         self.protected = [p.resolve() for p in protected or []]  # never deleted: the source folders
         self.say = say or (lambda text: logger.info(text))
         self.owner = {"host": socket.gethostname(), "pid": os.getpid()}
+        self._copying: dict[str, threading.Event] = {}  # copies this runner is making (set when done)
+        self._prefetching: set[str] = set()  # copies being made ahead
+        self._prefetched: set[str] = set()  # copies made ahead that no session reads yet
         if settings.mode != SourceCacheMode.DIRECT:
             assert settings.dir is not None
             folder = settings.dir.resolve()
@@ -136,12 +143,17 @@ class SourceCache:
         assert self.settings.dir is not None
         return self.settings.dir
 
+    @property
+    def prefetched(self) -> set[str]:
+        """Sessions copied (or being copied) ahead that no session reads yet."""
+        return self._prefetched | self._prefetching
+
     # --- the entries --------------------------------------------------------------------------------------------
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
         self.dir.mkdir(parents=True, exist_ok=True)
-        with FileLock(self.dir / ".lock"):
+        with FileLock(self.dir / ".lock"):  # also between the threads of this runner
             yield
 
     def _entries(self) -> dict[str, dict[str, Any]]:
@@ -179,6 +191,7 @@ class SourceCache:
             elif target.exists():
                 shutil.rmtree(target)
         (self.dir / f"{name}.json").unlink(missing_ok=True)
+        self._prefetched.discard(name)
 
     def _not_yet_written(self, entries: dict[str, dict[str, Any]]) -> int:
         """Bytes that copies being made have reserved but not yet written (the free space does not show them)."""
@@ -205,72 +218,119 @@ class SourceCache:
             return None
         return int(self.settings.max_size_gb * GB)
 
+    def _reusable(self, entry: dict[str, Any] | None, name: str, source: Path, files: dict[str, list[int]]) -> bool:
+        return bool(entry and entry.get("state") == "complete" and entry.get("source") == str(source)
+                    and entry.get("files") == files and (self.dir / name).is_dir()
+                    and (not self._in_use(entry) or entry.get("owner") == self.owner))
+
     # --- staging ------------------------------------------------------------------------------------------------
 
     def stage(self, name: str, source: Path, should_stop: Callable[[], bool] | None = None) -> Staged | None:
-        """The folder the steps of session ``name`` read: ``source`` (direct, or too big) or its copy, after
-        waiting for space. None: ``should_stop`` became true while waiting."""
+        """The folder the steps of session ``name`` read: ``source`` (direct, or too big) or its copy (made now,
+        prefetched or kept from before), after waiting for space. None: ``should_stop`` became true meanwhile."""
         source = source.resolve()
         if self.settings.mode == SourceCacheMode.DIRECT:
             return Staged(source, source)
+        result = self._stage(name, source, should_stop, prefetch=False)
+        return result if isinstance(result, Staged) or result is None else None
+
+    def prefetch(self, name: str, source: Path, should_stop: Callable[[], bool] | None = None) -> bool:
+        """Copy session ``name`` ahead if it fits now (without waiting; only copies of gone runners make room).
+        True: its copy is there (now or before); False: it does not fit now (or is read directly)."""
+        if self.settings.mode == SourceCacheMode.DIRECT:
+            return False
+        return self._stage(name, source.resolve(), should_stop, prefetch=True) is True
+
+    def _stage(self, name: str, source: Path, should_stop: Callable[[], bool] | None, prefetch: bool):
         files = folder_files(source)
         size = sum(f[0] for f in files.values())
         capacity = self._capacity()
         if capacity is not None and size > capacity:
+            if prefetch:
+                return False
             self.say(f"{name}: {size / GB:.1f} GB is more than the source cache holds "
                      f"(max_size_gb {self.settings.max_size_gb:g}); read directly")
             return Staged(source, source)
         waited = False
         while True:
+            pending_copy: threading.Event | None = None
             with self._locked():
                 entries = self._entries()
                 mine = entries.get(name)
-                if (mine and mine.get("state") == "complete" and mine.get("source") == str(source)
-                        and mine.get("files") == files and (self.dir / name).is_dir() and not self._in_use(mine)):
+                if name in self._copying:  # this runner copies it already (the prefetch)
+                    if prefetch:
+                        return True
+                    pending_copy = self._copying[name]
+                elif self._reusable(mine, name, source, files):
+                    if prefetch:
+                        return True
+                    how = "prefetched" if name in self._prefetched else "kept from before"
+                    self._prefetched.discard(name)
+                    self._prefetching.discard(name)
                     self._write_entry(name, {**mine, "owner": self.owner})
-                    self.say(f"{name}: reading the copy in {self.dir} (kept from before)")
+                    self.say(f"{name}: reading the copy in {self.dir} ({how})")
                     return Staged(self.dir / name, source, self.dir / f"{name}.json")
-                if mine and self._in_use(mine):
-                    raise RuntimeError(f"{name}: its copy in {self.dir} is used by another runner ({mine['owner']})")
-                if mine:
-                    self._remove(name)  # outdated or broken
-                    entries.pop(name)
-                # stale copies of other sessions (their runner is gone) count until they are deleted, which
-                # happens when their space is needed
-                stale = [n for n, e in entries.items() if not self._in_use(e)]
-                used = sum(int(e.get("size", 0)) for e in entries.values())
-                free, limit = self._limits(used, self._not_yet_written(entries))
-                stale_size = sum(int(entries[n].get("size", 0)) for n in stale)
-                if size <= free + stale_size:
-                    for n in stale:
-                        if size <= free:
-                            break
-                        self._remove(n)
-                        free += int(entries[n].get("size", 0))
-                    if size <= free:
+                else:
+                    if mine and self._in_use(mine) and mine.get("owner") != self.owner:
+                        raise RuntimeError(f"{name}: its copy in {self.dir} is used by another runner ({mine['owner']})")
+                    if mine:
+                        self._remove(name)  # outdated or broken
+                        entries.pop(name)
+                    # room is made from the copies of gone runners and (not for a prefetch) the copies this runner
+                    # prefetched for later sessions; until then they count
+                    stale = [n for n, e in entries.items() if not self._in_use(e)]
+                    if not prefetch:
+                        stale += sorted(n for n in self._prefetched if n in entries and n not in self._copying)
+                    used = sum(int(e.get("size", 0)) for e in entries.values())
+                    free, limit = self._limits(used, self._not_yet_written(entries))
+                    if size <= free + sum(int(entries[n].get("size", 0)) for n in stale):
+                        for n in reversed(stale):  # the prefetched copies of the latest sessions first
+                            if size <= free:
+                                break
+                            if n in self._prefetched:
+                                self.say(f"{name}: deleting the prefetched copy of {n} to make room")
+                            self._remove(n)
+                            free += int(entries[n].get("size", 0))
                         self._write_entry(name, {"source": str(source), "size": size, "files": files,
                                                  "state": "copying", "owner": self.owner})
+                        self._copying[name] = threading.Event()
+                        if prefetch:
+                            self._prefetching.add(name)
                         break
-                if not any(self._in_use(e) for e in entries.values()):  # waiting would not free anything
-                    self.say(f"{name}: {size / GB:.1f} GB do not fit ({limit}: {free / GB:.1f} GB) and no other "
-                             f"session holds space; read directly")
-                    return Staged(source, source)
+                    if prefetch:
+                        return False
+                    holders = [n for n, e in entries.items() if self._in_use(e) and n not in stale]
+                    if not holders:  # waiting would not free anything
+                        self.say(f"{name}: {size / GB:.1f} GB do not fit ({limit}: {free / GB:.1f} GB) and no other "
+                                 f"session holds space; read directly")
+                        return Staged(source, source)
+            if pending_copy is not None:  # the prefetch of this session: wait for its copy, then take it
+                while not pending_copy.wait(1.0):
+                    if should_stop and should_stop():
+                        return None
+                continue
             if not waited:
                 self.say(f"{name}: waiting for {size / GB:.1f} GB in the source cache ({limit}: {free / GB:.1f} GB free)")
                 waited = True
             if should_stop and should_stop():
                 return None
             time.sleep(WAIT_SECONDS)
-        return self._copy(name, source, files, size)
+        staged = self._copy(name, source, files, size, should_stop, prefetch)
+        if prefetch:
+            return staged is not None
+        return staged
 
-    def _copy(self, name: str, source: Path, files: dict[str, list[int]], size: int) -> Staged:
+    def _copy(self, name: str, source: Path, files: dict[str, list[int]], size: int,
+              should_stop: Callable[[], bool] | None, prefetch: bool) -> Staged | None:
         partial, target = self.dir / f"{name}.partial", self.dir / name
-        if partial.exists():
-            shutil.rmtree(partial)
         t0 = time.time()
-        self.say(f"{name}: copying {size / GB:.1f} GB to {self.dir}")
-        try:
+        self.say(f"{name}: copying {size / GB:.1f} GB to {self.dir}" + (" (prefetch)" if prefetch else ""))
+        try:  # whatever fails: the partial copy and the entry go (they are never read)
+            if partial.exists():
+                shutil.rmtree(partial)
             for relative, (file_size, mtime_ns) in files.items():
+                if should_stop and should_stop():
+                    raise _Stopped
                 destination = partial / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source / relative, destination)
@@ -278,19 +338,27 @@ class SourceCache:
                     raise OSError(f"{source / relative}: copied {destination.stat().st_size} of {file_size} bytes")
                 os.utime(destination, ns=(mtime_ns, mtime_ns))
             partial.rename(target)
-        except BaseException:
+        except BaseException as error:
             with self._locked():
                 self._remove(name)
+                self._prefetching.discard(name)
+                self._copying.pop(name).set()
+            if isinstance(error, _Stopped):
+                return None
             raise
         with self._locked():
             entry = json.loads((self.dir / f"{name}.json").read_text(encoding="utf-8"))
             self._write_entry(name, {**entry, "state": "complete"})
+            if prefetch and name in self._prefetching:
+                self._prefetched.add(name)
+            self._prefetching.discard(name)
+            self._copying.pop(name).set()
         seconds = max(time.time() - t0, 1e-3)
         self.say(f"{name}: copied in {seconds / 60:.1f} min ({size / seconds / 1e6:.0f} MB/s)")
         return Staged(target, source, self.dir / f"{name}.json")
 
     def release(self, name: str, staged: Staged, keep: bool = False) -> None:
-        """The session is over: delete its copy, or (``keep``, local mode) leave it for a resume."""
+        """The session is over: delete its copy, or (``keep``) leave it for a resume."""
         if not staged.copied:
             return
         with self._locked():
@@ -306,3 +374,16 @@ class SourceCache:
                 self._write_entry(name, {**entry, "owner": None})
                 self.say(f"{name}: could not delete its copy in {self.dir} yet ({error}); it is deleted when its "
                          f"space is needed")
+
+    def keep_prefetched(self) -> None:
+        """The runner ends: the prefetched copies no session read are kept for the next run (no owner)."""
+        with self._locked():
+            entries = self._entries()
+            for name in sorted(self._prefetched):
+                if name in entries and entries[name].get("owner") == self.owner:
+                    self._write_entry(name, {**entries[name], "owner": None})
+            self._prefetched.clear()
+
+
+class _Stopped(Exception):
+    """A copy was stopped (the runner pauses or stops)."""

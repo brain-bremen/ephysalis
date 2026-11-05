@@ -2,6 +2,10 @@
 below a size limit (ephysalis.conversion_batch.source_cache)."""
 
 import json
+import os
+import socket
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -139,6 +143,9 @@ def test_runner_reads_the_copies(tmp_path):
     provenance = json.loads((job.work_dir / "provenance" / "lfp.json").read_text())[-1]
     assert provenance["recording_session"] == str(job.recording_session_path)  # the original is recorded
     assert provenance["read_from"] == str(tmp_path / "cache" / "a")
+    from ephysalis.provenance import input_fingerprint
+
+    assert provenance["inputs"] == input_fingerprint(job.recording_session_path)  # same files, sizes, hashes
 
     # nothing to run: nothing is copied; reading directly afterwards: the steps stay done
     lines.clear()
@@ -169,17 +176,19 @@ def test_run_options_override_the_file(tmp_path, monkeypatch):
 
 def test_a_failed_copy_fails_only_its_session(tmp_path, monkeypatch):
     path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "local"\ndir = "cache"\n')
-    real_copy = SourceCache._copy
+    real_copyfile = sc.shutil.copyfile
 
-    def copy(self, name, *args):
-        if name == "a":
+    def copyfile(src, dst, *args, **kwargs):
+        if Path(dst).parent.name.startswith("a.partial") or "a.partial" in Path(dst).parts:
+            Path(dst).write_bytes(b"part")
             raise OSError("No space left on device")
-        return real_copy(self, name, *args)
+        return real_copyfile(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(SourceCache, "_copy", copy)
+    monkeypatch.setattr(sc.shutil, "copyfile", copyfile)
     lines: list[str] = []
     assert Runner(load_conversion_batch(path), echo=lines.append).run() == {"a": "failed", "b": "done"}
     assert any("a: copying to the source cache failed: No space left on device" in line for line in lines)
+    assert not list((tmp_path / "cache").glob("a*"))  # no partial copy, no entry
 
 
 def test_a_copy_that_cannot_be_deleted_yet(tmp_path, monkeypatch):
@@ -199,3 +208,200 @@ def test_a_copy_that_cannot_be_deleted_yet(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "cache" / "s1.json").read_text())["owner"] is None  # stale: deleted later
     cache.release("s1", cache.stage("s1", source))  # reused, then deleted
     assert not staged.path.exists()
+
+
+def test_prefetch_copies_ahead(tmp_path):
+    source = _session(tmp_path, "s1", {"a.bin": 3000})
+    lines = []
+    cache = _cache(tmp_path, lines=lines)
+    assert cache.prefetch("s1", source) and cache.prefetched == {"s1"}
+    assert any("(prefetch)" in line for line in lines)
+    assert cache.prefetch("s1", source)  # there already: not copied again
+    assert sum("copying" in line for line in lines) == 1
+    staged = cache.stage("s1", source)  # the session takes the prefetched copy
+    assert staged.copied and "(prefetched)" in lines[-1] and cache.prefetched == set()
+    cache.release("s1", staged)
+    assert not staged.path.exists()
+
+
+def test_prefetch_only_when_it_fits_and_running_sessions_go_first(tmp_path):
+    one = _session(tmp_path, "s1", {"a.bin": 3000})
+    two = _session(tmp_path, "s2", {"a.bin": 3000})
+    three = _session(tmp_path, "s3", {"a.bin": 3000})
+    lines = []
+    cache = _cache(tmp_path, max_size_gb=7000 / GB, lines=lines)
+    first = cache.stage("s1", one)
+    assert cache.prefetch("s2", two)
+    t0 = time.time()
+    assert not cache.prefetch("s3", three) and time.time() - t0 < 1  # does not fit: no copy, no waiting
+    cache.release("s1", first)
+    staged = cache.stage("s3", three)  # fits next to the prefetched s2
+    assert staged.copied and cache.prefetched == {"s2"}
+    # a running session that needs the space deletes prefetched copies (here: s2 for s1)
+    again = cache.stage("s1", one)
+    assert again.copied and not (tmp_path / "cache" / "s2").exists() and cache.prefetched == set()
+    assert any("s1: deleting the prefetched copy of s2" in line for line in lines)
+
+
+def test_a_session_waits_for_its_prefetch(tmp_path, monkeypatch):
+    source = _session(tmp_path, "s1", {"a.bin": 3000, "b.bin": 3000})
+    lines = []
+    cache = _cache(tmp_path, lines=lines)
+    real_copyfile = sc.shutil.copyfile
+
+    def slow_copyfile(*args, **kwargs):
+        time.sleep(0.3)
+        return real_copyfile(*args, **kwargs)
+
+    monkeypatch.setattr(sc.shutil, "copyfile", slow_copyfile)
+    thread = threading.Thread(target=cache.prefetch, args=("s1", source))
+    thread.start()
+    time.sleep(0.1)
+    staged = cache.stage("s1", source)  # while the prefetch copies: waits for it, does not copy again
+    thread.join()
+    assert staged.copied and sum("copying" in line for line in lines) == 1 and "(prefetched)" in lines[-1]
+
+
+def test_prefetch_stops(tmp_path):
+    source = _session(tmp_path, "s1", {"a.bin": 3000})
+    cache = _cache(tmp_path)
+    assert not cache.prefetch("s1", source, should_stop=lambda: True)
+    assert not list((tmp_path / "cache").glob("s1*"))
+
+
+def test_runner_prefetches_the_next_session(tmp_path, monkeypatch):
+    path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "local"\ndir = "cache"\n')
+    real_run_step = Runner.run_step
+
+    def run_step(self, job, step, *args, **kwargs):  # session a computes long enough for b to be prefetched
+        if job.recording_session_id == "a":
+            time.sleep(0.5)
+        return real_run_step(self, job, step, *args, **kwargs)
+
+    monkeypatch.setattr(Runner, "run_step", run_step)
+    lines: list[str] = []
+    assert Runner(load_conversion_batch(path), echo=lines.append).run(parallel=1) == {"a": "done", "b": "done"}
+    assert any("b: copying" in line and "(prefetch)" in line for line in lines), lines
+    assert any("b: reading the copy" in line and "(prefetched)" in line for line in lines), lines
+    assert sum("copying" in line for line in lines) == 2 and not list((tmp_path / "cache").glob("*.json"))
+
+
+def _dead_pid() -> int:
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def test_a_change_of_the_same_size_is_noticed(tmp_path):
+    """Reuse needs the same size and modification time of every file."""
+    source = _session(tmp_path, "s1", {"a.bin": 3000})
+    cache = _cache(tmp_path)
+    cache.release("s1", cache.stage("s1", source), keep=True)
+    (source / "a.bin").write_bytes(b"y" * 3000)  # same size, new content and time
+    os.utime(source / "a.bin", ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
+    staged = cache.stage("s1", source)
+    assert (staged.path / "a.bin").read_bytes() == b"y" * 3000
+
+
+def test_a_crashed_copy_is_never_read(tmp_path):
+    """A runner killed while copying leaves a partial copy and an entry in state copying: deleted, copied anew."""
+    source = _session(tmp_path, "s1", {"a.bin": 3000})
+    cache = _cache(tmp_path)
+    (tmp_path / "cache" / "s1.partial").mkdir(parents=True)
+    (tmp_path / "cache" / "s1.partial" / "a.bin").write_bytes(b"half")
+    (tmp_path / "cache" / "s1.json").write_text(json.dumps({
+        "source": str(source.resolve()), "size": 3000, "files": folder_files(source), "state": "copying",
+        "owner": {"host": socket.gethostname(), "pid": _dead_pid()}}))
+    staged = cache.stage("s1", source)
+    assert (staged.path / "a.bin").read_bytes() == (source / "a.bin").read_bytes()
+    assert not (tmp_path / "cache" / "s1.partial").exists()
+    # also a complete-looking folder without a complete entry is not used
+    cache.release("s1", staged, keep=True)
+    entry = json.loads((tmp_path / "cache" / "s1.json").read_text())
+    (tmp_path / "cache" / "s1.json").write_text(json.dumps({**entry, "state": "copying"}))
+    (staged.path / "a.bin").write_bytes(b"x" * 3000)  # the content of an unfinished copy
+    assert (cache.stage("s1", source).path / "a.bin").read_bytes() == (source / "a.bin").read_bytes()
+
+
+def test_the_copies_of_another_live_runner(tmp_path, monkeypatch):
+    """Not taken over, not deleted, and their space counts."""
+    monkeypatch.setattr(sc, "WAIT_SECONDS", 0.05)
+    one = _session(tmp_path, "s1", {"a.bin": 3000})
+    two = _session(tmp_path, "s2", {"a.bin": 3000})
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        theirs = _cache(tmp_path, max_size_gb=4000 / GB)
+        theirs.owner = {"host": socket.gethostname(), "pid": other.pid}  # as if made by the other runner
+        theirs.stage("s1", one)
+        ours = _cache(tmp_path, max_size_gb=4000 / GB)
+        with pytest.raises(RuntimeError, match="used by another runner"):
+            ours.stage("s1", one)
+        stop = threading.Event()
+        threading.Timer(0.3, stop.set).start()
+        assert ours.stage("s2", two, should_stop=stop.is_set) is None  # waits: their copy holds the space
+        assert not ours.prefetch("s2", two)
+        assert (tmp_path / "cache" / "s1" / "a.bin").exists()
+    finally:
+        other.kill()
+        other.wait()
+    assert ours.stage("s2", two).copied  # their runner is gone: its copy makes room
+
+
+def test_never_deletes_a_source_folder(tmp_path):
+    """Even a symbolic link in the cache dir that points to a session folder is not followed when deleting."""
+    one = _session(tmp_path, "s1", {"a.bin": 3000})
+    two = _session(tmp_path, "s2", {"a.bin": 3000})
+    cache = _cache(tmp_path, max_size_gb=4000 / GB, protected=[one, two])
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "s1").symlink_to(one, target_is_directory=True)
+    (tmp_path / "cache" / "s1.json").write_text(json.dumps({"size": 3000, "state": "complete", "owner": None}))
+    with pytest.raises(RuntimeError, match="refusing to delete"):
+        cache.stage("s2", two)  # needs the space of the (stale) entry s1
+    assert (one / "a.bin").read_bytes() and (two / "a.bin").exists()
+
+
+def test_concurrent_copies_stay_below_max_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(sc, "WAIT_SECONDS", 0.02)
+    sources = [_session(tmp_path, f"s{i}", {"a.bin": 3000}) for i in range(4)]
+    cache = _cache(tmp_path, max_size_gb=7000 / GB)
+    real_copyfile = sc.shutil.copyfile
+    peak = []
+
+    def copyfile(src, dst, *args, **kwargs):
+        time.sleep(0.05)
+        result = real_copyfile(src, dst, *args, **kwargs)
+        peak.append(sum(p.stat().st_size for p in (tmp_path / "cache").rglob("*.bin")))
+        return result
+
+    monkeypatch.setattr(sc.shutil, "copyfile", copyfile)
+
+    def session(i):
+        staged = cache.stage(f"s{i}", sources[i])
+        time.sleep(0.1)  # the steps
+        cache.release(f"s{i}", staged)
+
+    threads = [threading.Thread(target=session, args=(i,)) for i in range(4)]
+    threads.append(threading.Thread(target=cache.prefetch, args=("s3", sources[3])))
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert peak and max(peak) <= 7000 and not list((tmp_path / "cache").glob("s*"))
+
+
+def test_a_stop_during_the_copy(tmp_path, monkeypatch):
+    path = write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "local"\ndir = "cache"\n')
+    runner = Runner(load_conversion_batch(path), echo=lambda _: None)
+    real_copyfile = sc.shutil.copyfile
+
+    def copyfile(src, dst, *args, **kwargs):
+        runner.interrupt()  # Ctrl+C while the first file is copied
+        return real_copyfile(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(sc.shutil, "copyfile", copyfile)
+    results = runner.run(parallel=1)
+    assert set(results.values()) == {"interrupted"} and not list((tmp_path / "cache").glob("*.partial"))
+    assert not [p for p in (tmp_path / "cache").glob("*.json")
+                if json.loads(p.read_text()).get("state") != "complete"]
+    monkeypatch.undo()
+    assert Runner(load_conversion_batch(path), echo=lambda _: None).run() == {"a": "done", "b": "done"}

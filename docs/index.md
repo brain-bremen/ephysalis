@@ -34,6 +34,7 @@ installing and using it will follow once the design is settled.
 :caption: Reference
 
 configuration
+source_cache
 ```
 
 ```{toctree}

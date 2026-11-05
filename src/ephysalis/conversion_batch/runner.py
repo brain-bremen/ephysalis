@@ -17,7 +17,8 @@ Steps that are not done run again from scratch (``--force``; ``sort`` with a new
 crashing step does not take the runner down; a failed step stops its session (the others go on).
 
 Reading: ``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`) lets the steps read the session
-folders directly or a copy on a local disk made before a session's first step that has to run.
+folders directly or a copy on a local disk made before a session's first step that has to run. While sessions
+compute, a prefetch thread copies the next ones (at most ``parallel`` copies ahead).
 
 Pausing: ``ephysalis pause`` writes ``state_dir/pause``; runners start no new step, the running steps
 finish and the runners exit. ``ephysalis run`` again resumes (and removes the pause file). Ctrl+C
@@ -60,6 +61,7 @@ logger = logging.getLogger(__name__)
 FORCE_STEPS = ("lfp", "csd", "mua")  # steps that keep existing outputs without --force (align-clocks: the sync
 # edge cache only depends on the recording; the other steps overwrite their outputs)
 PAUSE_FILE = "pause"
+PREFETCH_RETRY_SECONDS = 30.0  # a prefetch that does not fit yet tries again after this
 _STATUS_LOCK = threading.Lock()
 
 
@@ -389,6 +391,37 @@ class Runner:
             if not self.dry_run:
                 release_lock(recording_session_job)
 
+    def _has_work(self, recording_session_job: RecordingSessionJob) -> bool:
+        """Whether a step of the session has to run (so that its folder is read)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            save_recording_session_config(recording_session_job.recording_session_config, Path(tmp) / "s.toml")
+            config_text = (Path(tmp) / "s.toml").read_bytes()
+        return any(not step_state(self.conversion_batch, recording_session_job, step, self.code, config_text,
+                                  self.ignore_code_changes).finished for step in self.steps)
+
+    def _prefetch(self, recording_session_jobs: list[RecordingSessionJob], ahead: int, finished: threading.Event) -> None:
+        """Copy the sessions that have not started yet into the source cache, in order, while the running ones
+        compute: at most ``ahead`` copies that no session reads yet, each only when it fits (it never takes the
+        space of a running session)."""
+        def should_stop() -> bool:
+            return finished.is_set() or self.stop.is_set() or pause_requested(self.conversion_batch)
+
+        for job in recording_session_jobs:
+            while (not should_stop() and job.recording_session_id not in self._started
+                   and len(self.source_cache.prefetched) >= ahead):
+                finished.wait(5)
+            if should_stop():
+                return
+            try:
+                if job.recording_session_id in self._started or not self._has_work(job):
+                    continue
+                while not should_stop() and job.recording_session_id not in self._started:
+                    if self.source_cache.prefetch(job.recording_session_id, job.recording_session_path, should_stop):
+                        break
+                    finished.wait(PREFETCH_RETRY_SECONDS)  # does not fit yet
+            except Exception as error:  # noqa: BLE001 (a failed prefetch: the session copies when it starts)
+                self._say(f"{job.recording_session_id}: prefetch failed: {error}")
+
     def run(self, recording_session_ids: list[str] | None = None, parallel: int = 1) -> dict[str, str]:
         recording_session_jobs = [recording_session_job for recording_session_job in self.conversion_batch.recording_session_jobs if recording_session_job.include
                             and (recording_session_ids is None or recording_session_job.recording_session_id in recording_session_ids)]
@@ -407,6 +440,7 @@ class Runner:
         results: dict[str, str] = {}
 
         def run_one_recording_session(recording_session_job: RecordingSessionJob) -> None:
+            self._started.add(recording_session_job.recording_session_id)
             t0 = time.time()
             result = self.run_recording_session(recording_session_job)
             results[recording_session_job.recording_session_id] = result
@@ -417,8 +451,21 @@ class Runner:
             if not self.dry_run:
                 write_status(self.conversion_batch, [recording_session_job], self.code, self.ignore_code_changes)
 
-        with ThreadPoolExecutor(max(1, parallel)) as pool:
-            list(pool.map(run_one_recording_session, recording_session_jobs))
+        self._started: set[str] = set()
+        finished = threading.Event()
+        prefetcher = None
+        if self.source_cache_settings.mode != "direct" and not self.dry_run:
+            prefetcher = threading.Thread(target=self._prefetch, args=(recording_session_jobs, max(1, parallel), finished),
+                                          name="prefetch", daemon=True)
+            prefetcher.start()
+        try:
+            with ThreadPoolExecutor(max(1, parallel)) as pool:
+                list(pool.map(run_one_recording_session, recording_session_jobs))
+        finally:
+            finished.set()
+            if prefetcher is not None:
+                prefetcher.join()
+                self.source_cache.keep_prefetched()
         if self.dry_run:
             self._say("dry run: nothing was run")
             return results
