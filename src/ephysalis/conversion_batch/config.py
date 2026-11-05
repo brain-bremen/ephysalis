@@ -77,9 +77,11 @@ read the file: a format change comes with a migration (``CONVERSION_BATCH_MIGRAT
 
 ``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`): ``local`` copies each session's
 folder once before its first step that has to run and let the steps read the copy (deleted when the session
-ends), and prefetches the next sessions while others compute; the copies together stay below ``max_size_gb`` and
-leave ``reserve_gb`` free, a session waits for space and one that alone is too big is read directly. It changes only where the data are read from (provenance records the
-original folder), not the results; ``ephysalis run --source-cache`` overrides it for one run.
+ends), and prefetches the next sessions while others compute; the steps also work in a local copy of the work dir,
+copied back when the session ends. The copies together stay below ``max_size_gb`` and leave ``reserve_gb`` free, a
+session waits for space and one that alone is too big is read directly. It changes only where the data are read
+and written (provenance records the original folder and work dir), not the results; ``ephysalis run
+--source-cache`` overrides it for one run.
 
 A recording session's config is ``[defaults]``, overridden by ``[subject_defaults.<subject>]``, by its
 ``recording_session_config_file`` (if the template is given, the file must exist) and by its ``session_config``:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -546,21 +547,28 @@ def _export(args: argparse.Namespace) -> int:
 
         processing = processing_record(work_dir, _record_step("export", args, recording_session, work_dir, config, config_path))
     syncs = _included_run_syncs(recording_session, config, work_dir) if not args.existing else {}
+    # the runner's local work dir (ephysalis.conversion_batch.source_cache): a file for the dataset is made there and
+    # copied in one go (a network file system writes it faster than the many small writes of HDF5)
+    from ephysalis.conversion_batch.source_cache import WORK_DIR_ORIGIN_ENV
+
+    build_locally = bool(args.bids and os.environ.get(WORK_DIR_ORIGIN_ENV))
     for file_recording_session, run_index, task, output in files:
         existing = Path(args.existing) if args.existing else None
+        built = None
         if existing is None:
+            built = work_dir / "export" / output.name if build_locally else output
             if args.output_format == "nwb":
                 from ephysalis.formats.output.nwb import write_recording_session_nwb
 
-                write_recording_session_nwb(file_recording_session, work_dir, output, config, syncs, lfp=args.lfp,
+                write_recording_session_nwb(file_recording_session, work_dir, built, config, syncs, lfp=args.lfp,
                                   compression="gzip" if args.compression else None, processing=processing,
                                   raw=args.raw, run_clock=args.per_run)
             else:
                 from ephysalis.formats.output.dh5 import write_recording_session_dh5
 
-                write_recording_session_dh5(file_recording_session, work_dir, output, config, syncs, lfp=args.lfp,
+                write_recording_session_dh5(file_recording_session, work_dir, built, config, syncs, lfp=args.lfp,
                                   processing=processing, raw=args.raw, run_clock=args.per_run)
-            existing = output
+            existing = built
         if args.bids:
             from ephysalis.formats.output.bids import add_dh5_to_bids, add_nwb_to_bids
 
@@ -570,6 +578,11 @@ def _export(args: argparse.Namespace) -> int:
             else:
                 add_dh5_to_bids(file_recording_session, work_dir, existing, Path(args.bids), subject, session_label, config,
                                 run=run_index, task=task, **options)
+        if built is not None and built != output:  # copied into the dataset: not kept in the work dir
+            from ephysalis.formats.output.dh5 import sidecar_paths
+
+            for path in [built, *(sidecar_paths(built).values() if args.output_format == "dh5" else [])]:
+                path.unlink(missing_ok=True)
         print(f"Output: {output}")
     return 0
 

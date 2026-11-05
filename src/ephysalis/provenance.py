@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
-from ephysalis.conversion_batch.source_cache import ORIGIN_ENV
+from ephysalis.conversion_batch.source_cache import ORIGIN_ENV, WORK_DIR_ORIGIN_ENV
 
 if TYPE_CHECKING:
     from ephysalis.recording_session.model import RecordingSession
@@ -143,6 +143,25 @@ def input_fingerprint(recording_session_path: Path, exclude: list[Path] | None =
     return files
 
 
+def _work_dir_origin(value: Any, work_dir: Path | None) -> Any:
+    """``value`` with the paths in a local work dir copy as the paths in the work dir it stands for (the runner's
+    local work dirs, :data:`~ephysalis.conversion_batch.source_cache.WORK_DIR_ORIGIN_ENV`)."""
+    origin = os.environ.get(WORK_DIR_ORIGIN_ENV)
+    if not origin or work_dir is None:
+        return value
+    if isinstance(value, dict):
+        return {k: _work_dir_origin(v, work_dir) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_work_dir_origin(v, work_dir) for v in value]
+    if isinstance(value, Path):
+        value = str(value)
+    if isinstance(value, str):
+        for local in dict.fromkeys((str(work_dir), str(work_dir.resolve()))):
+            if value == local or value.startswith(local + os.sep):
+                return origin + value[len(local):]
+    return value
+
+
 def step_record(step: str, recording_session: RecordingSession, config: RecordingSessionConfig | None, config_path: Path | None,
                 options: dict[str, Any], argv: list[str] | None = None,
                 work_dir: Path | None = None) -> dict[str, Any]:
@@ -150,12 +169,13 @@ def step_record(step: str, recording_session: RecordingSession, config: Recordin
     return {
         "step": step,
         "time": datetime.now(UTC).isoformat(timespec="seconds"),
-        "argv": ["ephysalis", *argv] if argv is not None else None,
+        "argv": ["ephysalis", *_work_dir_origin(argv, work_dir)] if argv is not None else None,
         "recording_session": os.environ.get(ORIGIN_ENV) or str(recording_session.path),
         **({"read_from": str(recording_session.path)} if os.environ.get(ORIGIN_ENV) else {}),
-        "config_file": str(config_path) if config_path else None,
+        "config_file": _work_dir_origin(str(config_path), work_dir) if config_path else None,
+        **({"worked_in": str(work_dir)} if os.environ.get(WORK_DIR_ORIGIN_ENV) and work_dir is not None else {}),
         "config": config.model_dump(mode="json", exclude_none=True) if config else None,
-        "options": options,
+        "options": _work_dir_origin(options, work_dir),
         "software": software_versions(),
         "environment": environment(),
         "inputs": input_fingerprint(recording_session.path, [work_dir] if work_dir else None),
@@ -197,7 +217,7 @@ def processing_record(work_dir: Path, export: dict[str, Any]) -> dict[str, Any]:
         sorting[segments.parent.name] = {k: info.get(k) for k in ("sorter", "sorter_params", "channel_ids")}
     return {
         "record_schema_version": RECORD_SCHEMA_VERSION,
-        "work_dir": str(work_dir),
+        "work_dir": _work_dir_origin(str(work_dir), work_dir),
         "export": export,
         "steps": step_records(work_dir),
         "spike_sorting": sorting,

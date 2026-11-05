@@ -108,3 +108,38 @@ def test_export_cli_into_bids(work_dir, tmp_path, output_format):  # noqa: F811
     else:
         assert channels.stream_id[0].startswith("processing/ecephys/LFP/")
     assert json.loads((ecephys / f"{prefix}_ecephys.json").read_text(encoding="utf-8"))["SamplingFrequency"] == 1000
+
+
+@pytest.mark.parametrize("output_format", ["nwb", "dh5"])
+def test_export_from_a_local_work_dir(work_dir, tmp_path, monkeypatch, output_format):  # noqa: F811
+    """The runner's local work dir (WORK_DIR_ORIGIN_ENV): the file is made in it, copied into the dataset in one go
+    and not kept; the records name the work dir it stands for."""
+    import json
+
+    from ephysalis.cli.main import main
+    from ephysalis.conversion_batch.source_cache import WORK_DIR_ORIGIN_ENV
+    from ephysalis.formats.output import bids, dh5, nwb
+
+    built = []
+    for module, name in ((dh5, "write_recording_session_dh5"), (nwb, "write_recording_session_nwb")):
+        real = getattr(module, name)
+        monkeypatch.setattr(module, name, lambda s, w, path, *a, _real=real, **k: (built.append(path), _real(s, w, path, *a, **k))[1])
+    copied = []
+    for name in ("add_dh5_to_bids", "add_nwb_to_bids"):
+        real = getattr(bids, name)
+        monkeypatch.setattr(bids, name, lambda *a, _real=real, **k: (copied.append([p for p in a if isinstance(p, type(tmp_path))]), _real(*a, **k))[1])
+    origin = tmp_path / "europa" / "work"
+    monkeypatch.setenv(WORK_DIR_ORIGIN_ENV, str(origin))
+    root = tmp_path / "bids"
+    assert main(["export", str(SPIKEGLX_CROP_RECORDING_SESSION), "--work-dir", str(work_dir), "--output-format",
+                 output_format, "--bids", str(root)]) == 0
+    assert built and all(path.parent == work_dir / "export" for path in built)
+    assert copied and all(built[0] in paths for paths in copied[:1])
+    data = next(root.glob(f"sub-*/ses-*/ecephys/*_ecephys.{output_format}"))
+    assert data.stat().st_size > 0
+    assert not list((work_dir / "export").iterdir())  # not kept (no second copy when the work dir goes back)
+    if output_format == "dh5":
+        assert (data.parent / data.name.replace(".dh5", "_units.csv")).exists()  # the sidecars went along
+    record = json.loads((work_dir / "provenance" / "export.json").read_text(encoding="utf-8"))[-1]
+    assert record["options"]["work_dir"] == str(origin) and record["worked_in"] == str(work_dir)
+    assert str(work_dir) not in json.dumps({k: v for k, v in record.items() if k != "worked_in"})

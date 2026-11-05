@@ -18,7 +18,9 @@ crashing step does not take the runner down; a failed step stops its session (th
 
 Reading: ``[source_cache]`` (:mod:`ephysalis.conversion_batch.source_cache`) lets the steps read the session
 folders directly or a copy on a local disk made before a session's first step that has to run. While sessions
-compute, a prefetch thread copies the next ones (at most ``parallel`` copies ahead).
+compute, a prefetch thread copies the next ones (at most ``parallel`` copies ahead). In ``local`` mode the steps
+also work in a local copy of the session's work dir, copied back when the session ends; the session's lock stays
+in its work dir.
 
 Pausing: ``ephysalis pause`` writes ``state_dir/pause``; runners start no new step, the running steps
 finish and the runners exit. ``ephysalis run`` again resumes (and removes the pause file). Ctrl+C
@@ -40,7 +42,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -52,7 +54,14 @@ from ephysalis.conversion_batch.config import (
     ConversionBatch,
     RecordingSessionJob,
 )
-from ephysalis.conversion_batch.source_cache import ORIGIN_ENV, SourceCache, SourceCacheSettings, Staged
+from ephysalis.conversion_batch.source_cache import (
+    ORIGIN_ENV,
+    WORK_DIR_ORIGIN_ENV,
+    SourceCache,
+    SourceCacheSettings,
+    Staged,
+    mirror,
+)
 from ephysalis.filesystem import glob_in_work_folder, remove_folder
 from ephysalis.step_settings import step_settings_argv
 from ephysalis.recording_session.config import save_recording_session_config
@@ -206,6 +215,11 @@ def acquire_lock(recording_session_job: RecordingSessionJob) -> bool:
     return False
 
 
+def _is_lock(relative: str) -> bool:
+    """The session lock (not copied between a work dir and its local copy)."""
+    return relative == "runner/lock"
+
+
 def release_lock(recording_session_job: RecordingSessionJob) -> None:
     owner = _lock_owner(recording_session_job)
     if owner and owner.get("pid") == os.getpid() and owner.get("host") == socket.gethostname():
@@ -290,7 +304,9 @@ class Runner:
         remove_folder(target)
 
     def run_step(self, recording_session_job: RecordingSessionJob, step: str, config_path: Path, config_text: bytes,
-                 staged: Staged | None = None) -> bool:
+                 staged: Staged | None = None, work_dir_origin: Path | None = None) -> bool:
+        """Run ``step`` unless it is done (``work_dir_origin``: the work dir of ``recording_session_job`` is a local
+        copy of that one; its records name the paths in it)."""
         previous = step_state(self.conversion_batch, recording_session_job, step, self.code, config_text, self.ignore_code_changes)
         if previous.finished:
             return True
@@ -317,6 +333,11 @@ class Runner:
         log = runner_dir(recording_session_job) / "logs" / f"{step}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         record = {**base, "state": "running", "argv": argv[3:], "log": str(log), "pid": os.getpid()}
+        if work_dir_origin is not None:
+            local = str(recording_session_job.work_dir)
+            record.update(argv=[str(work_dir_origin) + a[len(local):] if a == local or a.startswith(local + os.sep)
+                                else a for a in argv[3:]],
+                          log=str(work_dir_origin / log.relative_to(recording_session_job.work_dir)), worked_in=local)
         _write_record(recording_session_job, step, record)
         self._say(f"{recording_session_job.recording_session_id} {step}{why}")
         t0 = time.time()
@@ -324,6 +345,8 @@ class Runner:
             env = None
             if staged is not None and staged.copied:  # the step reads a copy: provenance records the original
                 env = {**os.environ, ORIGIN_ENV: str(staged.origin)}
+            if work_dir_origin is not None:  # the step works in a local copy: provenance records the work dir
+                env = {**(env or os.environ), WORK_DIR_ORIGIN_ENV: str(work_dir_origin)}
             child = subprocess.Popen(argv, cwd=self.conversion_batch.root, stdout=out, stderr=subprocess.STDOUT, env=env)
             with self._children_lock:
                 self._children.add(child)
@@ -341,7 +364,7 @@ class Runner:
         _write_record(recording_session_job, step, {**record, "state": state, "exit_code": code, "seconds": seconds,
                                       "finished": datetime.now(UTC).isoformat(timespec="seconds")})
         if code != 0:
-            self._say(f"{recording_session_job.recording_session_id} {step}: failed (exit {code}), see {log}")
+            self._say(f"{recording_session_job.recording_session_id} {step}: failed (exit {code}), see {record['log']}")
         return code == 0
 
     def run_recording_session(self, recording_session_job: RecordingSessionJob) -> str:
@@ -352,6 +375,46 @@ class Runner:
             owner = _lock_owner(recording_session_job) or {}
             self._say(f"{recording_session_job.recording_session_id}: another runner works on it ({owner.get('host')}, pid {owner.get('pid')})")
             return "locked"
+        try:
+            if self.source_cache_settings.mode == "direct" or self.dry_run or not self._has_work(recording_session_job):
+                return self._run_steps(recording_session_job)
+            return self._run_steps_locally(recording_session_job)
+        finally:
+            if not self.dry_run:
+                release_lock(recording_session_job)
+
+    def _run_steps_locally(self, recording_session_job: RecordingSessionJob) -> str:
+        """Run the steps in a local copy of the work dir, then copy it back (see the module docstring)."""
+        name = recording_session_job.recording_session_id
+        target = recording_session_job.work_dir
+        local = replace(recording_session_job, work_dir=self.source_cache.work_dir(name))
+        try:
+            t0 = time.time()
+            copied = mirror(target, local.work_dir, skip=_is_lock)
+            if copied:
+                self._say(f"{name}: work dir copied to {local.work_dir} ({copied / 1e9:.1f} GB in "
+                          f"{(time.time() - t0) / 60:.1f} min)")
+        except Exception as error:  # noqa: BLE001 (e.g. disk full): this session fails, the others go on
+            self._say(f"{name}: copying the work dir to {local.work_dir} failed: {error}")
+            return "failed"
+        result = self._run_steps(local, work_dir_origin=target)
+        try:
+            t0 = time.time()
+            copied = mirror(local.work_dir, target, skip=_is_lock)
+            self._say(f"{name}: work dir copied back to {target} ({copied / 1e9:.1f} GB in "
+                      f"{(time.time() - t0) / 60:.1f} min)")
+        except Exception as error:  # noqa: BLE001: the session fails; its results stay in the local copy
+            self._say(f"{name}: copying the work dir back to {target} failed: {error}; its results are in "
+                      f"{local.work_dir} until the session runs again")
+            return "failed"
+        try:
+            self.source_cache.remove_work_dir(name)
+        except OSError as error:  # e.g. Windows: a file still open; replaced when the session runs again
+            self._say(f"{name}: could not delete {local.work_dir} yet ({error})")
+        return result
+
+    def _run_steps(self, recording_session_job: RecordingSessionJob, work_dir_origin: Path | None = None) -> str:
+        """``done``, ``failed``, ``paused`` or ``interrupted``: the steps of a locked session."""
         staged: Staged | None = None
         result = "failed"
         try:
@@ -379,7 +442,7 @@ class Runner:
                     if staged is None:
                         result = "interrupted" if self.stop.is_set() else "paused"
                         return result
-                if not self.run_step(recording_session_job, step, config_path, config_text, staged):
+                if not self.run_step(recording_session_job, step, config_path, config_text, staged, work_dir_origin):
                     result = "interrupted" if self.stop.is_set() else "failed"
                     return result
             result = "done"
@@ -388,8 +451,6 @@ class Runner:
             if staged is not None:
                 self.source_cache.release(recording_session_job.recording_session_id, staged,
                                           keep=result in ("paused", "interrupted"))
-            if not self.dry_run:
-                release_lock(recording_session_job)
 
     def _has_work(self, recording_session_job: RecordingSessionJob) -> bool:
         """Whether a step of the session has to run (so that its folder is read)."""
@@ -422,6 +483,13 @@ class Runner:
             except Exception as error:  # noqa: BLE001 (a failed prefetch: the session copies when it starts)
                 self._say(f"{job.recording_session_id}: prefetch failed: {error}")
 
+    def _remove_left_work_dirs(self) -> None:
+        """Delete the local work dirs a stopped runner left (a crash: its session's work dir has the state before)."""
+        for job in self.conversion_batch.recording_session_jobs:
+            if self.source_cache.work_dir(job.recording_session_id).exists() and not _lock_alive(job):
+                self._say(f"{job.recording_session_id}: deleting the local work dir a stopped runner left")
+                self.source_cache.remove_work_dir(job.recording_session_id)
+
     def run(self, recording_session_ids: list[str] | None = None, parallel: int = 1) -> dict[str, str]:
         recording_session_jobs = [recording_session_job for recording_session_job in self.conversion_batch.recording_session_jobs if recording_session_job.include
                             and (recording_session_ids is None or recording_session_job.recording_session_id in recording_session_ids)]
@@ -438,6 +506,8 @@ class Runner:
                       + (f", at most {cache.max_size_gb:g} GB" if cache.max_size_gb is not None else "")
                       + f", {cache.reserve_bytes / 1e9:g} GB left free")
         results: dict[str, str] = {}
+        if self.source_cache_settings.mode != "direct" and not self.dry_run:
+            self._remove_left_work_dirs()
 
         def run_one_recording_session(recording_session_job: RecordingSessionJob) -> None:
             self._started.add(recording_session_job.recording_session_id)

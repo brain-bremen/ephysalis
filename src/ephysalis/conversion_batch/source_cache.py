@@ -10,14 +10,23 @@ Modes (:class:`SourceCacheMode`):
   interrupted keeps its copy: it is reused when the session resumes (if the source files are unchanged) and deleted
   when its space is needed.
 
-The copies of all sessions together (of every runner on this machine) stay below ``max_size_gb``, and leave
-``reserve_gb`` of the disk free. A session
+  The work dirs stay local too: when a step of a session has to run, the runner copies the session's work dir into
+  ``dir/.work/<recording_session_id>`` (:meth:`SourceCache.work_dir`), the steps read and write that copy, and when
+  the session ends (done, failed, paused or interrupted) it is copied back (:func:`mirror`) and deleted. So the
+  steps' outputs (LFP, CSD, MUA, ...) are written to the work dir once, not read back by the later steps over the
+  network, and the export builds its files locally and copies each into the dataset in one go. Until a session ends,
+  ``ephysalis status`` shows the state its work dir had when the session started.
+
+The copies of all sessions together (of every runner on this machine), with the local work dirs as they are when
+a copy is made, stay below ``max_size_gb``, and leave ``reserve_gb`` of the disk free (the work dirs grow while the
+steps run, by the size of a session's outputs). A session
 that needs more space than is free waits until other sessions release theirs; a session that alone is bigger than
 the cache can ever hold is read directly. Reading a folder once, sequentially, is fast on a network file system;
 the steps' own reads (memory-mapped, several workers) fetch the same data several times.
 
 Layout of ``dir``: ``<recording_session_id>/`` (the copy), ``<recording_session_id>.json`` (its entry: source, size,
-files, state, owner) and ``.lock`` (taken while the entries are changed).
+files, state, owner), ``.work/<recording_session_id>/`` (a local work dir) and ``.lock`` (taken while the entries
+are changed).
 """
 
 from __future__ import annotations
@@ -45,6 +54,9 @@ GB = 1_000_000_000
 DEFAULT_RESERVE_GB = 10.0
 WAIT_SECONDS = 30.0
 ORIGIN_ENV = "EPHYSALIS_RECORDING_SESSION_ORIGIN"  # the original folder of a step that reads a copy (provenance)
+WORK_DIR_ORIGIN_ENV = "EPHYSALIS_WORK_DIR_ORIGIN"  # the work dir a step's local work dir stands for (provenance)
+WORK_DIRS = ".work"  # the local work dirs, in the cache dir
+MIRROR_LAST = "runner/"  # the runner's step records: copied last, so that a record never claims outputs not copied
 
 
 class SourceCacheMode(StrEnum):
@@ -106,6 +118,57 @@ def folder_files(folder: Path) -> dict[str, list[int]]:
     return dict(sorted(files.items()))
 
 
+def mirror(source: Path, target: Path, skip: Callable[[str], bool] | None = None) -> int:
+    """Make ``target`` a copy of the folder ``source``: copy the files that differ from it (size or modification
+    time), delete the ones ``source`` does not have (and the folders left empty); the relative paths ``skip`` names
+    are left alone in both. Returns the bytes copied.
+
+    The step records (``runner/``) that differ are deleted first and copied last: when the copy stops half-way, the
+    steps whose outputs changed have no record in ``target`` (they run again), and the others keep theirs."""
+    skip = skip or (lambda relative: False)
+    have = {r: f for r, f in folder_files(source).items() if not skip(r)}
+    old = {r: f for r, f in (folder_files(target) if target.is_dir() else {}).items() if not skip(r)}
+    records = [r for r in sorted(set(have) | set(old)) if r.startswith(MIRROR_LAST)]
+    for relative in records:
+        if old.get(relative) != have.get(relative) and relative in old:
+            (target / relative).unlink()
+    copied = 0
+    for relative in [r for r in have if not r.startswith(MIRROR_LAST)] + [r for r in records if r in have]:
+        size, mtime_ns = have[relative]
+        if old.get(relative) == have[relative]:
+            continue
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tmp = destination.with_name(destination.name + ".mirror-partial")
+        shutil.copyfile(source / relative, tmp)
+        if tmp.stat().st_size != size:
+            raise OSError(f"{source / relative}: copied {tmp.stat().st_size} of {size} bytes")
+        os.utime(tmp, ns=(mtime_ns, mtime_ns))
+        tmp.replace(destination)
+        copied += size
+    for relative in old:
+        if relative not in have and not relative.startswith(MIRROR_LAST) and (target / relative).exists():
+            (target / relative).unlink()
+    for parent, folders, files in os.walk(target, topdown=False):
+        folder = Path(parent)
+        if folder != target and not folders and not files and not (source / folder.relative_to(target)).is_dir():
+            folder.rmdir()
+    return copied
+
+
+def folder_bytes(folder: Path) -> int:
+    """Bytes of the files below ``folder`` (0: no such folder), while steps may write there (files that are renamed
+    or deleted meanwhile do not count)."""
+    total = 0
+    for parent, _, names in os.walk(folder):
+        for name in names:
+            try:
+                total += (Path(parent) / name).stat().st_size
+            except FileNotFoundError:
+                pass
+    return total
+
+
 @dataclass
 class Staged:
     """The folder the steps of a session read, and where it came from."""
@@ -142,6 +205,22 @@ class SourceCache:
     def dir(self) -> Path:
         assert self.settings.dir is not None
         return self.settings.dir
+
+    def work_dir(self, name: str) -> Path:
+        """The local work dir of session ``name``."""
+        return self.dir / WORK_DIRS / name
+
+    def remove_work_dir(self, name: str) -> None:
+        """Delete the local work dir of session ``name`` (only inside the cache dir, never a source folder)."""
+        target = self.work_dir(name)
+        if target.is_symlink() or not target.exists():
+            target.unlink(missing_ok=True)
+            return
+        resolved = target.resolve()
+        if not resolved.is_relative_to((self.dir / WORK_DIRS).resolve()) or any(
+                resolved == p or resolved.is_relative_to(p) or p.is_relative_to(resolved) for p in self.protected):
+            raise RuntimeError(f"refusing to delete {resolved}: not a work dir in the source cache {self.dir}")
+        shutil.rmtree(target)
 
     @property
     def prefetched(self) -> set[str]:
@@ -281,7 +360,7 @@ class SourceCache:
                     stale = [n for n, e in entries.items() if not self._in_use(e)]
                     if not prefetch:
                         stale += sorted(n for n in self._prefetched if n in entries and n not in self._copying)
-                    used = sum(int(e.get("size", 0)) for e in entries.values())
+                    used = sum(int(e.get("size", 0)) for e in entries.values()) + folder_bytes(self.dir / WORK_DIRS)
                     free, limit = self._limits(used, self._not_yet_written(entries))
                     if size <= free + sum(int(entries[n].get("size", 0)) for n in stale):
                         for n in reversed(stale):  # the prefetched copies of the latest sessions first

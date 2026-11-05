@@ -23,6 +23,7 @@ from ephysalis.conversion_batch.source_cache import (
     SourceCacheMode,
     SourceCacheSettings,
     folder_files,
+    mirror,
 )
 
 
@@ -370,7 +371,13 @@ def test_concurrent_copies_stay_below_max_size(tmp_path, monkeypatch):
     def copyfile(src, dst, *args, **kwargs):
         time.sleep(0.05)
         result = real_copyfile(src, dst, *args, **kwargs)
-        peak.append(sum(p.stat().st_size for p in (tmp_path / "cache").rglob("*.bin")))
+        sizes = []
+        for p in (tmp_path / "cache").rglob("*.bin"):
+            try:
+                sizes.append(p.stat().st_size)
+            except FileNotFoundError:  # a copy renamed meanwhile (counted under its new name)
+                pass
+        peak.append(sum(sizes))
         return result
 
     monkeypatch.setattr(sc.shutil, "copyfile", copyfile)
@@ -405,3 +412,172 @@ def test_a_stop_during_the_copy(tmp_path, monkeypatch):
                 if json.loads(p.read_text()).get("state") != "complete"]
     monkeypatch.undo()
     assert Runner(load_conversion_batch(path), echo=lambda _: None).run() == {"a": "done", "b": "done"}
+
+
+# --- the local work dirs ---------------------------------------------------------------------------------------------
+
+def _tree(folder: Path) -> dict[str, bytes]:
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
+def _write(folder: Path, files: dict[str, bytes]) -> None:
+    for relative, data in files.items():
+        (folder / relative).parent.mkdir(parents=True, exist_ok=True)
+        (folder / relative).write_bytes(data)
+
+
+def test_mirror(tmp_path):
+    source, target = tmp_path / "local", tmp_path / "target"
+    _write(source, {"lfp/a.bin": b"a" * 1000, "session.toml": b"x", "runner/lfp.json": b"{}"})
+    _write(target, {"old/gone.bin": b"g", "session.toml": b"old", "runner/lock": b"pid", "runner/csd.json": b"{}"})
+    lock = lambda relative: relative == "runner/lock"  # noqa: E731
+    assert mirror(source, target, skip=lock) == 1003
+    assert _tree(target) == {**_tree(source), "runner/lock": b"pid"}  # the lock is left alone
+    assert not (target / "old").exists()  # folders left empty go
+    assert folder_files(target / "lfp") == folder_files(source / "lfp")  # with the modification times
+    assert mirror(source, target, skip=lock) == 0  # unchanged: nothing copied
+    (source / "lfp" / "a.bin").write_bytes(b"b" * 1000)  # same size, new modification time
+    os.utime(source / "lfp" / "a.bin", ns=(1, 1))
+    assert mirror(source, target, skip=lock) == 1000 and (target / "lfp" / "a.bin").read_bytes() == b"b" * 1000
+
+
+def test_mirror_stopped_half_way_leaves_no_record_of_changed_outputs(tmp_path, monkeypatch):
+    source, target = tmp_path / "local", tmp_path / "target"
+    _write(source, {"clocks/c.json": b"c", "runner/align-clocks.json": b"done", "lfp/a.bin": b"old",
+                    "runner/lfp.json": b"done 1"})
+    mirror(source, target)
+    _write(source, {"lfp/a.bin": b"new lfp", "runner/lfp.json": b"done 2"})  # lfp ran again
+    real_copyfile = sc.shutil.copyfile
+
+    def copyfile(src, dst, *args, **kwargs):
+        if Path(src).name == "a.bin":
+            raise OSError("Stale file handle")
+        return real_copyfile(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(sc.shutil, "copyfile", copyfile)
+    with pytest.raises(OSError):
+        mirror(source, target)
+    assert not (target / "runner" / "lfp.json").exists()  # lfp runs again
+    assert (target / "runner" / "align-clocks.json").read_bytes() == b"done"  # unchanged steps stay done
+    monkeypatch.setattr(sc.shutil, "copyfile", real_copyfile)
+    mirror(source, target)
+    assert _tree(target) == _tree(source)
+
+
+def _local_work_batch(tmp_path: Path) -> Path:
+    return write_conversion_batch(tmp_path, extra='[source_cache]\nmode = "local"\ndir = "cache"\n')
+
+
+def test_runner_works_in_a_local_work_dir(tmp_path, monkeypatch):
+    path = _local_work_batch(tmp_path)
+    local = (tmp_path / "cache").resolve() / ".work"
+    seen = []
+    real_run_step = Runner.run_step
+
+    def run_step(self, job, step, *args, **kwargs):  # what the steps see, and what europa has meanwhile
+        ok = real_run_step(self, job, step, *args, **kwargs)
+        target = tmp_path / "work" / job.recording_session_id
+        seen.append((job.work_dir, (target / "lfp").exists(), (target / "runner" / f"{step}.json").exists()))
+        return ok
+
+    monkeypatch.setattr(Runner, "run_step", run_step)
+    lines: list[str] = []
+    assert Runner(load_conversion_batch(path), echo=lines.append).run() == {"a": "done", "b": "done"}, "\n".join(lines)
+    assert {w for w, _, _ in seen} == {local / "a", local / "b"}  # the steps work in the local copies
+    assert not any(lfp or record for _, lfp, record in seen)  # nothing written to the work dir until the end
+    assert not list(local.iterdir())  # the local copies are deleted
+    conversion_batch = load_conversion_batch(path)
+    assert _states(conversion_batch, "a") == {s: "done" for s in STEPS}
+    job = conversion_batch.recording_session_job("a")
+    assert (job.work_dir / "lfp").is_dir() and (job.work_dir / "session.toml").exists()
+    record = read_record(job, "lfp")
+    assert record["argv"][record["argv"].index("--work-dir") + 1] == str(job.work_dir)  # the records name europa
+    assert record["worked_in"] == str(local / "a") and Path(record["log"]).is_file()
+    assert Path(record["log"]).is_relative_to(job.work_dir)
+    provenance = json.loads((job.work_dir / "provenance" / "lfp.json").read_text())[-1]
+    assert provenance["options"]["work_dir"] == str(job.work_dir) and provenance["worked_in"] == str(local / "a")
+    assert str(local) not in json.dumps({k: v for k, v in provenance.items() if k != "worked_in"})
+
+    # nothing to run: the work dir is not copied; a change of b: only b's work dir is copied, its steps run again
+    lines.clear()
+    Runner(load_conversion_batch(path), echo=lines.append).run()
+    assert not any("work dir" in line for line in lines), lines
+    write_conversion_batch(tmp_path, overrides_b='notes = "changed"', extra='[source_cache]\nmode = "local"\ndir = "cache"\n')
+    lines.clear()
+    assert Runner(load_conversion_batch(path), echo=lines.append).run() == {"a": "done", "b": "done"}
+    assert any("b: work dir copied to" in line for line in lines) and not any("a: work dir" in line for line in lines)
+    assert _states(load_conversion_batch(path), "b") == {s: "done" for s in STEPS}
+
+
+def test_a_paused_session_copies_its_work_dir_back(tmp_path, monkeypatch):
+    path = _local_work_batch(tmp_path)
+    real_run_step = Runner.run_step
+
+    def run_step(self, job, step, *args, **kwargs):  # pause after the first step
+        ok = real_run_step(self, job, step, *args, **kwargs)
+        (tmp_path / "state").mkdir(exist_ok=True)
+        (tmp_path / "state" / "pause").write_text("now")
+        return ok
+
+    monkeypatch.setattr(Runner, "run_step", run_step)
+    assert Runner(load_conversion_batch(path)).run(["a"]) == {"a": "paused"}
+    assert _states(load_conversion_batch(path), "a") == {"align-clocks": "done", "extract-events": None, "lfp": None}
+    assert not list((tmp_path / "cache" / ".work").iterdir())
+    monkeypatch.setattr(Runner, "run_step", real_run_step)
+    lines: list[str] = []
+    assert Runner(load_conversion_batch(path), echo=lines.append).run(["a"]) == {"a": "done"}
+    assert not any(" a align-clocks" in line for line in lines), lines  # resumed: the first step stays done
+
+
+def test_copying_the_work_dir_back_fails(tmp_path, monkeypatch):
+    from ephysalis.conversion_batch import runner
+
+    path = _local_work_batch(tmp_path)
+    real_mirror = runner.mirror
+
+    def mirror_to_europa_fails(source, target, **kwargs):
+        if Path(target).is_relative_to(tmp_path / "work"):
+            raise OSError("Stale file handle")
+        return real_mirror(source, target, **kwargs)
+
+    monkeypatch.setattr(runner, "mirror", mirror_to_europa_fails)
+    lines: list[str] = []
+    assert Runner(load_conversion_batch(path), echo=lines.append).run(["a"]) == {"a": "failed"}
+    local = (tmp_path / "cache").resolve() / ".work" / "a"
+    assert any("copying the work dir back" in line and str(local) in line for line in lines)
+    assert (local / "lfp").is_dir()  # the results are not lost yet
+    # the next run: a stopped runner's copy goes (europa has the state before); the session runs again
+    monkeypatch.setattr(runner, "mirror", real_mirror)
+    lines.clear()
+    assert Runner(load_conversion_batch(path), echo=lines.append).run(["a"]) == {"a": "done"}
+    assert any("a: deleting the local work dir a stopped runner left" in line for line in lines)
+    assert _states(load_conversion_batch(path), "a") == {s: "done" for s in STEPS}
+
+
+def test_copying_the_work_dir_fails(tmp_path, monkeypatch):
+    from ephysalis.conversion_batch import runner
+
+    path = _local_work_batch(tmp_path)
+    Runner(load_conversion_batch(path), steps=["align-clocks"]).run(["a"])
+    real_mirror = runner.mirror
+
+    def mirror_from_europa_fails(source, target, **kwargs):
+        if Path(source).is_relative_to(tmp_path / "work"):
+            raise OSError("No space left on device")
+        return real_mirror(source, target, **kwargs)
+
+    monkeypatch.setattr(runner, "mirror", mirror_from_europa_fails)
+    lines: list[str] = []
+    assert Runner(load_conversion_batch(path), echo=lines.append).run(["a"]) == {"a": "failed"}
+    assert any("a: copying the work dir to" in line for line in lines)
+    work = tmp_path / "work" / "a"
+    assert _states(load_conversion_batch(path), "a")["align-clocks"] == "done" and not (work / "runner" / "lock").exists()
+
+
+def test_the_work_dirs_count_toward_max_size(tmp_path):
+    source = _session(tmp_path, "s1", {"a.bin": 6000})
+    cache = _cache(tmp_path, max_size_gb=10_000 / GB, protected=[source])
+    _write(cache.work_dir("s0"), {"lfp/x.bin": b"x" * 5000})  # a running session's outputs
+    assert cache.stage("s1", source).path == source.resolve()  # does not fit next to it (no copy holds space)
+    cache.remove_work_dir("s0")
+    assert cache.stage("s1", source).copied
