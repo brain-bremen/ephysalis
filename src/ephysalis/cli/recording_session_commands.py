@@ -367,7 +367,20 @@ def _open_with_config(args: argparse.Namespace) -> tuple[RecordingSession, Path,
     work_dir = Path(args.work_dir) if args.work_dir else default_work_dir(path)
     config, config_path = _load_config_for(path, work_dir, args.config)
     input_format = args.format or (config.input_format if config is not None else None)
-    return open_recording_session(path, input_format), work_dir, config, config_path
+    recording_session = open_recording_session(path, input_format)
+    check_config_runs(recording_session, config, config_path)
+    return recording_session, work_dir, config, config_path
+
+
+def check_config_runs(recording_session: RecordingSession, config: RecordingSessionConfig | None, config_path: Path | None) -> None:
+    """Stop when the config names runs the recording does not have: their settings (``include = false``, a task)
+    would not apply, and the runs they meant would be processed with the defaults."""
+    if config is None:
+        return
+    names = [run.name for run in recording_session.runs]
+    if unknown := [run.name for run in config.runs if run.name not in names]:
+        raise SystemExit(f"{config_path}: runs not in the recording {recording_session.path}: {', '.join(unknown)} "
+                         f"(its runs: {', '.join(names)})")
 
 
 def _load_config_for(recording_session_path: Path, work_dir: Path, config: str | None) -> tuple[RecordingSessionConfig | None, Path | None]:

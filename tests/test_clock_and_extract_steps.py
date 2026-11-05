@@ -40,3 +40,23 @@ def test_dh5_event_codes(tmp_path):
     loaded = load_run_events(tmp_path / "events.csv")
     assert list(loaded.columns) == COLUMNS
     np.testing.assert_array_equal(dh5_event_codes(loaded, 1000), [3, -3, 1007])
+
+
+def test_a_config_naming_runs_the_recording_does_not_have(tmp_path):
+    """Their settings would not apply (e.g. include = false): the step stops and names the recording's runs."""
+    import pytest
+
+    from ephysalis.formats.input.base import open_recording_session
+    from ephysalis.recording_session.config import (
+        RunConfig,
+        default_recording_session_config,
+        save_recording_session_config,
+    )
+
+    config = default_recording_session_config(open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION))
+    config.runs.append(RunConfig(name="no_such_run", include=False))
+    save_recording_session_config(config, tmp_path / "session.toml")
+    with pytest.raises(SystemExit, match=f"runs not in the recording .*: no_such_run \\(its runs: .*{RUN}"):
+        main(["align-clocks", str(SPIKEGLX_CROP_RECORDING_SESSION), "--config", str(tmp_path / "session.toml"),
+              "--work-dir", str(tmp_path / "work")])
+    assert not (tmp_path / "work" / "clocks").exists()
