@@ -374,11 +374,15 @@ def _open_with_config(args: argparse.Namespace) -> tuple[RecordingSession, Path,
 
 def check_config_runs(recording_session: RecordingSession, config: RecordingSessionConfig | None, config_path: Path | None) -> None:
     """Stop when the config names runs the recording does not have: their settings (``include = false``, a task)
-    would not apply, and the runs they meant would be processed with the defaults."""
+    would not apply, and the runs they meant would be processed with the defaults. An entry ``<file>`` of a file
+    split into runs ``<file>_part<k>`` applies to those runs (:meth:`RecordingSessionConfig.run_config`)."""
     if config is None:
         return
+    from ephysalis.recording_session.config import run_file_name
+
     names = [run.name for run in recording_session.runs]
-    if unknown := [run.name for run in config.runs if run.name not in names]:
+    files = {run_file_name(name) for name in names} - {None}  # files split into runs <file>_part<k>
+    if unknown := [run.name for run in config.runs if run.name not in names and run.name not in files]:
         raise SystemExit(f"{config_path}: runs not in the recording {recording_session.path}: {', '.join(unknown)} "
                          f"(its runs: {', '.join(names)})")
 

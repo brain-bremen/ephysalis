@@ -278,7 +278,12 @@ class RecordingSessionConfig(BaseModel):
     notes: str = Field(default="", description="Free text")
 
     def run_config(self, name: str) -> RunConfig | None:
-        return next((r for r in self.runs if r.name == name), None)
+        """The entry of run ``name``; for a run ``<file>_part<k>`` (a recording file split by pauses, e.g. a DAQ
+        file: :func:`run_file_name`) without an entry of its own, the entry of ``<file>``."""
+        exact = next((r for r in self.runs if r.name == name), None)
+        if exact is not None or (file := run_file_name(name)) is None:
+            return exact
+        return next((r for r in self.runs if r.name == file), None)
 
     def task_of(self, run_names: list[str]) -> str | None:
         """Task of a file with these runs: their common task, else None."""
@@ -288,6 +293,12 @@ class RecordingSessionConfig(BaseModel):
     @property
     def included_runs(self) -> list[str]:
         return [r.name for r in self.runs if r.include]
+
+
+def run_file_name(run_name: str) -> str | None:
+    """``<file>`` of a run named ``<file>_part<k>`` (the runs of a recording file split by pauses), else None."""
+    match = re.fullmatch(r"(.+)_part\d+", run_name)
+    return match[1] if match else None
 
 
 # tables written with one inline table per entry (one line each), by key path
