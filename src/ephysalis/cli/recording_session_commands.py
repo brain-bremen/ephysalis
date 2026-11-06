@@ -413,9 +413,9 @@ def _write_trials(run: Run, sync: RunSync, config: RecordingSessionConfig | None
     from ephysalis.timeline.steps import extract_run_trials
 
     (work_dir / "trials").mkdir(parents=True, exist_ok=True)
-    from ephysalis.filesystem import glob_in_work_folder
+    from ephysalis.filesystem import run_files
 
-    for old in glob_in_work_folder(work_dir / "trials", f"{run.name}_*.csv"):
+    for old in run_files(work_dir / "trials", run.name, ".csv", run.recording_run_names):
         old.unlink()
     trials, run_start = extract_run_trials(run, sync, config)
     for experimental_protocol, table in trials.items():

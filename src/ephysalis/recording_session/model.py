@@ -69,6 +69,9 @@ class Run:
     recorded_start_time: datetime | None = None
     start_time_method: str = ""  # how ``start_time`` was obtained, if not from the recording
     extra: dict = field(default_factory=dict)  # format-specific details, used only by the format
+    # names of all runs of the recording (set by RecordingSession; kept when a session of one run is made from it):
+    # the files of this run in a work dir are told apart from those of a run whose name starts with "<name>_"
+    recording_run_names: tuple[str, ...] = ()
     def get_recording(self, kind: StreamKind, probe_id: str | None = None) -> BaseRecording:
         recording = self.format.get_stream_recording(self, kind, probe_id)
         info = self.probes.get(probe_id) if probe_id is not None else None
@@ -91,6 +94,12 @@ class RecordingSession:
     path: Path
     format: InputFormat
     runs: list[Run]
+
+    def __post_init__(self) -> None:
+        names = tuple(run.name for run in self.runs)
+        for run in self.runs:
+            if not run.recording_run_names:
+                run.recording_run_names = names
 
     @property
     def probe_ids(self) -> list[str]:

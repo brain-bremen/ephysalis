@@ -161,9 +161,9 @@ def recording_session_trials(work_dir: Path, runs: list[Run], offsets: dict[str,
     """Trials of all runs on the session time axis, with ``run`` and ``experimental protocol`` columns."""
     tables = []
     for run in runs:
-        from ephysalis.filesystem import glob_in_work_folder
+        from ephysalis.filesystem import run_files
 
-        for csv in glob_in_work_folder(work_dir / "trials", f"{run.name}_*.csv"):
+        for csv in run_files(work_dir / "trials", run.name, ".csv", run.recording_run_names):
             try:
                 trials = pd.read_csv(csv)
             except pd.errors.EmptyDataError:  # a experimental protocol without trials

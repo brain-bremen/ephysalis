@@ -39,6 +39,15 @@ def glob_in_work_folder(folder: str | Path, pattern: str) -> list[Path]:
     return sorted(folder.glob(pattern))
 
 
+def run_files(folder: str | Path, run_name: str, suffix: str, run_names: tuple[str, ...] | list[str] = ()) -> list[Path]:
+    """The files ``<run_name>_<anything><suffix>`` of a run in ``folder`` (:func:`glob_in_work_folder`), without
+    those of the other runs in ``run_names`` whose name starts with ``<run_name>_`` (runs ``task`` and
+    ``task_aftercrash``: ``task_*.csv`` also matches ``task_aftercrash_protocol.csv``)."""
+    longer = [n for n in run_names if n != run_name and n.startswith(run_name + "_")]
+    return [p for p in glob_in_work_folder(folder, f"{run_name}_*{suffix}")
+            if not any(p.name.startswith(n + "_") for n in longer)]
+
+
 def copy_folder(source: str | Path, destination: str | Path) -> None:
     """Copy the folder ``source`` to ``destination`` (which must not exist), then refresh the listing of every
     copied folder so that readers see all files at once."""
