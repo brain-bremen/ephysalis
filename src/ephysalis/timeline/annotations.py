@@ -135,8 +135,9 @@ def line_descriptions(lines: dict[int, str], digital: dict[str, DigitalLineConfi
 def recording_session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str, float],
                              digital: dict[str, DigitalLineConfig]) -> tuple[pd.DataFrame, dict[int, str]]:
     """Pulses of all runs on the file's time axis (``offsets``: start of each run on it) and
-    the lines with a role (``line -> role``), from ``events/<run>.csv``."""
-    from ephysalis.timeline.events import load_run_events
+    the lines with a role (``line -> role``), from ``events/<run>.csv`` and the edges of the lines kept for their
+    pulses (``events/<run>.pulse_lines.npz``, ``pulse_lines`` of extract-events)."""
+    from ephysalis.timeline.events import PULSE_LINES_SUFFIX, load_pulse_line_edges, load_run_events
 
     parts, lines = [], {}
     for run in runs:
@@ -144,6 +145,10 @@ def recording_session_pulses(work_dir: Path, runs: list[Run], offsets: dict[str,
         if not path.exists():
             continue
         events = load_run_events(path)
+        extra = path.with_name(f"{run.name}{PULSE_LINES_SUFFIX}")  # lines kept for their pulses (pulse_lines)
+        if extra.exists():
+            events = pd.concat([events, load_pulse_line_edges(extra)], ignore_index=True).sort_values(
+                "time", kind="stable", ignore_index=True)
         ttl = events[(events.source == "ttl") & (events["name"] != "")]
         lines.update({int(line): str(role) for line, role in ttl.groupby("line")["name"].first().items()})
         pulses = line_pulses(events, digital, run.name)

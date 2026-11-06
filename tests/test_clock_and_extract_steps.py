@@ -86,3 +86,23 @@ def test_an_entry_of_a_file_split_into_runs():
     config.runs.append(RunConfig(name="day_mapping_b"))
     with pytest.raises(SystemExit, match="runs not in the recording .*: day_mapping_b "):
         check_config_runs(RecordingSession(name="day", path=Path("."), format=None, runs=runs), config, None)
+
+
+def test_pulse_lines(tmp_path):
+    """A line with in_events = false (the sync line here; a 100 Hz frame line in the lab's setups) kept for its
+    pulses: not in the events, but in the pulses of the exports."""
+    from ephysalis.formats.input.base import open_recording_session
+    from ephysalis.timeline.annotations import recording_session_pulses
+    from ephysalis.recording_session.config import default_recording_session_config
+
+    recording_session = str(SPIKEGLX_CROP_RECORDING_SESSION)
+    assert main(["extract-events", recording_session, "--work-dir", str(tmp_path), "--pulse-lines", "sync"]) == 0
+    events = pd.read_csv(tmp_path / "events" / f"{RUN}.csv")
+    assert "sync" not in set(events["name"].dropna())
+    session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    digital = default_recording_session_config(session).aux_channels.digital
+    pulses, lines = recording_session_pulses(tmp_path, session.runs, {RUN: 0.0}, digital)
+    sync = pulses[pulses.role == "sync"]
+    assert len(sync) == 5 and (sync.stop_time[:4] > sync.start_time[:4]).all() and sync.stop_time.isna().iloc[4] and lines[digital["sync"].bit + 1] == "sync"
+    assert main(["extract-events", recording_session, "--work-dir", str(tmp_path)]) == 0  # without: no file
+    assert not (tmp_path / "events" / f"{RUN}.pulse_lines.npz").exists()

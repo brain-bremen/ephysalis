@@ -95,6 +95,38 @@ def run_events(run: Run, sync: RunSync, aux_channels: AuxChannelMap, config: Eve
     return events[COLUMNS]
 
 
+PULSE_LINES_SUFFIX = ".pulse_lines.npz"  # events/<run>.pulse_lines.npz: edges of the pulse lines (extract-events)
+
+
+def run_pulse_line_edges(run: Run, sync: RunSync, aux_channels: AuxChannelMap, roles: list[str]) -> pd.DataFrame:
+    """Edges (columns ``time``, ``line``, ``state``, ``name``) of the lines of ``roles``, which are not in the
+    events (``in_events = false``, e.g. a frame line), for their pulses in the exports (``pulse_lines`` of
+    extract-events)."""
+    lines = {aux_channels.digital[role].bit + 1: role for role in roles if role in aux_channels.digital}
+    if unknown := sorted(set(roles) - set(aux_channels.digital)):
+        raise ValueError(f"pulse_lines: no digital line with the role {', '.join(unknown)} in [aux_channels.digital]")
+    if run.aux_stream is None or not lines or not isinstance(run.format, ReadsDigitalLineEdges):
+        return pd.DataFrame({"time": [], "line": [], "state": [], "name": []})
+    ttl = run.format.read_digital_line_edges(run, set(lines))
+    ttl = ttl[ttl.line.isin(lines)]
+    return pd.DataFrame({"time": sync.to_reference_time(AUX, ttl.aux_sample.to_numpy(float)),
+                         "line": ttl.line.to_numpy(np.int64), "state": ttl.state.to_numpy(np.int64),
+                         "name": [lines[int(n)] for n in ttl.line]}).sort_values("time", kind="stable",
+                                                                                 ignore_index=True)
+
+
+def save_pulse_line_edges(path, edges: pd.DataFrame) -> None:
+    np.savez_compressed(path, time=edges.time.to_numpy(float), line=edges.line.to_numpy(np.int64),
+                        state=edges.state.to_numpy(np.int64), name=edges.name.to_numpy(str))
+
+
+def load_pulse_line_edges(path) -> pd.DataFrame:
+    """``events/<run>.pulse_lines.npz`` as event rows (``source = ttl``)."""
+    with np.load(path) as data:
+        return pd.DataFrame({"time": data["time"], "source": "ttl", "line": pd.array(data["line"], "Int64"),
+                             "state": pd.array(data["state"], "Int64"), "word": pd.NA, "name": data["name"].astype(str)})
+
+
 def load_run_events(path) -> pd.DataFrame:
     """``events/<run>.csv``."""
     events = pd.read_csv(path, keep_default_na=False, na_values={c: [""] for c in INT_COLUMNS})

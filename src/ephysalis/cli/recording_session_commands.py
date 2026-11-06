@@ -462,7 +462,28 @@ def _extract_trials(args: argparse.Namespace) -> int:
 
 
 def _extract_events(args: argparse.Namespace) -> int:
-    return _extract_step(args, "extract-events", _write_events)
+    pulse_lines = list(getattr(args, "pulse_lines", None) or [])
+
+    def write(run: Run, sync: RunSync, config: RecordingSessionConfig | None, work_dir: Path) -> None:
+        _write_events(run, sync, config, work_dir)
+        _write_pulse_lines(run, sync, config, work_dir, pulse_lines)
+
+    return _extract_step(args, "extract-events", write)
+
+
+def _write_pulse_lines(run: Run, sync: RunSync, config: RecordingSessionConfig | None, work_dir: Path,
+                       roles: list[str]) -> None:
+    """``events/<run>.pulse_lines.npz``: the edges of the lines of ``roles`` (``--pulse-lines``)."""
+    from ephysalis.timeline.events import PULSE_LINES_SUFFIX, run_pulse_line_edges, save_pulse_line_edges
+    from ephysalis.timeline.steps import aux_channel_map
+
+    path = work_dir / "events" / f"{run.name}{PULSE_LINES_SUFFIX}"
+    path.unlink(missing_ok=True)
+    if not roles:
+        return
+    edges = run_pulse_line_edges(run, sync, aux_channel_map(run, config), roles)
+    save_pulse_line_edges(path, edges)
+    print(f"{run.name}: {len(edges)} edges of the pulse lines {', '.join(roles)}")
 
 
 def _extract_behavior(args: argparse.Namespace) -> int:

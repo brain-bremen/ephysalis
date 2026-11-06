@@ -214,6 +214,10 @@ def events_table(nwbfile: NWBFile) -> pd.DataFrame:
     tables = []
     if "trigger_pulses" in nwbfile.intervals:
         pulses = nwbfile.intervals["trigger_pulses"].to_dataframe()
+        if "events" in nwbfile.processing and "trigger_lines" in nwbfile.processing["events"].data_interfaces:
+            lines = nwbfile.processing["events"]["trigger_lines"].to_dataframe()
+            if "in_events" in lines:  # lines kept only for their pulses (e.g. 100 Hz frames): not in events.tsv
+                pulses = pulses[~pulses.role.isin(set(lines.role[~lines.in_events.astype(bool)]))]
         tables.append(pd.DataFrame({
             "onset": pulses.start_time, "duration": pulses.stop_time - pulses.start_time,
             "trial_type": pulses.role, "run": pulses.run, "ttl_line": pulses.line,

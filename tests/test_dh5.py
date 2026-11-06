@@ -143,3 +143,22 @@ def test_export_from_a_local_work_dir(work_dir, tmp_path, monkeypatch, output_fo
     record = json.loads((work_dir / "provenance" / "export.json").read_text(encoding="utf-8"))[-1]
     assert record["options"]["work_dir"] == str(origin) and record["worked_in"] == str(work_dir)
     assert str(work_dir) not in json.dumps({k: v for k, v in record.items() if k != "worked_in"})
+
+
+def test_pulse_lines_in_the_dh5_not_in_events_tsv(work_dir, tmp_path):  # noqa: F811
+    import h5py
+
+    from ephysalis.cli.main import main
+
+    rs = str(SPIKEGLX_CROP_RECORDING_SESSION)
+    assert main(["extract-events", rs, "--work-dir", str(work_dir), "--pulse-lines", "sync"]) == 0
+    root = tmp_path / "bids"
+    try:
+        assert main(["export", rs, "--work-dir", str(work_dir), "--output-format", "dh5", "--bids", str(root)]) == 0
+        data = next(root.glob("sub-*/ses-*/ecephys/*_ecephys.dh5"))
+        with h5py.File(data, "r") as f:
+            assert len(f["Intervals"]["sync"]) == 4  # (the 5th ends after the crop: no end, not in the DH5)
+        events = pd.read_csv(next(root.glob("sub-*/ses-*/ecephys/*_events.tsv")), sep="\t")
+        assert "sync" not in set(events.trial_type)
+    finally:
+        assert main(["extract-events", rs, "--work-dir", str(work_dir)]) == 0  # the shared work dir as before

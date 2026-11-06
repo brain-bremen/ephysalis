@@ -67,7 +67,10 @@ class ExtractTrialsSettings(StepSettings):
 
 
 class ExtractEventsSettings(StepSettings):
-    pass
+    pulse_lines: list[str] = Field(default_factory=list, description=(
+        "Roles of digital lines with in_events = false whose pulses are kept anyway: in the exported files' "
+        "trigger pulses (DH5 /Intervals/<role>, NWB trigger_pulses), not in the events or the BIDS events.tsv "
+        "(e.g. the 100 Hz frame pulses of a stimulus PC)"))
 
 
 class ExtractBehaviorSettings(StepSettings):

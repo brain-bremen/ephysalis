@@ -87,7 +87,9 @@ No settings (an empty table runs the step).
 
 ### `[steps.extract-events]`
 
-No settings (an empty table runs the step).
+| key | type | default | description |
+|---|---|---|---|
+| `pulse_lines` | list[string] | `[]` | Roles of digital lines with in_events = false whose pulses are kept anyway: in the exported files' trigger pulses (DH5 /Intervals/<role>, NWB trigger_pulses), not in the events or the BIDS events.tsv (e.g. the 100 Hz frame pulses of a stimulus PC) |
 
 ### `[steps.extract-behavior]`
 
