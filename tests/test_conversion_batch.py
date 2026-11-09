@@ -423,12 +423,18 @@ def test_config_digest_per_step():
     assert config_digest("lfp", same) != config_digest("lfp", mains)
     assert config_digest("csd", same) == config_digest("csd", mains)
     assert config_digest("extract-trials", same) != config_digest("extract-trials", text(aux_channels={"analog": {"photodiode": 9}}))
+    off = text(line_noise={"enabled": False})
+    assert config_digest("lfp", same) != config_digest("lfp", off)
+    assert config_digest("mua", same) == config_digest("mua", off) and config_digest("align-clocks", same) == config_digest("align-clocks", off)
 
 
-def test_records_of_the_earlier_digest_are_kept(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_records_of_the_earlier_digest_are_kept(tmp_path, version):
     """A record with the sha256 of the config text (earlier ephysalis) counts as done when the previous merged
     config has the same digest now, and is updated; a real change still runs the step."""
     import hashlib
+
+    from ephysalis.conversion_batch.runner import config_digest
 
     path = write_conversion_batch(tmp_path)
     assert Runner(load_conversion_batch(path), echo=lambda _: None).run() == {"a": "done", "b": "done"}
@@ -439,7 +445,8 @@ def test_records_of_the_earlier_digest_are_kept(tmp_path):
     for s in STEPS:  # as written by the earlier digest
         f = work / "runner" / f"{s}.json"
         record = json.loads(f.read_text())
-        record["inputs"]["config"] = hashlib.sha256(old_text).hexdigest()
+        record["inputs"]["config"] = (hashlib.sha256(old_text).hexdigest() if version == 1
+                                      else config_digest(s, old_text, version))
         f.write_text(json.dumps(record))
     run_ids = {s: read_record(job, s)["run_id"] for s in STEPS}
     write_conversion_batch(tmp_path, extra="")  # unchanged batch
@@ -451,4 +458,4 @@ def test_records_of_the_earlier_digest_are_kept(tmp_path):
     assert (work / "runner" / "session.previous.toml").read_bytes() == old_text
     for s in STEPS:
         record = read_record(job, s)
-        assert record["run_id"] == run_ids[s] and record["inputs"]["config"].startswith("v2:")
+        assert record["run_id"] == run_ids[s] and record["inputs"]["config"].startswith("v3:")

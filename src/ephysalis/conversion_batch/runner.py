@@ -10,7 +10,8 @@ A step is done when its record says ``done`` with the same stamp. The stamp has 
   the runs of the steps whose outputs it reads (:data:`~ephysalis.conversion_batch.config.STEP_INPUTS`); so a
   step runs again when its config or options change or a step before it ran again. The descriptive keys of the
   config (:data:`DESCRIPTIVE_KEYS`: notes, the probes' type, model, ...) count only for ``export``, which writes
-  them, and of ``[aux_channels.analog]`` each step counts only the roles it reads (:func:`_analog_roles_read`); records of the earlier digest (the whole config text) are compared through the previous merged config
+  them, ``[line_noise]`` counts only for lfp (and export), and of ``[aux_channels.analog]`` each step counts only the
+  roles it reads (:func:`_analog_roles_read`); records of the earlier digest (the whole config text) are compared through the previous merged config
   (``runner/session.previous.toml``) and updated;
 - code: the versions of ephysalis (with its git commit) and of the plugin packages.
   ``--ignore-code-changes`` counts steps done with other code as done.
@@ -36,6 +37,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -146,7 +148,7 @@ def write_recording_session_config(recording_session_job: RecordingSessionJob) -
 DESCRIPTIVE_KEYS = ("notes",)
 DESCRIPTIVE_PROBE_KEYS = ("probe_type", "manufacturer", "model", "position_description")
 PREVIOUS_CONFIG = "session.previous.toml"
-CONFIG_DIGEST_PREFIX = "v2:"
+CONFIG_DIGEST_VERSION = 3  # v1: sha256 of the config text; v2: + descriptive keys, analog roles; v3: + line_noise
 
 
 def _without_descriptive_keys(value: Any) -> Any:
@@ -160,6 +162,7 @@ def _without_descriptive_keys(value: Any) -> Any:
 # The analog roles ([aux_channels.analog]) a step reads: all for these, for lfp the line-noise reference, for
 # extract-trials the trial photodiode (photodiode_pulses); the other steps read none.
 ALL_ANALOG_ROLES = ("extract-behavior", "export")
+LINE_NOISE_STEPS = ("lfp", "export")  # the steps that read [line_noise]
 TRIAL_ANALOG_ROLES = ("photodiode",)
 
 
@@ -175,35 +178,48 @@ def _analog_roles_read(step: str, data: dict[str, Any]) -> set[str] | None:
     return set()
 
 
-def config_digest(step: str, config_text: bytes) -> str:
-    """The digest of the merged config for ``step``: without the descriptive keys (except for ``export``) and with
-    only the analog roles the step reads."""
+def config_digest(step: str, config_text: bytes, version: int = CONFIG_DIGEST_VERSION) -> str:
+    """The digest of the merged config for ``step``: without the descriptive keys (except for ``export``), with
+    only the analog roles the step reads and ``[line_noise]`` only for the steps that read it. ``version``: the
+    digest of an earlier ephysalis (1: the config text; 2: without line_noise handling), for its records."""
     import tomllib
 
+    if version == 1:
+        return _sha256(config_text)
     data = tomllib.loads(config_text.decode("utf-8"))
     if step != "export":
         data = _without_descriptive_keys(data)
         for probe in (data.get("probes") or {}).values():
             for key in DESCRIPTIVE_PROBE_KEYS:
                 probe.pop(key, None)
+    if version >= 3 and step not in LINE_NOISE_STEPS:
+        data.pop("line_noise", None)  # read by lfp only (later steps follow through its run id)
     roles = _analog_roles_read(step, data)
     analog = (data.get("aux_channels") or {}).get("analog")
     if roles is not None and isinstance(analog, dict):
         data["aux_channels"]["analog"] = {k: v for k, v in analog.items() if k in roles}
-    return CONFIG_DIGEST_PREFIX + _sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8"))
+    return f"v{version}:" + _sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8"))
+
+
+def _digest_version(digest: Any) -> int | None:
+    if not isinstance(digest, str):
+        return None
+    match = re.fullmatch(r"v(\d+):[0-9a-f]{64}", digest)
+    return int(match[1]) if match else (1 if re.fullmatch(r"[0-9a-f]{64}", digest) else None)
 
 
 def _same_inputs_as_earlier_digest(recording_session_job: RecordingSessionJob, step: str, recorded: dict[str, Any],
                                    inputs: dict[str, Any]) -> bool:
-    """A record of the earlier digest (sha256 of the config text) has the same inputs as ``inputs``: its config is
-    the previous merged config (or the current ``session.toml``) and that one has the same digest now."""
-    old = recorded.get("config")
-    if not isinstance(old, str) or old.startswith(CONFIG_DIGEST_PREFIX):
+    """A record of an earlier digest version has the same inputs as ``inputs``: the config it was made with (the
+    previous merged config or the current ``session.toml``, whichever gives the recorded digest in that version)
+    has the same digest as the current one in the current version."""
+    version = _digest_version(recorded.get("config"))
+    if version is None or version >= CONFIG_DIGEST_VERSION:
         return False
     if {k: v for k, v in recorded.items() if k != "config"} != {k: v for k, v in inputs.items() if k != "config"}:
         return False
     for path in (runner_dir(recording_session_job) / PREVIOUS_CONFIG, recording_session_job.work_dir / "session.toml"):
-        if path.exists() and _sha256(text := path.read_bytes()) == old:
+        if path.exists() and config_digest(step, text := path.read_bytes(), version) == recorded["config"]:
             return config_digest(step, text) == inputs["config"]
     return False
 
