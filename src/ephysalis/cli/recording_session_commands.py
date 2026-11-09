@@ -498,7 +498,9 @@ def _extract_behavior(args: argparse.Namespace) -> int:
 
 def _write_analog(run: Run, sync: RunSync, config: RecordingSessionConfig | None, work_dir: Path,
                   roles: list[str]) -> None:
-    """``analog/<run>.npz``: the analog aux channels of ``roles`` (``analog_roles`` of extract-behavior)."""
+    """``analog/<run>.npz``: the analog aux channels of ``roles`` (``analog_roles`` of extract-behavior), and
+    ``_roles``: all of ``roles`` in their order (the DH5 block of a role is its place in it, also when a run lacks
+    roles before it)."""
     import numpy as np
 
     from ephysalis.timeline.steps import extract_run_analog
@@ -508,7 +510,7 @@ def _write_analog(run: Run, sync: RunSync, config: RecordingSessionConfig | None
     signals = extract_run_analog(run, sync, config, roles)
     if signals:
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(path, **signals)
+        np.savez(path, _roles=np.array(roles), **signals)
         print(f"{run.name}: analog {', '.join(signals)}, {len(next(iter(signals.values())))} samples")
 
 

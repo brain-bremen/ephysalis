@@ -183,5 +183,12 @@ def test_analog_roles(work_dir, tmp_path):  # noqa: F811
                 block = file.get_cont_group_by_id(cont_id)
                 assert block.name == role
                 np.testing.assert_allclose(block.calibrated_data[:, 0], values, atol=block.calibration[0])
+        # a role missing in the run keeps the others at their place in analog_roles (_roles)
+        np.savez(path, _roles=np.array(["pupil", "photodiode_b", "photodiode_a"]), **signals)
+        out = write_recording_session_dh5(recording_session, work_dir, tmp_path / "analog2.dh5", config, syncs)
+        with dh5io.DH5File(out, "r") as file:
+            assert file.get_cont_group_by_id(3605).name == "photodiode_b"
+            assert file.get_cont_group_by_id(3606).name == "photodiode_a"
+            assert 3604 not in [int(k[4:]) for k in file._file if k.startswith("CONT") and k[4:].isdigit()]
     finally:
         path.unlink()
