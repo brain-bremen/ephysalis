@@ -162,3 +162,26 @@ def test_pulse_lines_in_the_dh5_not_in_events_tsv(work_dir, tmp_path):  # noqa: 
         assert "sync" not in set(events.trial_type)
     finally:
         assert main(["extract-events", rs, "--work-dir", str(work_dir)]) == 0  # the shared work dir as before
+
+
+def test_analog_roles(work_dir, tmp_path):  # noqa: F811
+    """analog/<run>.npz (extract-behavior analog_roles) -> CONT 3604... in the order of the file, named by role."""
+    recording_session = open_recording_session(SPIKEGLX_CROP_RECORDING_SESSION)
+    config = default_recording_session_config(recording_session)
+    run = recording_session.run(RUN)
+    syncs = {RUN: synchronize_run(run, aux_channel_map(run, config))}
+    n = len(np.load(work_dir / "running_speed" / f"{RUN}.npy"))
+    signals = {"photodiode_b": np.sin(np.arange(n) / 5.0).astype(np.float32) * 0.2,
+               "photodiode_a": np.linspace(-1, 1, n, dtype=np.float32)}
+    path = work_dir / "analog" / f"{RUN}.npz"
+    path.parent.mkdir(exist_ok=True)
+    np.savez(path, **signals)
+    try:
+        out = write_recording_session_dh5(recording_session, work_dir, tmp_path / "analog.dh5", config, syncs)
+        with dh5io.DH5File(out, "r") as file:
+            for cont_id, (role, values) in zip((3604, 3605), signals.items()):
+                block = file.get_cont_group_by_id(cont_id)
+                assert block.name == role
+                np.testing.assert_allclose(block.calibrated_data[:, 0], values, atol=block.calibration[0])
+    finally:
+        path.unlink()

@@ -129,16 +129,24 @@ def _electrode_names(electrodes: pd.DataFrame) -> pd.Series:
     return electrodes.group_name + "_e" + index.map("{:03d}".format)
 
 
-def probes_table(nwbfile: NWBFile) -> pd.DataFrame:
+def _probe_config(config: Any, name: str) -> Any:
+    return config.probes.get(name) if config is not None and getattr(config, "probes", None) else None
+
+
+def probes_table(nwbfile: NWBFile, config: Any = None) -> pd.DataFrame:
+    """probes.tsv; ``type``, ``manufacturer``, ``model`` from ``[probes.<id>]`` of the session config where set."""
     electrodes = _electrodes(nwbfile)
     rows = []
     for name, group in nwbfile.electrode_groups.items():
         device, model = group.device, group.device.model
+        probe = _probe_config(config, name)
         rows.append({
             "probe_name": name,
-            "type": "silicon-probe",
-            "manufacturer": model.manufacturer if model is not None and model.manufacturer != "unknown" else None,
-            "model": (model.model_number or model.name) if model is not None else None,
+            "type": (probe.probe_type if probe is not None and probe.probe_type else "silicon-probe"),
+            "manufacturer": (probe.manufacturer if probe is not None and probe.manufacturer else
+                             model.manufacturer if model is not None and model.manufacturer != "unknown" else None),
+            "model": (probe.model if probe is not None and probe.model else
+                      (model.model_number or model.name) if model is not None else None),
             "device_serial_number": device.serial_number,
             "associated_brain_region": None if group.location == "unknown" else group.location,
             "electrode_count": int((electrodes.group_name == name).sum()),
@@ -367,25 +375,41 @@ def write_bids_sidecars(nwb_path: Path, root: Path, subject: str, recording_sess
         write_sidecars(io.read(), nwb_path, root, subject, recording_session, power_line_frequency, dataset_name)
 
 
+DEFAULT_POSITION_DESCRIPTION = "x across the shank, y distance from the probe tip"
+
+
+def electrodes_json(nwbfile: NWBFile, config: Any = None) -> dict:
+    """electrodes.json; x, y described per probe (``position_description`` of ``[probes.<id>]``)."""
+    positions = {name: (getattr(_probe_config(config, name), "position_description", None)
+                        or DEFAULT_POSITION_DESCRIPTION) for name in nwbfile.electrode_groups}
+    where = ("; ".join(f"{name}: {text}" for name, text in positions.items())
+             if len(set(positions.values())) > 1 else next(iter(positions.values()), DEFAULT_POSITION_DESCRIPTION))
+    return {
+        "channel_name": {"Description": "channel id in the stream of the recording"},
+        "in_brain": {"Description": "contact within the insertion depth of the probe (all contacts when the session "
+                                    "config gives no insertion_depth_um)"},
+        "bad_channel": {"Description": "excluded from spike sorting by the session config (bad_channels); the "
+                                       "channel selection on the data: status in channels.tsv"},
+        "x": {"Units": "um", "Description": f"contact position ({where})"},
+        "y": {"Units": "um", "Description": f"contact position ({where})"},
+    }
+
+
 def write_sidecars(nwbfile: NWBFile, data_path: Path, root: Path, subject: str, recording_session: str,
                    power_line_frequency: float | str = 50.0, dataset_name: str | None = None,
                    streams: dict[int, tuple[list[str], float]] | None = None,
-                   lfp: tuple[float, str] | None = None) -> None:
+                   lfp: tuple[float, str] | None = None, config: Any = None) -> None:
     """Write the sidecars of the data file at ``data_path``, described by ``nwbfile``;
     ``streams`` and ``lfp`` describe the LFP when it is not in ``nwbfile`` (see
-    :func:`channels_table`, :func:`ecephys_json`)."""
+    :func:`channels_table`, :func:`ecephys_json`); ``config`` (the session config) adds the probes' type, model
+    and position description."""
     root.mkdir(parents=True, exist_ok=True)
     _write_dataset_files(root, dataset_name)
     prefix = data_path.parent / data_path.name[:data_path.name.rindex("_ecephys")]
     _write_json(ecephys_json(nwbfile, power_line_frequency, lfp), Path(f"{prefix}_ecephys.json"))
-    _write_tsv(probes_table(nwbfile), Path(f"{prefix}_probes.tsv"))
+    _write_tsv(probes_table(nwbfile, config), Path(f"{prefix}_probes.tsv"))
     _write_tsv(electrodes_table(nwbfile), Path(f"{prefix}_electrodes.tsv"))
-    _write_json({
-        "channel_name": {"Description": "channel id in the AP stream of the recording"},
-        "in_brain": {"Description": "contact closer to the probe tip than the insertion depth"},
-        "bad_channel": {"Description": "excluded from spike sorting"},
-        "x": {"Units": "um"}, "y": {"Units": "um", "Description": "distance from the probe tip"},
-    }, Path(f"{prefix}_electrodes.json"))
+    _write_json(electrodes_json(nwbfile, config), Path(f"{prefix}_electrodes.json"))
     _write_tsv(channels_table(nwbfile, streams), Path(f"{prefix}_channels.tsv"))
     events = events_table(nwbfile)
     _write_tsv(events, Path(f"{prefix}_events.tsv"))
@@ -458,7 +482,7 @@ def add_dh5_to_bids(recording_session: Any, work_dir: Path, dh5_path: Path, root
                 streams[row] = ([name], rate)
                 lfp = (rate, lfp_settings(work_dir).filtering())
     nwbfile = recording_session_metadata_nwbfile(recording_session, work_dir, config, run_clock=run is not None)
-    write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, **kwargs)
+    write_sidecars(nwbfile, target, root, subject, session_label, streams=streams, lfp=lfp, config=config, **kwargs)
     ignore = root / ".bidsignore"
     lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []
     for pattern in ("*_ecephys_trials.csv", "*_ecephys_units.csv"):

@@ -74,7 +74,10 @@ class ExtractEventsSettings(StepSettings):
 
 
 class ExtractBehaviorSettings(StepSettings):
-    pass
+    analog_roles: list[str] = Field(default_factory=list, description=(
+        "Roles of analog aux channels ([aux_channels.analog]) written besides the eye position, as 1 kHz bin means "
+        "in V (analog/<run>.npz; DH5 CONT 3604... in this order, NWB behavior TimeSeries), e.g. photodiodes or the "
+        "pupil diameter; a run without a role's channel leaves it out"))
 
 
 class LfpSettings(AntiAliasResampling):

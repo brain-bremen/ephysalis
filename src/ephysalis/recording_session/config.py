@@ -101,6 +101,14 @@ class ProbeConfig(BaseModel):
         "channels before every step (LFP, MUA, CSD, sorting), e.g. a local reference electrode")
     geometry: ProbeGeometry | None = None
     area: str | None = Field(default=None, description="Target brain area, e.g. V1")
+    probe_type: str | None = Field(
+        default=None, description="BIDS probes.tsv `type`, e.g. 'utah-array', 'microwire', 'epidural-array' "
+        "(default: silicon-probe)")
+    manufacturer: str | None = Field(default=None, description="Manufacturer for probes.tsv (default: the reader's)")
+    model: str | None = Field(default=None, description="Model for probes.tsv (default: the reader's)")
+    position_description: str | None = Field(
+        default=None, description="What the contact positions x, y of the geometry are, for electrodes.json "
+        "(default: 'x across the shank, y distance from the probe tip')")
     insertion_depth_um: float | None = Field(
         default=None, description="Depth of the probe tip below the brain surface"
     )

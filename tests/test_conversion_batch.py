@@ -284,8 +284,12 @@ def test_run_resume_and_reruns(tmp_path):
     assert Runner(load_conversion_batch(path), echo=lines.append).run() == {"a": "done", "b": "done"}
     assert not [line for line in lines if line.split()[2:3] in (["a"], ["b"]) and line.split()[3] in STEPS], lines
 
+    # descriptive keys (notes, probe type, ...) count only for export: nothing to do
+    write_conversion_batch(tmp_path, overrides_b='notes = "changed", probes = { imec0 = { probe_type = "x" } }')
+    assert status_table(load_conversion_batch(path)).splitlines()[2].split()[1:] == ["+", "+", "+"]
+
     # a config change of session b: only b runs again, all its steps (they all read the config)
-    write_conversion_batch(tmp_path, overrides_b='notes = "changed"')
+    write_conversion_batch(tmp_path, overrides_b='lab = "changed"')
     conversion_batch = load_conversion_batch(path)
     table = status_table(conversion_batch)
     assert table.splitlines()[1].split()[1:] == ["+", "+", "+"] and table.splitlines()[2].split()[1:] == ["~", "~", "~"]
@@ -397,3 +401,54 @@ def test_remove_folder(tmp_path):
     remove_folder(tmp_path / "missing")
     remove_folder(tmp_path / "file")
     assert not (tmp_path / "tree").exists() and not (tmp_path / "file").exists()
+
+
+def test_config_digest_per_step():
+    """Descriptive keys count only for export; of the analog roles each step counts the ones it reads."""
+    from ephysalis.conversion_batch.runner import config_digest
+
+    def text(**changes):
+        base = {"notes": "a", "lab": "l", "probes": {"p": {"area": "V1", "model": "m", "notes": "n"}},
+                "aux_channels": {"analog": {"eye_x": 1, "mains": 2, "photodiode": 3}},
+                "line_noise": {"enabled": True, "reference_role": "mains"}}
+        return tomli_w.dumps(merge_tables(base, changes)).encode()
+
+    same, other = text(), text(notes="b", probes={"p": {"model": "other", "notes": "x"}})
+    assert config_digest("lfp", same) == config_digest("lfp", other)
+    assert config_digest("export", same) != config_digest("export", other)
+    eye = text(aux_channels={"analog": {"eye_x": 9}})
+    assert config_digest("lfp", same) == config_digest("lfp", eye) == config_digest("lfp", eye)
+    assert config_digest("extract-behavior", same) != config_digest("extract-behavior", eye)
+    mains = text(aux_channels={"analog": {"mains": 9}})
+    assert config_digest("lfp", same) != config_digest("lfp", mains)
+    assert config_digest("csd", same) == config_digest("csd", mains)
+    assert config_digest("extract-trials", same) != config_digest("extract-trials", text(aux_channels={"analog": {"photodiode": 9}}))
+
+
+def test_records_of_the_earlier_digest_are_kept(tmp_path):
+    """A record with the sha256 of the config text (earlier ephysalis) counts as done when the previous merged
+    config has the same digest now, and is updated; a real change still runs the step."""
+    import hashlib
+
+    path = write_conversion_batch(tmp_path)
+    assert Runner(load_conversion_batch(path), echo=lambda _: None).run() == {"a": "done", "b": "done"}
+    conversion_batch = load_conversion_batch(path)
+    job = conversion_batch.recording_session_job("a")
+    work = tmp_path / "work" / "a"
+    old_text = (work / "session.toml").read_bytes()
+    for s in STEPS:  # as written by the earlier digest
+        f = work / "runner" / f"{s}.json"
+        record = json.loads(f.read_text())
+        record["inputs"]["config"] = hashlib.sha256(old_text).hexdigest()
+        f.write_text(json.dumps(record))
+    run_ids = {s: read_record(job, s)["run_id"] for s in STEPS}
+    write_conversion_batch(tmp_path, extra="")  # unchanged batch
+    (tmp_path / "conversion_batch.toml").write_text((tmp_path / "conversion_batch.toml").read_text()
+                                                   .replace('notes = "default"', 'notes = "default, changed"'))
+    conversion_batch = load_conversion_batch(path)
+    assert status_table(conversion_batch).splitlines()[1].split()[1:] == ["+", "+", "+"]
+    assert Runner(conversion_batch, echo=lambda _: None).run() == {"a": "done", "b": "done"}
+    assert (work / "runner" / "session.previous.toml").read_bytes() == old_text
+    for s in STEPS:
+        record = read_record(job, s)
+        assert record["run_id"] == run_ids[s] and record["inputs"]["config"].startswith("v2:")

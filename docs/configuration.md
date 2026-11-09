@@ -93,7 +93,9 @@ No settings (an empty table runs the step).
 
 ### `[steps.extract-behavior]`
 
-No settings (an empty table runs the step).
+| key | type | default | description |
+|---|---|---|---|
+| `analog_roles` | list[string] | `[]` | Roles of analog aux channels ([aux_channels.analog]) written besides the eye position, as 1 kHz bin means in V (analog/<run>.npz; DH5 CONT 3604... in this order, NWB behavior TimeSeries), e.g. photodiodes or the pupil diameter; a run without a role's channel leaves it out |
 
 ### `[steps.lfp]`
 
@@ -227,6 +229,10 @@ Probes by id (e.g. imec0, v1).
 | `channels` | list[string] | none | Channel ids of the probe in `stream` (default: all) |
 | `reference_channels` | list[string] | none | Re-reference: channel ids of `stream` whose mean is subtracted from the probe's channels before every step (LFP, MUA, CSD, sorting), e.g. a local reference electrode |
 | `area` | string | none | Target brain area, e.g. V1 |
+| `probe_type` | string | none | BIDS probes.tsv `type`, e.g. 'utah-array', 'microwire', 'epidural-array' (default: silicon-probe) |
+| `manufacturer` | string | none | Manufacturer for probes.tsv (default: the reader's) |
+| `model` | string | none | Model for probes.tsv (default: the reader's) |
+| `position_description` | string | none | What the contact positions x, y of the geometry are, for electrodes.json (default: 'x across the shank, y distance from the probe tip') |
 | `insertion_depth_um` | float | none | Depth of the probe tip below the brain surface |
 | `shank_depth_um` | float | none | 'ShankDepth' from the lab Excel sheets |
 | `bad_channels` | list[integer] | `[]` | 0-based channel indices excluded from sorting |

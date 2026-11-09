@@ -588,6 +588,24 @@ def _add_running_speed(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offset
         _behavior_module(nwbfile).add(BehavioralTimeSeries(time_series=series, name="RunningSpeed"))
 
 
+def _add_analog_roles(nwbfile: NWBFile, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> None:
+    from pynwb import TimeSeries
+    from pynwb.behavior import BehavioralTimeSeries
+
+    series = []
+    for run in runs:
+        path = work_dir / "analog" / f"{run.name}.npz"
+        if path.exists():
+            with np.load(path) as data:
+                series += [TimeSeries(
+                    name=f"{role}_{run.name}", data=data[role], unit="volts",
+                    starting_time=offsets[run.name] + RUNNING_SPEED_BIN_S / 2, rate=1 / RUNNING_SPEED_BIN_S,
+                    description=f"analog aux input with the role {role}, mean over 1 ms bins (time = bin centre)",
+                ) for role in data.files]
+    if series:
+        _behavior_module(nwbfile).add(BehavioralTimeSeries(time_series=series, name="AnalogInputs"))
+
+
 def _behavior_module(nwbfile: NWBFile) -> Any:
     if "behavior" not in nwbfile.processing:
         nwbfile.create_processing_module("behavior", "behavioural signals")
@@ -656,6 +674,7 @@ def write_recording_session_nwb(
     _add_units(nwbfile, work_dir, runs, offsets, electrode_rows, channel_index)
     _add_running_speed(nwbfile, work_dir, runs, offsets)
     _add_eye_position(nwbfile, work_dir, runs, offsets)
+    _add_analog_roles(nwbfile, work_dir, runs, offsets)
     if raw:
         _add_raw(nwbfile, runs, offsets, syncs or {}, electrode_rows, compression)
     if lfp:

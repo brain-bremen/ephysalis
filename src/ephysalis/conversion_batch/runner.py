@@ -8,7 +8,10 @@ A step is done when its record says ``done`` with the same stamp. The stamp has 
 
 - inputs: the session's merged config, the files it names (probe geometry), the step's options and
   the runs of the steps whose outputs it reads (:data:`~ephysalis.conversion_batch.config.STEP_INPUTS`); so a
-  step runs again when its config or options change or a step before it ran again;
+  step runs again when its config or options change or a step before it ran again. The descriptive keys of the
+  config (:data:`DESCRIPTIVE_KEYS`: notes, the probes' type, model, ...) count only for ``export``, which writes
+  them, and of ``[aux_channels.analog]`` each step counts only the roles it reads (:func:`_analog_roles_read`); records of the earlier digest (the whole config text) are compared through the previous merged config
+  (``runner/session.previous.toml``) and updated;
 - code: the versions of ephysalis (with its git commit) and of the plugin packages.
   ``--ignore-code-changes`` counts steps done with other code as done.
 
@@ -121,7 +124,8 @@ def _write_record(recording_session_job: RecordingSessionJob, step: str, record:
 
 
 def write_recording_session_config(recording_session_job: RecordingSessionJob) -> Path:
-    """The session's merged config as ``<work dir>/session.toml`` (rewritten only when it changed)."""
+    """The session's merged config as ``<work dir>/session.toml`` (rewritten only when it changed; the version
+    before as ``runner/session.previous.toml``, for the records of the earlier config digest)."""
     path = recording_session_job.work_dir / "session.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -129,8 +133,79 @@ def write_recording_session_config(recording_session_job: RecordingSessionJob) -
         save_recording_session_config(recording_session_job.recording_session_config, new)
         text = new.read_bytes()
     if not path.exists() or path.read_bytes() != text:
+        if path.exists():
+            previous = runner_dir(recording_session_job) / PREVIOUS_CONFIG
+            previous.parent.mkdir(parents=True, exist_ok=True)
+            previous.write_bytes(path.read_bytes())
         path.write_bytes(text)
     return path
+
+
+# Keys of the session config that only describe (written by export, not used by the other steps): ``notes`` at
+# every level and these of ``[probes.<id>]``.
+DESCRIPTIVE_KEYS = ("notes",)
+DESCRIPTIVE_PROBE_KEYS = ("probe_type", "manufacturer", "model", "position_description")
+PREVIOUS_CONFIG = "session.previous.toml"
+CONFIG_DIGEST_PREFIX = "v2:"
+
+
+def _without_descriptive_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _without_descriptive_keys(v) for k, v in value.items() if k not in DESCRIPTIVE_KEYS}
+    if isinstance(value, list):
+        return [_without_descriptive_keys(v) for v in value]
+    return value
+
+
+# The analog roles ([aux_channels.analog]) a step reads: all for these, for lfp the line-noise reference, for
+# extract-trials the trial photodiode (photodiode_pulses); the other steps read none.
+ALL_ANALOG_ROLES = ("extract-behavior", "export")
+TRIAL_ANALOG_ROLES = ("photodiode",)
+
+
+def _analog_roles_read(step: str, data: dict[str, Any]) -> set[str] | None:
+    """The analog roles ``step`` reads (None: all)."""
+    if step in ALL_ANALOG_ROLES:
+        return None
+    if step == "lfp":
+        line_noise = data.get("line_noise") or {}
+        return {line_noise.get("reference_role", "mains")} if line_noise.get("enabled") else set()
+    if step == "extract-trials":
+        return set(TRIAL_ANALOG_ROLES)
+    return set()
+
+
+def config_digest(step: str, config_text: bytes) -> str:
+    """The digest of the merged config for ``step``: without the descriptive keys (except for ``export``) and with
+    only the analog roles the step reads."""
+    import tomllib
+
+    data = tomllib.loads(config_text.decode("utf-8"))
+    if step != "export":
+        data = _without_descriptive_keys(data)
+        for probe in (data.get("probes") or {}).values():
+            for key in DESCRIPTIVE_PROBE_KEYS:
+                probe.pop(key, None)
+    roles = _analog_roles_read(step, data)
+    analog = (data.get("aux_channels") or {}).get("analog")
+    if roles is not None and isinstance(analog, dict):
+        data["aux_channels"]["analog"] = {k: v for k, v in analog.items() if k in roles}
+    return CONFIG_DIGEST_PREFIX + _sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8"))
+
+
+def _same_inputs_as_earlier_digest(recording_session_job: RecordingSessionJob, step: str, recorded: dict[str, Any],
+                                   inputs: dict[str, Any]) -> bool:
+    """A record of the earlier digest (sha256 of the config text) has the same inputs as ``inputs``: its config is
+    the previous merged config (or the current ``session.toml``) and that one has the same digest now."""
+    old = recorded.get("config")
+    if not isinstance(old, str) or old.startswith(CONFIG_DIGEST_PREFIX):
+        return False
+    if {k: v for k, v in recorded.items() if k != "config"} != {k: v for k, v in inputs.items() if k != "config"}:
+        return False
+    for path in (runner_dir(recording_session_job) / PREVIOUS_CONFIG, recording_session_job.work_dir / "session.toml"):
+        if path.exists() and _sha256(text := path.read_bytes()) == old:
+            return config_digest(step, text) == inputs["config"]
+    return False
 
 
 def step_inputs(conversion_batch: ConversionBatch, recording_session_job: RecordingSessionJob, step: str, config_text: bytes) -> dict[str, Any]:
@@ -143,7 +218,7 @@ def step_inputs(conversion_batch: ConversionBatch, recording_session_job: Record
     files = {}
     for file in recording_session_job.referenced_files:
         files[str(file)] = _sha256(file.read_bytes()) if file.exists() else None
-    return {"config": _sha256(config_text), "files": files,
+    return {"config": config_digest(step, config_text), "files": files,
             "options": step_settings_argv(step, recording_session_job.step_settings[step]), "upstream": upstream}
 
 
@@ -166,8 +241,11 @@ def step_state(conversion_batch: ConversionBatch, recording_session_job: Recordi
         return StepState("running" if _lock_alive(recording_session_job) else "interrupted", record)
     if record.get("state") in ("failed", "interrupted"):
         return StepState(record["state"], record)
-    if record.get("inputs") != step_inputs(conversion_batch, recording_session_job, step, config_text):
-        return StepState("changed", record)
+    inputs = step_inputs(conversion_batch, recording_session_job, step, config_text)
+    if record.get("inputs") != inputs:
+        if not _same_inputs_as_earlier_digest(recording_session_job, step, record.get("inputs") or {}, inputs):
+            return StepState("changed", record)
+        record = {**record, "inputs": inputs, "upgraded": True}  # the record of the earlier digest, same inputs
     if record.get("code") != code and not ignore_code_changes:
         return StepState("code", record)
     return StepState(record.get("state", "pending"), record)
@@ -309,6 +387,8 @@ class Runner:
         copy of that one; its records name the paths in it)."""
         previous = step_state(self.conversion_batch, recording_session_job, step, self.code, config_text, self.ignore_code_changes)
         if previous.finished:
+            if previous.record and previous.record.pop("upgraded", False) and not self.dry_run:
+                _write_record(recording_session_job, step, previous.record)  # now with the current digest
             return True
         inputs = step_inputs(self.conversion_batch, recording_session_job, step, config_text)
         base = {"step": step, "inputs": inputs, "code": self.code, "run_id": uuid.uuid4().hex,

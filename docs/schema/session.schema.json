@@ -402,6 +402,58 @@
      "description": "Target brain area, e.g. V1",
      "title": "Area"
     },
+    "probe_type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "description": "BIDS probes.tsv `type`, e.g. 'utah-array', 'microwire', 'epidural-array' (default: silicon-probe)",
+     "title": "Probe Type"
+    },
+    "manufacturer": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "description": "Manufacturer for probes.tsv (default: the reader's)",
+     "title": "Manufacturer"
+    },
+    "model": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "description": "Model for probes.tsv (default: the reader's)",
+     "title": "Model"
+    },
+    "position_description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "description": "What the contact positions x, y of the geometry are, for electrodes.json (default: 'x across the shank, y distance from the probe tip')",
+     "title": "Position Description"
+    },
     "insertion_depth_um": {
      "anyOf": [
       {

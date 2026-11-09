@@ -13,6 +13,7 @@ DH5                    content
 ``CONT2001``...        LFP, one block per channel (ids ``2001 +`` channel index over all probes)
 ``CONT3601``           running speed (calibration: cm/s per bit)
 ``CONT3602``, ``3603``   eye position x, y (uncalibrated volts of the eye tracker outputs)
+``CONT3604``...``3610`` the analog roles of ``analog_roles`` (extract-behavior), in that order (V, 1 ms bins)
 ``CONT4001``...        MUA envelope (``ephysalis mua``), ids ``4001 +`` channel index
 ``CONT8001``...        CSD (``ephysalis csd``), ids ``8001 +`` channel index; int16 scaled as
                        ``dh_csd`` (calibration = max |CSD| / (32767 - 0.01) A/m^3 per count)
@@ -106,6 +107,7 @@ MUA_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.MUA][0]
 CSD_FIRST_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.CSD][0]
 RUNNING_SPEED_CONT_ID = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG_DOWNSAMPLED][0]
 EYE_CONT_IDS = (RUNNING_SPEED_CONT_ID + 1, RUNNING_SPEED_CONT_ID + 2)
+ANALOG_ROLE_CONT_IDS = range(RUNNING_SPEED_CONT_ID + 3, RUNNING_SPEED_CONT_ID + 10)  # analog_roles of extract-behavior
 MAX_NEURAL_CHANNELS = CONT_BLOCK_RANGES[ContBlockGroup.RAW][1] - RAW_FIRST_CONT_ID + 1
 MAX_ANALOG_CHANNELS = CONT_BLOCK_RANGES[ContBlockGroup.ANALOG][1] - ANALOG_FIRST_CONT_ID + 1
 SPIKE_IDS_PER_PROBE = 10000
@@ -490,6 +492,39 @@ def _write_eye_position(file: h5py.File, work_dir: Path, runs: list[Run], offset
     return True
 
 
+def _write_analog_roles(file: h5py.File, work_dir: Path, runs: list[Run], offsets: dict[str, float]) -> list[str]:
+    """CONT 3604...: the analog roles of ``analog/<run>.npz`` (extract-behavior ``analog_roles``), one block per role
+    in the order of the first run that has it; the runs without the role are not in its INDEX."""
+    import dh5io.cont
+    from dhspec.cont import ContSignalType, create_empty_index_array
+
+    per_run = {}
+    for run in runs:
+        path = work_dir / "analog" / f"{run.name}.npz"
+        if path.exists():
+            with np.load(path) as data:
+                per_run[run.name] = {role: data[role] for role in data.files}
+    roles = list(dict.fromkeys(role for signals in per_run.values() for role in signals))
+    if len(roles) > len(ANALOG_ROLE_CONT_IDS):
+        raise ValueError(f"analog_roles: at most {len(ANALOG_ROLE_CONT_IDS)} roles fit CONT "
+                         f"{ANALOG_ROLE_CONT_IDS[0]}-{ANALOG_ROLE_CONT_IDS[-1]}, got {', '.join(roles)}")
+    for cont_id, role in zip(ANALOG_ROLE_CONT_IDS, roles):
+        parts = [(run, per_run[run.name][role]) for run in runs if role in per_run.get(run.name, {})]
+        values = np.nan_to_num(np.concatenate([p[1] for p in parts]))
+        index = create_empty_index_array(len(parts))
+        index["time"] = [int(_ns(offsets[run.name] + RUNNING_SPEED_BIN_S / 2)) for run, _ in parts]
+        index["offset"] = np.cumsum([0] + [len(p[1]) for p in parts[:-1]])
+        scale = max(float(np.abs(values).max()), 1e-9) / 32000  # V per bit
+        dh5io.cont.create_cont_group_from_data_in_file(
+            file, cont_id, data=np.round(values / scale).astype(np.int16)[:, None], index=index,
+            sample_period_ns=np.int32(round(RUNNING_SPEED_BIN_S * 1e9)), calibration=np.array([scale]),
+            channels=_channel_info(-1, 0), name=role,
+            comment=f"analog aux input with the role {role} ([aux_channels.analog]), mean over 1 ms bins (V)",
+            signal_type=ContSignalType.ANALOG,
+        )
+    return roles
+
+
 def _write_spikes(file: h5py.File, recording_session: RecordingSession, work_dir: Path, runs: list[Run],
                   offsets: dict[str, float]) -> pd.DataFrame:
     import dh5io.spike
@@ -642,6 +677,7 @@ def write_recording_session_dh5(
         n_events = _write_events(file, work_dir, runs, offsets, config)
         _write_running_speed(file, work_dir, runs, offsets)
         _write_eye_position(file, work_dir, runs, offsets)
+        _write_analog_roles(file, work_dir, runs, offsets)
         units = _write_spikes(file, recording_session, work_dir, runs, offsets)
         if not trials.empty:
             _write_trialmap(file, trials)

@@ -487,7 +487,29 @@ def _write_pulse_lines(run: Run, sync: RunSync, config: RecordingSessionConfig |
 
 
 def _extract_behavior(args: argparse.Namespace) -> int:
-    return _extract_step(args, "extract-behavior", _write_behavior)
+    analog_roles = list(getattr(args, "analog_roles", None) or [])
+
+    def write(run: Run, sync: RunSync, config: RecordingSessionConfig | None, work_dir: Path) -> None:
+        _write_behavior(run, sync, config, work_dir)
+        _write_analog(run, sync, config, work_dir, analog_roles)
+
+    return _extract_step(args, "extract-behavior", write)
+
+
+def _write_analog(run: Run, sync: RunSync, config: RecordingSessionConfig | None, work_dir: Path,
+                  roles: list[str]) -> None:
+    """``analog/<run>.npz``: the analog aux channels of ``roles`` (``analog_roles`` of extract-behavior)."""
+    import numpy as np
+
+    from ephysalis.timeline.steps import extract_run_analog
+
+    path = work_dir / "analog" / f"{run.name}.npz"
+    path.unlink(missing_ok=True)
+    signals = extract_run_analog(run, sync, config, roles)
+    if signals:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(path, **signals)
+        print(f"{run.name}: analog {', '.join(signals)}, {len(next(iter(signals.values())))} samples")
 
 
 def _lfp(args: argparse.Namespace) -> int:
@@ -708,7 +730,7 @@ def add_recording_session_commands(sub: argparse._SubParsersAction) -> None:
         ("extract-events", _extract_events, "Write the edges of the digital lines and the event words of every run "
          "(on the reference clock)", "events/"),
         ("extract-behavior", _extract_behavior, "Write the eye position (1 kHz, V) and running speed (1 kHz, cm/s) of "
-         "every run (on the reference clock)", "eye/, running_speed/"),
+         "every run (on the reference clock), and the analog roles of analog_roles", "eye/, running_speed/, analog/"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("recording_sessions", nargs="+", type=Path, metavar="recording_session")

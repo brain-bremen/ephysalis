@@ -145,6 +145,22 @@ def extract_run_behavior(run: Run, sync: RunSync, config: RecordingSessionConfig
     return running_speed, eye_position
 
 
+def extract_run_analog(run: Run, sync: RunSync, config: RecordingSessionConfig | None, roles: list[str]
+                       ) -> dict[str, np.ndarray]:
+    """The analog aux channels of ``roles`` as means over the same 1 ms bins as the eye position (V, float32), in
+    the order of ``roles``; roles without a channel in the run are left out."""
+    aux = _aux(run, config)
+    if aux is None or not roles:
+        return {}
+    reference = (run.get_recording(StreamKind.AUX) if sync.reference == AUX
+                 else run.get_recording(StreamKind.AP, sync.reference))
+    duration_s = reference.get_num_samples() / reference.sampling_frequency
+    bin_edges = np.arange(int(np.floor(duration_s * RUNNING_SPEED_RATE)) + 1) / RUNNING_SPEED_RATE
+    edges = sync.to_samples(AUX, bin_edges)
+    return {role: bin_means_on_reference(aux.analog_volts(role)[:, None], edges)[:, 0].astype(np.float32)
+            for role in roles if role in aux.channels.analog}
+
+
 def extract_run_timing(
     run: Run, config: RecordingSessionConfig | None = None, sync_cache: SyncEdgeCache | None = None
 ) -> RunTiming:
